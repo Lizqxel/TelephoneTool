@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
         try:
             self.setup_google_sheets()
         except Exception as e:
+            QMessageBox.warning(self, "警告", "スプレッドシートへの初期接続に失敗しました。\n転記機能は再接続後に使用可能になります。")
             print(f"Google Sheets設定エラー: {str(e)}")
 
     def create_top_bar(self, parent_layout):
@@ -513,6 +514,14 @@ ND：
     def write_to_spreadsheet(self):
         """スプレッドシートにデータを書き込む"""
         try:
+            # スプレッドシートの接続確認と再接続
+            if not hasattr(self, 'sheet') or self.sheet is None:
+                try:
+                    self.setup_google_sheets()
+                except Exception as e:
+                    QMessageBox.critical(self, "接続エラー", "スプレッドシートへの接続に失敗しました。\n再度お試しください。")
+                    return
+
             # 現在時刻と日付を取得
             current_time = datetime.datetime.now().strftime("%H:%M")
             current_date = datetime.datetime.now().strftime("%Y/%m/%d")
@@ -525,10 +534,10 @@ ND：
             row_data = [''] * 16  # 画像から見える列数に合わせて調整
             
             # 必要な列にデータを設定（0から始まるインデックスなので、A列が0、B列が1）
-            row_data[3] = tel1                          # TEL1（E列）
-            row_data[4] = tel2                          # TEL2（F列）
-            row_data[7] = current_time                  # 架電時間（I列）
-            row_data[10] = current_date                 # トス日（L列）
+            row_data[4] = tel1                          # TEL1（E列）
+            row_data[5] = tel2                          # TEL2（F列）
+            row_data[8] = current_time                  # 架電時間（I列）
+            row_data[11] = current_date                 # トス日（L列）
             
             # スプレッドシートに追記
             self.sheet.append_row(row_data, value_input_option='RAW')
@@ -536,8 +545,17 @@ ND：
             # 成功メッセージを表示
             QMessageBox.information(self, "成功", "スプレッドシートへの転記が完了しました。")
             
+        except gspread.exceptions.APIError as e:
+            # API制限やトークン期限切れの場合は再接続を試みる
+            try:
+                self.setup_google_sheets()
+                # 再度書き込みを試行
+                self.sheet.append_row(row_data, value_input_option='RAW')
+                QMessageBox.information(self, "成功", "スプレッドシートへの転記が完了しました。")
+            except Exception as e:
+                QMessageBox.critical(self, "エラー", f"スプレッドシートへの転記に失敗しました。\n{str(e)}")
         except Exception as e:
-            # エラーメッセージを表示
+            # その他のエラー
             QMessageBox.critical(self, "エラー", f"スプレッドシートへの転記に失敗しました。\n{str(e)}")
 
     def update_year_combo(self):
