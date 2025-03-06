@@ -8,6 +8,7 @@ PySide6を使用してUIを構築し、Google Spreadsheetsとの連携機能を�
 - 顧客情報の入力
 - CTIフォーマットの生成
 - スプレッドシートへのデータ転記
+- クリップボード監視機能
 """
 
 import sys
@@ -15,8 +16,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                               QHBoxLayout, QLabel, QLineEdit, QComboBox,
                               QPushButton, QTextEdit, QGroupBox, QMessageBox,
                               QScrollArea, QDialog, QTabWidget)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIntValidator
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QIntValidator, QClipboard
 import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -83,6 +84,12 @@ class SettingsDialog(QDialog):
         spreadsheet_layout.addWidget(QLabel("スプレッドシートID:"))
         self.spreadsheet_id_input = QLineEdit()
         spreadsheet_layout.addWidget(self.spreadsheet_id_input)
+        
+        # 受注者名設定
+        spreadsheet_layout.addWidget(QLabel("受注者名:"))
+        self.order_person_input = QLineEdit()
+        spreadsheet_layout.addWidget(self.order_person_input)
+        
         spreadsheet_layout.addStretch()
         
         # フォーマット設定タブ
@@ -151,6 +158,7 @@ class SettingsDialog(QDialog):
                     settings = json.load(f)
                     self.spreadsheet_id_input.setText(settings.get('spreadsheet_id', ''))
                     self.format_template_input.setText(settings.get('format_template', DEFAULT_FORMAT))
+                    self.order_person_input.setText(settings.get('order_person', ''))
             else:
                 self.reset_to_default()
         except Exception as e:
@@ -162,7 +170,8 @@ class SettingsDialog(QDialog):
         try:
             settings = {
                 'spreadsheet_id': self.spreadsheet_id_input.text(),
-                'format_template': self.format_template_input.toPlainText()
+                'format_template': self.format_template_input.toPlainText(),
+                'order_person': self.order_person_input.text()
             }
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -174,12 +183,14 @@ class SettingsDialog(QDialog):
         """設定を初期値に戻す"""
         self.spreadsheet_id_input.setText("1Y3M8YZ0ywLdMxCVY6EB8COcPkBaOS6e27jzEJWcU8Tw")
         self.format_template_input.setText(DEFAULT_FORMAT)
+        self.order_person_input.clear()
 
     def get_settings(self):
         """現在の設定を取得"""
         return {
             'spreadsheet_id': self.spreadsheet_id_input.text(),
-            'format_template': self.format_template_input.toPlainText()
+            'format_template': self.format_template_input.toPlainText(),
+            'order_person': self.order_person_input.text()
         }
 
 class MainWindow(QMainWindow):
@@ -193,6 +204,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("コールセンター業務効率化ツール")
         self.setMinimumSize(1000, 800)
+        
+        # クリップボード監視用の変数
+        self.clipboard = QApplication.clipboard()
+        self.last_clipboard_text = ""
+        self.clipboard_timer = QTimer()
+        self.clipboard_timer.timeout.connect(self.check_clipboard)
+        
+        # 受注者名の初期化
+        self.order_person = ""
         
         # メインウィジェットの設定
         main_widget = QWidget()
@@ -290,7 +310,38 @@ class MainWindow(QMainWindow):
         top_bar.setStyleSheet("background-color: #2C3E50; color: white;")
         top_bar_layout = QHBoxLayout(top_bar)
         
-        # ボタンのスタイル設定
+        # クリップボード監視ボタンを追加
+        self.clipboard_monitor_btn = QPushButton("クリップボード監視")
+        self.clipboard_monitor_btn.setCheckable(True)  # トグルボタンにする
+        self.clipboard_monitor_btn.setStyleSheet("""
+            QPushButton {
+                color: white;
+                border: 1px solid white;
+                padding: 5px;
+                border-radius: 3px;
+                background-color: #2C3E50;
+            }
+            QPushButton:checked {
+                background-color: #27AE60;
+            }
+            QPushButton:hover {
+                background-color: #34495E;
+                border: 1px solid #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        self.clipboard_monitor_btn.clicked.connect(self.toggle_clipboard_monitor)
+        top_bar_layout.addWidget(self.clipboard_monitor_btn)
+        
+        # 既存のボタン
+        self.settings_btn = QPushButton("設定")
+        self.clear_btn = QPushButton("入力クリア")
+        self.cti_copy_btn = QPushButton("CTIコピー")
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
+        
+        # 既存のボタンにスタイルを適用
         button_style = """
             QPushButton {
                 color: white;
@@ -308,21 +359,16 @@ class MainWindow(QMainWindow):
             }
         """
         
-        # 設定ボタンを追加
-        self.settings_btn = QPushButton("設定")
         self.settings_btn.setStyleSheet(button_style)
-        top_bar_layout.addWidget(self.settings_btn)
-        
-        # 既存のボタン
-        self.clear_btn = QPushButton("入力クリア")
-        self.cti_copy_btn = QPushButton("CTIコピー")
-        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
-        
-        # 既存のボタンにスタイルを適用
         self.clear_btn.setStyleSheet(button_style)
         self.cti_copy_btn.setStyleSheet(button_style)
         self.spreadsheet_btn.setStyleSheet(button_style)
         
+        # 設定ボタンのシグナル接続
+        self.settings_btn.clicked.connect(self.show_settings)
+        
+        # ボタンをレイアウトに追加
+        top_bar_layout.addWidget(self.settings_btn)
         top_bar_layout.addWidget(self.clear_btn)
         top_bar_layout.addWidget(self.cti_copy_btn)
         top_bar_layout.addWidget(self.spreadsheet_btn)
@@ -604,13 +650,16 @@ class MainWindow(QMainWindow):
                     settings = json.load(f)
                     self.SPREADSHEET_ID = settings.get('spreadsheet_id', '1Y3M8YZ0ywLdMxCVY6EB8COcPkBaOS6e27jzEJWcU8Tw')
                     self.format_template = settings.get('format_template', '')
+                    self.order_person = settings.get('order_person', '')
             else:
                 self.SPREADSHEET_ID = '1Y3M8YZ0ywLdMxCVY6EB8COcPkBaOS6e27jzEJWcU8Tw'
                 self.format_template = ''
+                self.order_person = ''
         except Exception as e:
             print(f"設定の読み込みエラー: {str(e)}")
             self.SPREADSHEET_ID = '1Y3M8YZ0ywLdMxCVY6EB8COcPkBaOS6e27jzEJWcU8Tw'
             self.format_template = ''
+            self.order_person = ''
 
     def generate_cti_format(self):
         """CTIフォーマットの生成とプレビュー表示"""
@@ -847,6 +896,10 @@ class MainWindow(QMainWindow):
             settings = dialog.get_settings()
             self.SPREADSHEET_ID = settings['spreadsheet_id']
             self.format_template = settings['format_template']
+            self.order_person = settings['order_person']
+            
+            # 受注者名を入力欄に設定
+            self.order_person_input.setText(self.order_person)
             
             # スプレッドシートの再接続
             try:
@@ -862,6 +915,58 @@ class MainWindow(QMainWindow):
             self.mobile_input.setEnabled(False)
         else:
             self.mobile_input.setEnabled(True)
+
+    def toggle_clipboard_monitor(self):
+        """クリップボード監視の開始/停止を切り替え"""
+        if self.clipboard_monitor_btn.isChecked():
+            self.clipboard_timer.start(1000)  # 1秒ごとにチェック
+            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を開始しました。\n他のアプリからコピーした情報を自動で取得します。")
+        else:
+            self.clipboard_timer.stop()
+            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を停止しました。")
+
+    def check_clipboard(self):
+        """クリップボードの内容をチェックして適切なフィールドに自動入力"""
+        current_text = self.clipboard.text()
+        
+        # クリップボードの内容が変更された場合のみ処理
+        if current_text != self.last_clipboard_text:
+            self.last_clipboard_text = current_text
+            
+            # クリップボードの内容を解析
+            self.analyze_clipboard_content(current_text)
+
+    def analyze_clipboard_content(self, text):
+        """クリップボードの内容を解析して適切なフィールドに入力"""
+        # 郵便番号のパターンマッチ（例：123-4567）
+        if len(text) == 8 and text[3] == '-' and text.replace('-', '').isdigit():
+            self.postal_code_input.setText(text)  # 通常の郵便番号フィールド
+            self.list_postal_code_input.setText(text)  # リスト郵便番号フィールド
+            return
+            
+        # 電話番号のパターンマッチ（例：03-1234-5678）
+        if len(text) <= 13 and text.replace('-', '').isdigit():
+            if len(text.replace('-', '')) == 11:  # 携帯電話の場合
+                self.mobile_input.setText(text)
+            else:
+                self.list_phone_input.setText(text)
+            return
+            
+        # 住所らしき文字列（漢字とカタカナが含まれる長い文字列）
+        if len(text) > 10 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
+            self.address_input.setText(text)  # 通常の住所フィールド
+            self.list_address_input.setText(text)  # リスト住所フィールド
+            return
+            
+        # カタカナのみの文字列（フリガナとして扱う）
+        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF for c in text.replace(' ', '')):
+            self.list_furigana_input.setText(text)  # リストフリガナに入力
+            return
+            
+        # その他の文字列（名前として扱う）
+        if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
+            self.list_name_input.setText(text)  # リスト名に入力
+            return
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
