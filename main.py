@@ -23,6 +23,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import json
+import pykakasi
+import pdfplumber
 
 # デフォルトのフォーマットテンプレート
 DEFAULT_FORMAT = """対応者（お客様の名前）：{operator}
@@ -205,6 +207,17 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("コールセンター業務効率化ツール")
         self.setMinimumSize(1000, 800)
         
+        # フォントサイズの初期設定
+        self.current_font_size = 10
+        self.min_font_size = 8
+        self.max_font_size = 14
+        
+        # 初期フォントの設定
+        self.apply_font_size()
+        
+        # カタカナ変換用のインスタンスを作成
+        self.kks = pykakasi.kakasi()
+        
         # クリップボード監視用の変数
         self.clipboard = QApplication.clipboard()
         self.last_clipboard_text = ""
@@ -304,74 +317,96 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "スプレッドシートへの初期接続に失敗しました。\n転記機能は再接続後に使用可能になります。")
             print(f"Google Sheets設定エラー: {str(e)}")
 
+        # 必須項目の定義
+        self.required_fields = {
+            'operator': '対応者名',
+            'contractor': '契約者名',
+            'furigana': 'フリガナ',
+            'birth_year': '生年月日（年）',
+            'birth_month': '生年月日（月）',
+            'birth_day': '生年月日（日）',
+            'postal_code': '郵便番号',
+            'address': '住所',
+            'list_name': 'リスト名',
+            'list_furigana': 'リストフリガナ',
+            'list_phone': '電話番号',
+            'list_postal_code': 'リスト郵便番号',
+            'list_address': 'リスト住所',
+            'order_person': '受注者名',
+            'fee': '料金認識'
+        }
+
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
         top_bar = QWidget()
         top_bar.setStyleSheet("background-color: #2C3E50; color: white;")
         top_bar_layout = QHBoxLayout(top_bar)
         
-        # クリップボード監視ボタンを追加
+        # 左側のボタングループ
+        left_buttons = QHBoxLayout()
+        
+        # クリップボード監視ボタン
         self.clipboard_monitor_btn = QPushButton("クリップボード監視")
-        self.clipboard_monitor_btn.setCheckable(True)  # トグルボタンにする
-        self.clipboard_monitor_btn.setStyleSheet("""
-            QPushButton {
-                color: white;
-                border: 1px solid white;
-                padding: 5px;
-                border-radius: 3px;
-                background-color: #2C3E50;
-            }
-            QPushButton:checked {
-                background-color: #27AE60;
-            }
-            QPushButton:hover {
-                background-color: #34495E;
-                border: 1px solid #3498DB;
-            }
-            QPushButton:pressed {
-                background-color: #2980B9;
-            }
-        """)
+        self.clipboard_monitor_btn.setCheckable(True)
+        self.clipboard_monitor_btn.setStyleSheet(self.get_button_style())
         self.clipboard_monitor_btn.clicked.connect(self.toggle_clipboard_monitor)
-        top_bar_layout.addWidget(self.clipboard_monitor_btn)
+        left_buttons.addWidget(self.clipboard_monitor_btn)
         
-        # 既存のボタン
+        # 設定ボタン
         self.settings_btn = QPushButton("設定")
-        self.clear_btn = QPushButton("入力クリア")
-        self.cti_copy_btn = QPushButton("CTIコピー")
-        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
-        
-        # 既存のボタンにスタイルを適用
-        button_style = """
-            QPushButton {
-                color: white;
-                border: 1px solid white;
-                padding: 5px;
-                border-radius: 3px;
-                background-color: #2C3E50;
-            }
-            QPushButton:hover {
-                background-color: #34495E;
-                border: 1px solid #3498DB;
-            }
-            QPushButton:pressed {
-                background-color: #2980B9;
-            }
-        """
-        
-        self.settings_btn.setStyleSheet(button_style)
-        self.clear_btn.setStyleSheet(button_style)
-        self.cti_copy_btn.setStyleSheet(button_style)
-        self.spreadsheet_btn.setStyleSheet(button_style)
-        
-        # 設定ボタンのシグナル接続
+        self.settings_btn.setStyleSheet(self.get_button_style())
         self.settings_btn.clicked.connect(self.show_settings)
+        left_buttons.addWidget(self.settings_btn)
         
-        # ボタンをレイアウトに追加
-        top_bar_layout.addWidget(self.settings_btn)
-        top_bar_layout.addWidget(self.clear_btn)
-        top_bar_layout.addWidget(self.cti_copy_btn)
-        top_bar_layout.addWidget(self.spreadsheet_btn)
+        # 中央のボタングループ
+        center_buttons = QHBoxLayout()
+        
+        # 入力クリアボタン
+        self.clear_btn = QPushButton("入力クリア")
+        self.clear_btn.setStyleSheet(self.get_button_style())
+        self.clear_btn.clicked.connect(self.clear_all_inputs)
+        center_buttons.addWidget(self.clear_btn)
+        
+        # CTIコピーボタン
+        self.cti_copy_btn = QPushButton("CTIコピー")
+        self.cti_copy_btn.setStyleSheet(self.get_button_style())
+        self.cti_copy_btn.clicked.connect(self.generate_cti_format)
+        center_buttons.addWidget(self.cti_copy_btn)
+        
+        # スプレッドシート転記ボタン
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
+        self.spreadsheet_btn.setStyleSheet(self.get_button_style())
+        self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
+        center_buttons.addWidget(self.spreadsheet_btn)
+        
+        # 右側のボタングループ（フォントサイズ調整）
+        right_buttons = QHBoxLayout()
+        
+        # フォントサイズ縮小ボタン
+        self.font_decrease_btn = QPushButton("A-")
+        self.font_decrease_btn.setStyleSheet(self.get_button_style())
+        self.font_decrease_btn.clicked.connect(lambda: self.adjust_font_size(-1))
+        self.font_decrease_btn.setToolTip("フォントサイズを小さくする")
+        right_buttons.addWidget(self.font_decrease_btn)
+        
+        # フォントサイズ表示ラベル
+        self.font_size_label = QLabel(f"{self.current_font_size}pt")
+        self.font_size_label.setStyleSheet("color: white; padding: 0 5px;")
+        right_buttons.addWidget(self.font_size_label)
+        
+        # フォントサイズ拡大ボタン
+        self.font_increase_btn = QPushButton("A+")
+        self.font_increase_btn.setStyleSheet(self.get_button_style())
+        self.font_increase_btn.clicked.connect(lambda: self.adjust_font_size(1))
+        self.font_increase_btn.setToolTip("フォントサイズを大きくする")
+        right_buttons.addWidget(self.font_increase_btn)
+        
+        # レイアウトの配置
+        top_bar_layout.addLayout(left_buttons)
+        top_bar_layout.addStretch()
+        top_bar_layout.addLayout(center_buttons)
+        top_bar_layout.addStretch()
+        top_bar_layout.addLayout(right_buttons)
         
         parent_layout.addWidget(top_bar)
 
@@ -461,6 +496,20 @@ class MainWindow(QMainWindow):
         self.address_input = QLineEdit()
         address_layout.addWidget(self.address_input)
         
+        # 住所情報セクションに提供エリアチェック機能を追加
+        address_layout.addWidget(QLabel("提供エリアチェック"))
+        check_area_layout = QHBoxLayout()
+        
+        self.check_area_btn = QPushButton("エリアチェック")
+        self.check_area_btn.clicked.connect(self.check_service_area)
+        check_area_layout.addWidget(self.check_area_btn)
+        
+        self.area_result_label = QLabel()
+        self.area_result_label.setWordWrap(True)  # 長いメッセージを折り返し表示
+        check_area_layout.addWidget(self.area_result_label)
+        
+        address_layout.addLayout(check_area_layout)
+        
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
         
@@ -471,6 +520,7 @@ class MainWindow(QMainWindow):
         # リスト名
         list_layout.addWidget(QLabel("リスト名"))
         self.list_name_input = QLineEdit()
+        self.list_name_input.textChanged.connect(self.update_list_furigana)  # シグナルを接続
         list_layout.addWidget(self.list_name_input)
         
         # リストフリガナ
@@ -661,11 +711,90 @@ class MainWindow(QMainWindow):
             self.format_template = ''
             self.order_person = ''
 
+    def check_required_fields(self, show_message=True, message_type="warning"):
+        """必須項目の入力チェック
+        
+        Args:
+            show_message (bool): メッセージを表示するかどうか
+            message_type (str): メッセージの種類 ("warning" または "info")
+            
+        Returns:
+            tuple: (bool, list) - 全ての必須項目が入力されているかどうか、未入力項目のリスト
+        """
+        missing_fields = []
+        
+        # 各必須項目をチェック
+        if not self.operator_input.text().strip():
+            missing_fields.append(self.required_fields['operator'])
+        
+        if not self.contractor_input.text().strip():
+            missing_fields.append(self.required_fields['contractor'])
+            
+        if not self.furigana_input.text().strip():
+            missing_fields.append(self.required_fields['furigana'])
+            
+        if not self.year_combo.currentText().strip():
+            missing_fields.append(self.required_fields['birth_year'])
+            
+        if not self.month_combo.currentText().strip():
+            missing_fields.append(self.required_fields['birth_month'])
+            
+        if not self.day_combo.currentText().strip():
+            missing_fields.append(self.required_fields['birth_day'])
+            
+        if not self.postal_code_input.text().strip():
+            missing_fields.append(self.required_fields['postal_code'])
+            
+        if not self.address_input.text().strip():
+            missing_fields.append(self.required_fields['address'])
+        
+        if not self.list_name_input.text().strip():
+            missing_fields.append(self.required_fields['list_name'])
+            
+        if not self.list_furigana_input.text().strip():
+            missing_fields.append(self.required_fields['list_furigana'])
+        
+        if not self.list_phone_input.text().strip():
+            missing_fields.append(self.required_fields['list_phone'])
+            
+        if not self.list_postal_code_input.text().strip():
+            missing_fields.append(self.required_fields['list_postal_code'])
+        
+        if not self.list_address_input.text().strip():
+            missing_fields.append(self.required_fields['list_address'])
+            
+        if not self.order_person_input.text().strip():
+            missing_fields.append(self.required_fields['order_person'])
+            
+        if not self.fee_input.text().strip():
+            missing_fields.append(self.required_fields['fee'])
+
+        if missing_fields and show_message:
+            missing_fields_str = '\n'.join([f'・{field}' for field in missing_fields])
+            if message_type == "warning":
+                QMessageBox.warning(
+                    self,
+                    "入力エラー",
+                    f"以下の必須項目が未入力です：\n\n{missing_fields_str}\n\n全ての必須項目を入力してください。"
+                )
+            else:  # info
+                QMessageBox.information(
+                    self,
+                    "未入力項目の確認",
+                    f"以下の項目が未入力です：\n\n{missing_fields_str}\n\nこのままコピーを続行します。"
+                )
+        
+        return len(missing_fields) == 0, missing_fields
+
     def generate_cti_format(self):
         """CTIフォーマットの生成とプレビュー表示"""
+        print("generate_cti_format called")  # デバッグ用
+        # 必須項目チェック（情報メッセージ表示）のみ
+        _, missing_fields = self.check_required_fields(show_message=True, message_type="info")
+        
         # 生年月日の生成（和暦を西暦に変換）
         era = self.era_combo.currentText()
-        year = int(self.year_combo.currentText())
+        year = int(self.year_combo.currentText()) if self.year_combo.currentText() else 0
         month = self.month_combo.currentText()
         day = self.day_combo.currentText()
         
@@ -676,7 +805,7 @@ class MainWindow(QMainWindow):
             year = year + 1988  # 平成元年は1989年
         # 西暦の場合はそのまま
         
-        birth_date = f"{year}/{month}/{day}"
+        birth_date = f"{year}/{month}/{day}" if year and month and day else ""
         
         # 現在の日付を取得（先頭の0を除去）
         now = datetime.datetime.now()
@@ -789,6 +918,13 @@ class MainWindow(QMainWindow):
 
     def write_to_spreadsheet(self):
         """スプレッドシートにデータを書き込む"""
+        print("write_to_spreadsheet called")  # デバッグ用
+        # 必須項目チェックを無言で実行
+        is_valid, _ = self.check_required_fields(show_message=False)
+        if not is_valid:
+            QMessageBox.warning(self, "入力エラー", "必須項目が未入力です。\n全ての必須項目を入力してください。")
+            return
+            
         try:
             # スプレッドシートの接続確認と再接続
             if not hasattr(self, 'sheet') or self.sheet is None:
@@ -869,11 +1005,17 @@ class MainWindow(QMainWindow):
         
         # ボタンのシグナル接続
         self.clear_btn.clicked.connect(self.clear_all_inputs)
+        
+        # 既存の接続をすべて切断してから新しい接続を作成
+        try:
+            self.cti_copy_btn.clicked.disconnect()
+            self.spreadsheet_btn.clicked.disconnect()
+        except:
+            pass  # 接続が存在しない場合は無視
+        
+        # 新しい接続を作成
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
-        
-        # 設定ボタンのシグナル接続
-        self.settings_btn.clicked.connect(self.show_settings)
 
     def format_phone_number_without_hyphen(self):
         """電話番号の自動フォーマット処理（ハイフンなし）"""
@@ -891,7 +1033,10 @@ class MainWindow(QMainWindow):
     def show_settings(self):
         """設定ダイアログを表示"""
         dialog = SettingsDialog(self)
-        if dialog.exec():
+        result = dialog.exec()
+        
+        # ダイアログがAcceptで閉じられた場合のみ設定を更新
+        if result == QDialog.DialogCode.Accepted:
             # 設定が保存された場合
             settings = dialog.get_settings()
             self.SPREADSHEET_ID = settings['spreadsheet_id']
@@ -966,7 +1111,195 @@ class MainWindow(QMainWindow):
         # その他の文字列（名前として扱う）
         if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
             self.list_name_input.setText(text)  # リスト名に入力
+            # フリガナは自動的に生成されます（textChangedシグナルによって）
             return
+
+    def update_list_furigana(self, text):
+        """リスト名からフリガナを自動生成"""
+        if not text:  # テキストが空の場合
+            self.list_furigana_input.clear()
+            return
+            
+        try:
+            # 漢字をカタカナに変換
+            result = self.kks.convert(text)
+            # 結果を連結してカタカナ文字列を作成
+            katakana = ''.join([item['kana'] for item in result])
+            # フリガナ入力欄に設定
+            self.list_furigana_input.setText(katakana)
+        except Exception as e:
+            print(f"フリガナ変換エラー: {str(e)}")
+
+    def adjust_font_size(self, delta):
+        """フォントサイズを調整"""
+        new_size = self.current_font_size + delta
+        if self.min_font_size <= new_size <= self.max_font_size:
+            self.current_font_size = new_size
+            self.font_size_label.setText(f"{self.current_font_size}pt")
+            self.apply_font_size()
+
+    def apply_font_size(self):
+        """アプリケーション全体のフォントサイズを適用"""
+        # メインウィンドウのフォントを設定
+        font = QFont()
+        font.setPointSize(self.current_font_size)
+        QApplication.setFont(font)
+        
+        # 各ウィジェットのフォントを更新
+        for widget in self.findChildren(QWidget):
+            widget_font = widget.font()
+            widget_font.setPointSize(self.current_font_size)
+            widget.setFont(widget_font)
+            
+            # QLineEditとQComboBoxの高さを調整
+            if isinstance(widget, (QLineEdit, QComboBox)):
+                widget.setMinimumHeight(max(25, self.current_font_size * 2))
+
+    def get_button_style(self):
+        """ボタンのスタイルを取得"""
+        return """
+            QPushButton {
+                color: white;
+                border: 1px solid white;
+                padding: 5px;
+                border-radius: 3px;
+                background-color: #2C3E50;
+                min-width: 30px;
+                margin: 0px;
+            }
+            QPushButton:checked {
+                background-color: #27AE60;
+            }
+            QPushButton:hover {
+                background-color: #34495E;
+                border: 1px solid #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """
+
+    def check_service_area(self):
+        """提供エリアのチェック"""
+        address = self.address_input.text()
+        if not address:
+            QMessageBox.warning(self, "エラー", "住所を入力してください。")
+            return
+        
+        checker = ServiceAreaChecker()
+        result = checker.check_address(address)
+        
+        # 結果に応じて表示色を変更
+        if result["status"] == "提供可能":
+            self.area_result_label.setStyleSheet("color: green; font-weight: bold;")
+        elif result["status"] == "提供不可":
+            self.area_result_label.setStyleSheet("color: red; font-weight: bold;")
+        else:  # 要確認
+            self.area_result_label.setStyleSheet("color: orange; font-weight: bold;")
+        
+        self.area_result_label.setText(result["message"])
+
+class ServiceAreaChecker:
+    """提供エリアチェッカー"""
+    def __init__(self):
+        self.pdf_path = "hikari.pdf"
+        self.area_data = {}
+        # 番地情報を含むエリアデータを保持
+        self.detailed_areas = {}
+        self.load_from_pdf()
+    
+    def load_from_pdf(self):
+        """PDFファイルからデータを読み込む"""
+        try:
+            with pdfplumber.open(self.pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    for line in text.split('\n'):
+                        if not line.strip():
+                            continue
+                        
+                        parts = line.strip().split()
+                        if len(parts) >= 3:
+                            prefecture = parts[0]  # 都道府県名
+                            city = parts[1]       # 市区町村名
+                            area_detail = ' '.join(parts[2:])  # 区域等
+                            
+                            # データを階層的に格納
+                            if prefecture not in self.area_data:
+                                self.area_data[prefecture] = {}
+                            if city not in self.area_data[prefecture]:
+                                self.area_data[prefecture][city] = {}
+                            
+                            # 町名と詳細を分離
+                            town_parts = area_detail.split('の一部')
+                            if len(town_parts) > 1:
+                                town = town_parts[0]
+                                if town not in self.area_data[prefecture][city]:
+                                    self.area_data[prefecture][city][town] = []
+                                self.area_data[prefecture][city][town].append(area_detail)
+                            else:
+                                if area_detail not in self.area_data[prefecture][city]:
+                                    self.area_data[prefecture][city][area_detail] = []
+                                self.area_data[prefecture][city][area_detail].append(area_detail)
+                                
+        except FileNotFoundError:
+            print(f"エラー: {self.pdf_path} が見つかりません。")
+            # 基本的なデータを設定
+            self.area_data = {
+                "富山県": {
+                    "下新川郡": {
+                        "入善町": ["上野の一部"],
+                        "朝日町": ["平柳の一部"]
+                    }
+                }
+            }
+        except Exception as e:
+            print(f"PDFの読み込みエラー: {str(e)}")
+            # エラー時は基本データを使用
+            self.area_data = {
+                "富山県": {
+                    "下新川郡": {
+                        "入善町": ["上野の一部"],
+                        "朝日町": ["平柳の一部"]
+                    }
+                }
+            }
+
+    def check_address(self, address):
+        """
+        住所から提供可能かどうかを判定
+        
+        Args:
+            address (str): 検索する住所
+            
+        Returns:
+            dict: {
+                "status": "提供可能" | "提供不可" | "要確認",
+                "message": "詳細メッセージ"
+            }
+        """
+        # 住所から都道府県、市区町村、町名を抽出
+        for pref in self.area_data:
+            if pref in address:
+                for city in self.area_data[pref]:
+                    if city in address:
+                        for town in self.area_data[pref][city]:
+                            if town in address:
+                                areas = self.area_data[pref][city][town]
+                                # 「一部」地域の場合は要確認
+                                if any("一部" in area for area in areas):
+                                    return {
+                                        "status": "要確認",
+                                        "message": f"この地域は一部のみ提供可能です。\n対象地域：{', '.join(areas)}"
+                                    }
+                                return {
+                                    "status": "提供可能",
+                                    "message": "この地域は提供可能です。"
+                                }
+        return {
+            "status": "提供不可",
+            "message": "この地域は提供エリア外です。"
+        }
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
