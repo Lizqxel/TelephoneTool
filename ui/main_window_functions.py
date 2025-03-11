@@ -311,74 +311,67 @@ class MainWindowFunctions:
             self.list_name_input.setText(text)
     
     def search_service_area(self):
-        """提供エリア検索機能"""
-        # 郵便番号と住所を取得
-        postal_code = self.postal_code_input.text().strip()
-        address = self.address_input.text().strip()
+        """提供エリア検索を実行"""
+        postal_code = self.postal_code_input.text()
+        address = self.address_input.text()
         
-        # 入力チェック
         if not postal_code or not address:
-            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
+            QMessageBox.warning(self, "エラー", "郵便番号と住所を入力してください。")
             return
-        
-        # 処理中メッセージを表示
-        self.area_result_label.setText("提供エリア: 検索中...")
-        self.area_result_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                background-color: #fffde7;
-            }
-        """)
-        QApplication.processEvents()  # UIを更新
         
         try:
             # 提供エリア検索を実行
             result = search_service_area(postal_code, address)
             
-            # 結果に基づいてUIを更新
+            # スクリーンショットボタンを更新
+            self.update_screenshot_button(result.get("screenshot"))
+            
             if result["status"] == "success":
-                self.area_result_label.setText(f"提供エリア: {result['message']}")
+                # 提供可能の場合
+                self.area_result_label.setText("提供エリア: 提供可能")
                 self.area_result_label.setStyleSheet("""
                     QLabel {
                         font-size: 14px;
                         padding: 5px;
-                        border: 1px solid #4CAF50;
+                        border: 1px solid #27AE60;
                         border-radius: 4px;
                         background-color: #E8F5E9;
-                        color: #2E7D32;
+                        color: #27AE60;
                     }
                 """)
-                # 提供判定コンボボックスを更新
-                self.judgment_combo.setCurrentText("OK")
+                self.judgment_combo.setCurrentText("○")
             else:
-                self.area_result_label.setText(f"提供エリア: {result['message']}")
+                # 提供不可の場合
+                self.area_result_label.setText("提供エリア: 提供不可")
                 self.area_result_label.setStyleSheet("""
                     QLabel {
                         font-size: 14px;
                         padding: 5px;
-                        border: 1px solid #F44336;
+                        border: 1px solid #E74C3C;
                         border-radius: 4px;
                         background-color: #FFEBEE;
-                        color: #C62828;
+                        color: #E74C3C;
                     }
                 """)
-                # 提供判定コンボボックスを更新
-                self.judgment_combo.setCurrentText("NG")
-        
+                self.judgment_combo.setCurrentText("×")
+            
+            # 詳細情報がある場合は表示
+            if "details" in result:
+                details = result["details"]
+                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+                QMessageBox.information(self, "検索結果", details_text)
+            
         except Exception as e:
-            logging.error(f"提供エリア検索中にエラーが発生しました: {str(e)}")
-            self.area_result_label.setText(f"提供エリア: エラー ({str(e)})")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #FF9800;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #E65100;
-                }
-            """)
-            QMessageBox.critical(self, "エラー", f"提供エリア検索中にエラーが発生しました:\n{str(e)}") 
+            QMessageBox.warning(self, "エラー", f"提供エリア検索に失敗しました: {str(e)}")
+            # エラー時もスクリーンショットボタンを更新
+            self.update_screenshot_button(None)
+    
+    def update_screenshot_button(self, screenshot_path):
+        """スクリーンショットボタンを更新"""
+        # このメソッドは実装しない（必要に応じて実装）
+        pass
+    
+    def update_screenshot_button(self):
+        """スクリーンショットボタンを更新"""
+        # このメソッドは実装しない（必要に応じて実装）
+        pass 

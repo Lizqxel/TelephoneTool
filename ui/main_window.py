@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication)
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QIntValidator, QClipboard
+from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
@@ -142,7 +142,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 background-color: #2980B9;
             }
         """)
-        # シグナル接続はsetup_signals関数で行うため、ここでは行わない
         top_bar_layout.addWidget(self.clipboard_toggle_btn)
         
         # 既存のボタン
@@ -150,6 +149,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.clear_btn = QPushButton("入力クリア")
         self.cti_copy_btn = QPushButton("CTIコピー")
         self.spreadsheet_btn = QPushButton("スプレッドシート転記")
+        
+        # スクリーンショット表示ボタンを追加
+        self.screenshot_btn = QPushButton("スクリーンショット表示")
+        self.screenshot_btn.setEnabled(False)  # 初期状態は無効
         
         # 既存のボタンにスタイルを適用
         button_style = """
@@ -167,18 +170,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QPushButton:pressed {
                 background-color: #2980B9;
             }
+            QPushButton:disabled {
+                color: #95A5A6;
+                border: 1px solid #95A5A6;
+                background-color: #34495E;
+            }
         """
         
         self.settings_btn.setStyleSheet(button_style)
         self.clear_btn.setStyleSheet(button_style)
         self.cti_copy_btn.setStyleSheet(button_style)
         self.spreadsheet_btn.setStyleSheet(button_style)
+        self.screenshot_btn.setStyleSheet(button_style)
         
         # ボタンをレイアウトに追加
         top_bar_layout.addWidget(self.settings_btn)
         top_bar_layout.addWidget(self.clear_btn)
         top_bar_layout.addWidget(self.cti_copy_btn)
         top_bar_layout.addWidget(self.spreadsheet_btn)
+        top_bar_layout.addWidget(self.screenshot_btn)
         
         parent_layout.addWidget(top_bar)
     
@@ -423,7 +433,17 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         parent_layout.addWidget(self.preview_text)
     
     def setup_signals(self):
-        """シグナルの接続"""
+        """シグナルの設定"""
+        # 既存のシグナル設定
+        self.settings_btn.clicked.connect(self.show_settings)
+        self.clear_btn.clicked.connect(self.clear_all_inputs)
+        self.cti_copy_btn.clicked.connect(self.generate_cti_format)
+        self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
+        self.clipboard_toggle_btn.clicked.connect(self.toggle_clipboard_monitor)
+        
+        # スクリーンショット表示ボタンのシグナル設定
+        self.screenshot_btn.clicked.connect(self.show_screenshot)
+        
         # 自動フォーマット用のシグナル
         self.mobile_input.textChanged.connect(self.format_phone_number)
         self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
@@ -436,13 +456,47 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.era_combo.currentTextChanged.connect(self.update_year_combo)
         
         # ボタンのシグナル接続
-        self.clear_btn.clicked.connect(self.clear_all_inputs)
-        self.cti_copy_btn.clicked.connect(self.generate_cti_format)
-        self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
         self.area_search_btn.clicked.connect(self.search_service_area)
-        
-        # 設定ボタンのシグナル接続
-        self.settings_btn.clicked.connect(self.show_settings)
-        
-        # クリップボード監視ボタンのシグナル接続
-        self.clipboard_toggle_btn.clicked.connect(self.toggle_clipboard_monitor) 
+    
+    def show_screenshot(self):
+        """最新のスクリーンショットを表示"""
+        if hasattr(self, 'latest_screenshot_path') and os.path.exists(self.latest_screenshot_path):
+            # スクリーンショット表示用のダイアログを作成
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("スクリーンショット")
+            
+            # スクリーンショットを読み込んでラベルに設定
+            pixmap = QPixmap(self.latest_screenshot_path)
+            
+            # スクリーンサイズの80%を上限とする
+            screen_size = QApplication.primaryScreen().size()
+            max_width = int(screen_size.width() * 0.8)
+            max_height = int(screen_size.height() * 0.8)
+            
+            # 画像のサイズを調整
+            if pixmap.width() > max_width or pixmap.height() > max_height:
+                pixmap = pixmap.scaled(max_width, max_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+            # ラベルを作成して画像を設定
+            label = QLabel()
+            label.setPixmap(pixmap)
+            
+            # ダイアログにラベルを設定
+            dialog.layout().addWidget(label, 0, 0, 1, dialog.layout().columnCount())
+            dialog.setStyleSheet("QMessageBox { background-color: white; }")
+            
+            # OKボタンのみ表示
+            dialog.setStandardButtons(QMessageBox.StandardButton.Ok)
+            
+            # ダイアログを表示
+            dialog.exec()
+        else:
+            QMessageBox.warning(self, "エラー", "スクリーンショットが見つかりません。")
+
+    def update_screenshot_button(self, screenshot_path=None):
+        """スクリーンショット表示ボタンの状態を更新"""
+        if screenshot_path and os.path.exists(screenshot_path):
+            self.latest_screenshot_path = screenshot_path
+            self.screenshot_btn.setEnabled(True)
+        else:
+            self.screenshot_btn.setEnabled(False) 
