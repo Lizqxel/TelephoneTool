@@ -113,135 +113,74 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # Google Sheetsの設定
         self.setup_google_sheets()
-        
-        # クリップボード監視の初期化
-        self.toggle_clipboard_monitor()
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
-        # トップバーのレイアウト
-        top_bar = QHBoxLayout()
+        top_bar = QWidget()
+        top_bar.setStyleSheet("background-color: #2C3E50; color: white;")
+        top_bar_layout = QHBoxLayout(top_bar)
         
-        # 設定ボタン
-        self.settings_btn = QPushButton("設定")
-        self.settings_btn.setFixedWidth(80)
-        self.settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
-        top_bar.addWidget(self.settings_btn)
-        
-        # クリップボード監視トグルボタン
-        self.clipboard_toggle_btn = QPushButton("クリップボード監視: オフ")
-        self.clipboard_toggle_btn.setFixedWidth(200)
+        # クリップボード監視ボタンを追加
+        self.clipboard_toggle_btn = QPushButton("クリップボード監視")
+        self.clipboard_toggle_btn.setCheckable(True)  # トグルボタンにする
         self.clipboard_toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #f44336;
                 color: white;
-                border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
-                border-radius: 4px;
+                border: 1px solid white;
+                padding: 5px;
+                border-radius: 3px;
+                background-color: #2C3E50;
+            }
+            QPushButton:checked {
+                background-color: #27AE60;
             }
             QPushButton:hover {
-                background-color: #d32f2f;
+                background-color: #34495E;
+                border: 1px solid #3498DB;
             }
             QPushButton:pressed {
-                background-color: #b71c1c;
+                background-color: #2980B9;
             }
         """)
-        top_bar.addWidget(self.clipboard_toggle_btn)
+        # シグナル接続はsetup_signals関数で行うため、ここでは行わない
+        top_bar_layout.addWidget(self.clipboard_toggle_btn)
         
-        # スペーサー
-        top_bar.addStretch()
+        # 既存のボタン
+        self.settings_btn = QPushButton("設定")
+        self.clear_btn = QPushButton("入力クリア")
+        self.cti_copy_btn = QPushButton("CTIコピー")
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
         
-        # CTIフォーマットコピーボタン
-        self.cti_copy_btn = QPushButton("CTIフォーマットをコピー")
-        self.cti_copy_btn.setFixedWidth(200)
-        self.cti_copy_btn.setStyleSheet("""
+        # 既存のボタンにスタイルを適用
+        button_style = """
             QPushButton {
-                background-color: #2196F3;
                 color: white;
-                border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
-                border-radius: 4px;
+                border: 1px solid white;
+                padding: 5px;
+                border-radius: 3px;
+                background-color: #2C3E50;
             }
             QPushButton:hover {
-                background-color: #0b7dda;
+                background-color: #34495E;
+                border: 1px solid #3498DB;
             }
             QPushButton:pressed {
-                background-color: #0a69b7;
+                background-color: #2980B9;
             }
-        """)
-        top_bar.addWidget(self.cti_copy_btn)
+        """
         
-        # スプレッドシート転記ボタン
-        self.spreadsheet_btn = QPushButton("スプレッドシートに転記")
-        self.spreadsheet_btn.setFixedWidth(200)
-        self.spreadsheet_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #e68a00;
-            }
-            QPushButton:pressed {
-                background-color: #cc7a00;
-            }
-        """)
-        top_bar.addWidget(self.spreadsheet_btn)
+        self.settings_btn.setStyleSheet(button_style)
+        self.clear_btn.setStyleSheet(button_style)
+        self.cti_copy_btn.setStyleSheet(button_style)
+        self.spreadsheet_btn.setStyleSheet(button_style)
         
-        # クリアボタン
-        self.clear_btn = QPushButton("クリア")
-        self.clear_btn.setFixedWidth(80)
-        self.clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9E9E9E;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #757575;
-            }
-            QPushButton:pressed {
-                background-color: #616161;
-            }
-        """)
-        top_bar.addWidget(self.clear_btn)
+        # ボタンをレイアウトに追加
+        top_bar_layout.addWidget(self.settings_btn)
+        top_bar_layout.addWidget(self.clear_btn)
+        top_bar_layout.addWidget(self.cti_copy_btn)
+        top_bar_layout.addWidget(self.spreadsheet_btn)
         
-        # トップバーをメインレイアウトに追加
-        parent_layout.addLayout(top_bar)
+        parent_layout.addWidget(top_bar)
     
     def create_input_form(self, parent_layout):
         """入力フォームを作成"""
@@ -463,10 +402,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def create_preview_area(self, parent_layout):
         """プレビューエリアを作成"""
+        # プレビューラベル
+        preview_label = QLabel("CTIフォーマットプレビュー")
+        
         # プレビューテキストエリア
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
-        self.preview_text.setPlaceholderText("ここにプレビューが表示されます")
         self.preview_text.setStyleSheet("""
             QTextEdit {
                 background-color: #f8f8f8;
@@ -477,6 +418,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 font-family: 'MS Gothic', monospace;
             }
         """)
+        
+        parent_layout.addWidget(preview_label)
         parent_layout.addWidget(self.preview_text)
     
     def setup_signals(self):
@@ -496,9 +439,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
-        
-        # 提供エリア検索ボタンのシグナル接続
-        self.area_search_btn.clicked.connect(self.search_service_area)
         
         # 設定ボタンのシグナル接続
         self.settings_btn.clicked.connect(self.show_settings)

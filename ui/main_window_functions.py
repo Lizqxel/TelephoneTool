@@ -256,49 +256,13 @@ class MainWindowFunctions:
             self.mobile_input.clear()
     
     def toggle_clipboard_monitor(self):
-        """クリップボード監視の有効/無効を切り替え"""
-        if self.clipboard_timer.isActive():
-            self.clipboard_timer.stop()
-            self.clipboard_toggle_btn.setText("クリップボード監視: オフ")
-            self.clipboard_toggle_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f44336;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    text-align: center;
-                    font-size: 14px;
-                    margin: 4px 2px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #d32f2f;
-                }
-                QPushButton:pressed {
-                    background-color: #b71c1c;
-                }
-            """)
-        else:
+        """クリップボード監視の開始/停止を切り替え"""
+        if self.clipboard_toggle_btn.isChecked():
             self.clipboard_timer.start(1000)  # 1秒ごとにチェック
-            self.clipboard_toggle_btn.setText("クリップボード監視: オン")
-            self.clipboard_toggle_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #4CAF50;
-                    color: white;
-                    border: none;
-                    padding: 8px 16px;
-                    text-align: center;
-                    font-size: 14px;
-                    margin: 4px 2px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #45a049;
-                }
-                QPushButton:pressed {
-                    background-color: #3e8e41;
-                }
-            """)
+            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を開始しました。\n他のアプリからコピーした情報を自動で取得します。")
+        else:
+            self.clipboard_timer.stop()
+            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を停止しました。")
     
     def check_clipboard(self):
         """クリップボードの内容をチェック"""
@@ -309,45 +273,42 @@ class MainWindowFunctions:
     
     def analyze_clipboard_content(self, text):
         """クリップボードの内容を解析して適切なフィールドに入力"""
-        # 電話番号（ハイフンあり/なし）
+        # 電話番号（ハイフンあり/なし）のパターン
         phone_pattern = re.compile(r'(\d{2,4}[-\s]?\d{2,4}[-\s]?\d{4})')
-        phone_match = phone_pattern.search(text)
+        phone_matches = phone_pattern.finditer(text)
         
-        # 郵便番号（ハイフンあり/なし）
+        # 郵便番号（ハイフンあり/なし）のパターン
         postal_pattern = re.compile(r'(\d{3}[-\s]?\d{4})')
         postal_match = postal_pattern.search(text)
         
-        if phone_match:
-            phone_number = phone_match.group(1)
-            # 携帯電話番号かどうかを判定
-            if phone_number.startswith('0') and (
-                phone_number.startswith('090') or 
-                phone_number.startswith('080') or 
-                phone_number.startswith('070') or
-                phone_number.startswith('0[9]') or 
-                phone_number.startswith('0[8]') or 
-                phone_number.startswith('0[7]')
-            ):
+        # 電話番号の処理
+        for match in phone_matches:
+            phone_number = match.group(1)
+            # 携帯電話番号の判定（070, 080, 090で始まる番号）
+            if phone_number.replace('-', '').replace(' ', '').startswith(('070', '080', '090')):
                 self.mobile_input.setText(phone_number)
+                self.mobile_type_combo.setCurrentText("入力")
             else:
                 self.list_phone_input.setText(phone_number)
-            return
-            
+        
+        # 郵便番号の処理
+        if postal_match:
+            postal_code = postal_match.group(1)
+            self.postal_code_input.setText(postal_code)
+            self.list_postal_code_input.setText(postal_code)
+        
         # 住所らしき文字列（漢字とカタカナが含まれる長い文字列）
         if len(text) > 10 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            self.address_input.setText(text)  # 通常の住所フィールド
-            self.list_address_input.setText(text)  # リスト住所フィールド
-            return
-            
+            self.address_input.setText(text)
+            self.list_address_input.setText(text)
+        
         # カタカナのみの文字列（フリガナとして扱う）
-        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF for c in text.replace(' ', '')):
-            self.list_furigana_input.setText(text)  # リストフリガナに入力
-            return
-            
+        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF or c.isspace() for c in text):
+            self.list_furigana_input.setText(text)
+        
         # その他の文字列（名前として扱う）
         if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            self.list_name_input.setText(text)  # リスト名に入力
-            return
+            self.list_name_input.setText(text)
     
     def search_service_area(self):
         """提供エリア検索機能"""
