@@ -13,6 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 
 from services.web_driver import create_driver
 from utils.string_utils import normalize_string, calculate_similarity
@@ -30,6 +31,32 @@ def search_service_area(postal_code, address):
         dict: 検索結果を含む辞書
     """
     logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
+    
+    # 住所を分割（都道府県、市区町村、町名、番地・号）
+    address = address.replace('　', ' ')  # 全角スペースを半角に統一
+    
+    # 番地・号を抽出するための正規表現
+    number_pattern = r'([0-9０-９]+(?:[-ー－]+[0-9０-９]+)*)'
+    match = re.search(number_pattern, address)
+    
+    street_number = None
+    building_number = None
+    base_address = address
+    
+    if match:
+        # 番地・号部分を取得
+        numbers = match.group(1)
+        # 番地部分より前を基本住所とする
+        base_address = address[:match.start()].strip()
+        
+        # 番地と号を分離
+        number_parts = numbers.replace('－', '-').replace('ー', '-').split('-')
+        if len(number_parts) >= 1:
+            street_number = number_parts[0]
+            if len(number_parts) >= 2:
+                building_number = number_parts[1]
+    
+    logging.info(f"住所分割結果 - 基本住所: {base_address}, 番地: {street_number}, 号: {building_number}")
     
     # 郵便番号のフォーマットチェック
     postal_code_clean = postal_code.replace("-", "")
@@ -202,43 +229,133 @@ def search_service_area(postal_code, address):
             
             # 5. 番地入力画面が表示された場合は、最初の候補を選択
             try:
-                # 番地入力ダイアログが表示されるまで待機（ID指定）
-                banchi_dialog = WebDriverWait(driver, 5).until(
+                # 番地入力ダイアログが表示されるまで待機
+                banchi_dialog = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.ID, "DIALOG_ID01"))
                 )
                 logging.info("番地入力ダイアログが表示されました")
                 
-                # 番地入力フィールドを探す
-                banchi_field = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='DIALOG_ID01']//input"))
-                )
-                banchi_field.clear()
-                banchi_field.send_keys("1")  # 仮の番地として1を入力
-                logging.info("番地「1」を入力しました")
+                # 番地入力フィールドの検出を試みる（複数のセレクタを使用）
+                selectors = [
+                    "//*[@id='DIALOG_ID01']/div/div[2]/div[1]/input",
+                    "//input[contains(@class, 'banchi-input')]",
+                    "//*[@id='DIALOG_ID01']//input",
+                    "//input[@type='text' and ancestor::*[@id='DIALOG_ID01']]"
+                ]
                 
-                # 少し待機して候補リストが表示されるのを待つ
-                time.sleep(1)
+                banchi_field = None
+                for selector in selectors:
+                    try:
+                        banchi_field = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, selector))
+                        )
+                        logging.info(f"番地入力フィールドが見つかりました: {selector}")
+                        break
+                    except:
+                        continue
+                
+                if not banchi_field:
+                    raise NoSuchElementException("番地入力フィールドが見つかりませんでした")
+                
+                # 番地入力フィールドをクリアして入力
+                banchi_field.clear()
+                input_street_number = street_number if street_number else "1"
+                banchi_field.send_keys(input_street_number)
+                logging.info(f"番地「{input_street_number}」を入力しました")
                 
                 # 候補リストが表示されるのを待つ
-                candidate_list = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[@id='scrollBoxDIALOG_ID01']/ul/li[1]/a"))
-                )
+                time.sleep(3)  # 待機時間を延長
                 
-                # JavaScriptでクリックを実行（より安定した方法）
-                driver.execute_script("arguments[0].click();", candidate_list)
-                logging.info(f"番地候補を選択しました: {candidate_list.text}")
+                try:
+                    # 候補リストの取得を試みる
+                    candidate_list = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, "//*[@id='scrollBoxDIALOG_ID01']/ul"))
+                    )
+                    
+                    # 候補の取得
+                    candidates = candidate_list.find_elements(By.TAG_NAME, "li")
+                    if candidates:
+                        first_candidate = candidates[0].find_element(By.TAG_NAME, "a")
+                        first_candidate_text = first_candidate.text.strip()
+                        normalized_input = normalize_string(input_street_number)
+                        normalized_first_candidate = normalize_string(first_candidate_text)
+                        
+                        logging.info(f"入力した番地: '{input_street_number}' (正規化: '{normalized_input}')")
+                        logging.info(f"最初の候補: '{first_candidate_text}' (正規化: '{normalized_first_candidate}')")
+                        
+                        # JavaScriptでクリックを実行
+                        driver.execute_script("arguments[0].click();", first_candidate)
+                        logging.info(f"番地候補を選択しました: {first_candidate_text}")
+                        
+                        # 選択後の待機を追加
+                        time.sleep(2)
+                except Exception as e:
+                    logging.warning(f"番地候補の選択に失敗: {str(e)}")
+                    # 候補が見つからない場合は、Enterキーを送信
+                    banchi_field.send_keys(Keys.RETURN)
+                    logging.info("Enterキーを送信しました")
                 
-                # 番地選択後の読み込みを待つ
-                WebDriverWait(driver, 5).until(
-                    EC.invisibility_of_element_located((By.ID, "DIALOG_ID01"))
-                )
-            except TimeoutException:
-                # 番地入力画面が表示されない場合はスキップ
-                logging.info("番地入力画面はスキップされました")
+                # 番地選択後のダイアログが閉じるのを待つ
+                try:
+                    WebDriverWait(driver, 15).until(
+                        EC.invisibility_of_element_located((By.ID, "DIALOG_ID01"))
+                    )
+                    logging.info("番地入力ダイアログが閉じられました")
+                except TimeoutException:
+                    logging.warning("番地入力ダイアログが閉じられませんでした")
+                
+                # 最終検索ボタンの検出を改善
+                try:
+                    # 複数のセレクタを試行
+                    button_selectors = [
+                        "//*[@id='id_tak_bt_nx']",
+                        "//button[contains(@class, 'next')]",
+                        "//button[contains(text(), '次へ')]",
+                        "//*[contains(@class, 'next-button')]"
+                    ]
+                    
+                    final_search_button = None
+                    for selector in button_selectors:
+                        try:
+                            final_search_button = WebDriverWait(driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, selector))
+                            )
+                            logging.info(f"検索ボタンが見つかりました: {selector}")
+                            break
+                        except:
+                            continue
+                    
+                    if final_search_button:
+                        # ボタンの状態をログ出力
+                        logging.info(f"検索ボタンの状態 - 表示: {final_search_button.is_displayed()}, 有効: {final_search_button.is_enabled()}")
+                        
+                        # JavaScriptでスクロール
+                        driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
+                        time.sleep(1)
+                        
+                        # JavaScriptでクリック
+                        driver.execute_script("arguments[0].click();", final_search_button)
+                        logging.info("JavaScriptで最終検索ボタンをクリックしました")
+                    else:
+                        raise NoSuchElementException("検索ボタンが見つかりませんでした")
+                            
+                except Exception as e:
+                    logging.error(f"最終検索ボタンの操作に失敗: {str(e)}")
+                    driver.save_screenshot("debug_final_search_error.png")
+                    logging.info("エラー時のスクリーンショットを保存しました")
+                    raise
+            
+            except TimeoutException as e:
+                logging.error(f"番地入力処理でタイムアウトが発生しました: {str(e)}")
+                driver.save_screenshot("debug_banchi_timeout.png")
+                logging.info("タイムアウト時のスクリーンショットを保存しました")
+                raise
+            
             except Exception as e:
                 logging.error(f"番地入力処理中にエラーが発生しました: {str(e)}")
-                # エラーが発生しても処理を継続
-                pass
+                driver.save_screenshot("debug_banchi_error.png")
+                logging.info("エラー発生時のスクリーンショットを保存しました")
+                raise
             
             # 6. 号入力画面が表示された場合は、最初の候補を選択
             try:
@@ -248,37 +365,46 @@ def search_service_area(postal_code, address):
                 )
                 logging.info("号入力ダイアログが表示されました")
                 
-                # 最初の候補を探して選択
-                gou_candidates = gou_dialog.find_elements(By.XPATH, ".//div/div[2]/div")
+                # 号入力フィールドを探す
+                gou_field = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[@id='DIALOG_ID02']//input"))
+                )
+                gou_field.clear()
                 
-                if gou_candidates:
-                    first_gou = gou_candidates[0]
-                    WebDriverWait(driver, 5).until(EC.element_to_be_clickable(first_gou))
-                    first_gou.click()
-                    logging.info(f"号候補を選択しました: {first_gou.text}")
-                    
-                    # 号選択後の読み込みを待つ
-                    WebDriverWait(driver, 5).until(
-                        EC.invisibility_of_element_located((By.ID, "DIALOG_ID02"))
+                # 抽出した号を使用（ない場合は1を使用）
+                input_building_number = building_number if building_number else "1"
+                gou_field.send_keys(input_building_number)
+                logging.info(f"号「{input_building_number}」を入力しました")
+                
+                time.sleep(2)
+                
+                try:
+                    # 候補リストが表示されるのを待つ
+                    gou_candidate = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//*[@id='scrollBoxDIALOG_ID02']/ul/li[1]/a"))
                     )
+                    
+                    # JavaScriptでクリックを実行
+                    driver.execute_script("arguments[0].click();", gou_candidate)
+                    logging.info(f"号候補を選択しました: {gou_candidate.text}")
+                except TimeoutException:
+                    # 候補が見つからない場合は、Enterキーを送信
+                    gou_field.send_keys(Keys.RETURN)
+                    logging.info("号候補が見つからないため、Enterキーを送信しました")
+                
+                # 号選択後の読み込みを待つ
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.ID, "DIALOG_ID02"))
+                )
             except TimeoutException:
                 # 号入力画面が表示されない場合はスキップ
                 logging.info("号入力画面はスキップされました")
-            
-            # 7. 検索ボタンを押す
-            try:
-                final_search_button = WebDriverWait(driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[@id='id_tak_bt_nx']"))
-                )
-                final_search_button.click()
-                logging.info("最終検索ボタンをクリックしました")
             except Exception as e:
-                logging.error(f"最終検索ボタンが見つかりませんでした: {str(e)}")
-                # ページのHTMLを出力してデバッグ
-                logging.info(f"ページのHTML: {driver.page_source[:500]}...")
-                raise
+                logging.error(f"号入力処理中にエラーが発生しました: {str(e)}")
+                # エラーが発生しても処理を継続
+                pass
             
-            # 結果が表示されるのを待つ
+            # 7. 結果が表示されるのを待つ
             try:
                 WebDriverWait(driver, 15).until(
                     EC.presence_of_element_located((By.XPATH, "//*[@id='nextForm']/div/div[2]/div/picture/img"))
