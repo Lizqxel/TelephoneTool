@@ -439,6 +439,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
+        self.area_search_btn.clicked.connect(self.search_service_area)
         
         # 設定ボタンのシグナル接続
         self.settings_btn.clicked.connect(self.show_settings)

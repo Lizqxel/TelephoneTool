@@ -1,0 +1,170 @@
+2025-03-11 11:04:55,597 - INFO - 郵便番号 754-1277、住所 山口県山口市阿知須3499 の処理を開始します
+2025-03-11 11:04:55,597 - INFO - ====== WebDriver manager ======
+2025-03-11 11:04:58,104 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 11:04:58,187 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 11:04:58,261 - INFO - Driver [C:\Users\owner\.wdm\drivers\chromedriver\win64\134.0.6998.88\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 11:05:08,618 - INFO - ページが読み込まれました
+2025-03-11 11:05:08,709 - INFO - 郵便番号 7541277 を入力しました
+2025-03-11 11:05:08,880 - INFO - 検索ボタンをクリックしました
+2025-03-11 11:05:09,440 - INFO - 住所選択モーダルが表示されました
+2025-03-11 11:05:10,569 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 11:05:10,587 - INFO - 方法1: 2 件の候補が見つかりました
+2025-03-11 11:05:10,649 - INFO - 有効な候補: 1 件
+2025-03-11 11:05:10,662 - INFO - 候補 1: '山口県 山口市 阿知須
+山口県 山口市 阿知須 青畑
+山口県 山口市 阿知須 赤迫
+山口県 山口市 阿知須 井関
+山口県 山口市 阿知須 岡
+山口県 山口市 阿知須 沖の原
+山口県 山口市 阿知須 北祝
+山口県 山口市 阿知須 きらら浜
+山口県 山口市 阿知須 源河
+山口県 山口市 阿知須 河内
+山口県 山口市 阿知須 小山
+山口県 山口市 阿知須 仙在
+山口県 山口市 阿知須 杖川
+山口県 山口市 阿知須 寺河内
+山口県 山口市 阿知須 中村
+山口県 山口市 阿知須 西祝
+山口県 山口市 阿知須 西条
+山口県 山口市 阿知須 二の宮
+山口県 山口市 阿知須 野口
+山口県 山口市 阿知須 浜表
+山口県 山口市 阿知須 浜
+山口県 山口市 阿知須 引野
+山口県 山口市 阿知須 前山
+山口県 山口市 阿知須 南祝
+山口県 山口市 阿知須 向井関
+山口県 山口市 阿知須 岩倉
+山口県 山口市 阿知須 小古郷
+山口県 山口市 阿知須 砂郷
+山口県 山口市 阿知須 旦
+山口県 山口市 阿知須 東条
+山口県 山口市 阿知須 飛石
+山口県 山口市 阿知須 縄田
+山口県 山口市 阿知須 焼野'
+2025-03-11 11:05:10,690 - INFO - 最適な住所候補: '山口県 山口市 阿知須
+山口県 山口市 阿知須 青畑
+山口県 山口市 阿知須 赤迫
+山口県 山口市 阿知須 井関
+山口県 山口市 阿知須 岡
+山口県 山口市 阿知須 沖の原
+山口県 山口市 阿知須 北祝
+山口県 山口市 阿知須 きらら浜
+山口県 山口市 阿知須 源河
+山口県 山口市 阿知須 河内
+山口県 山口市 阿知須 小山
+山口県 山口市 阿知須 仙在
+山口県 山口市 阿知須 杖川
+山口県 山口市 阿知須 寺河内
+山口県 山口市 阿知須 中村
+山口県 山口市 阿知須 西祝
+山口県 山口市 阿知須 西条
+山口県 山口市 阿知須 二の宮
+山口県 山口市 阿知須 野口
+山口県 山口市 阿知須 浜表
+山口県 山口市 阿知須 浜
+山口県 山口市 阿知須 引野
+山口県 山口市 阿知須 前山
+山口県 山口市 阿知須 南祝
+山口県 山口市 阿知須 向井関
+山口県 山口市 阿知須 岩倉
+山口県 山口市 阿知須 小古郷
+山口県 山口市 阿知須 砂郷
+山口県 山口市 阿知須 旦
+山口県 山口市 阿知須 東条
+山口県 山口市 阿知須 飛石
+山口県 山口市 阿知須 縄田
+山口県 山口市 阿知須 焼野'
+2025-03-11 11:05:10,819 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 11:05:10,829 - INFO - 選択された住所: 
+2025-03-11 11:05:10,847 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 11:05:11,374 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 11:05:11,457 - INFO - 番地「1」を入力しました
+2025-03-11 11:05:12,579 - ERROR - 番地入力処理中にエラーが発生しました: Message: stale element reference: stale element not found in the current frame
+  (Session info: chrome=134.0.6998.36); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#stale-element-reference-exception
+Stacktrace:
+	GetHandleVerifier [0x005CB5A3+24387]
+	(No symbol) [0x00555904]
+	(No symbol) [0x00430753]
+	(No symbol) [0x00437137]
+	(No symbol) [0x004393AA]
+	(No symbol) [0x00439427]
+	(No symbol) [0x004738AE]
+	(No symbol) [0x0049D84C]
+	(No symbol) [0x0046E164]
+	(No symbol) [0x0049DAC4]
+	(No symbol) [0x004BF138]
+	(No symbol) [0x0049D646]
+	(No symbol) [0x0046C59F]
+	(No symbol) [0x0046D8E4]
+	GetHandleVerifier [0x008CD883+3179043]
+	GetHandleVerifier [0x008E6CF9+3282585]
+	GetHandleVerifier [0x008E167C+3260444]
+	GetHandleVerifier [0x00664330+650448]
+	(No symbol) [0x0055ED0D]
+	(No symbol) [0x0055BAF8]
+	(No symbol) [0x0055BC99]
+	(No symbol) [0x0054E530]
+	BaseThreadInitThunk [0x76DC5D49+25]
+	RtlInitializeExceptionChain [0x777CCDEB+107]
+	RtlGetAppContainerNamedObjectPath [0x777CCD71+561]
+
+2025-03-11 11:05:13,099 - INFO - 号入力ダイアログが表示されました
+2025-03-11 11:05:13,169 - INFO - 号候補を選択しました: ２
+該当する住所がない
+2025-03-11 11:05:18,299 - INFO - 号入力画面はスキップされました
+2025-03-11 11:05:33,549 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x005CB5A3+24387]
+	(No symbol) [0x00555904]
+	(No symbol) [0x00430753]
+	(No symbol) [0x00478BA9]
+	(No symbol) [0x00478EFB]
+	(No symbol) [0x004C19C2]
+	(No symbol) [0x0049D894]
+	(No symbol) [0x004BF138]
+	(No symbol) [0x0049D646]
+	(No symbol) [0x0046C59F]
+	(No symbol) [0x0046D8E4]
+	GetHandleVerifier [0x008CD883+3179043]
+	GetHandleVerifier [0x008E6CF9+3282585]
+	GetHandleVerifier [0x008E167C+3260444]
+	GetHandleVerifier [0x00664330+650448]
+	(No symbol) [0x0055ED0D]
+	(No symbol) [0x0055BAF8]
+	(No symbol) [0x0055BC99]
+	(No symbol) [0x0054E530]
+	BaseThreadInitThunk [0x76DC5D49+25]
+	RtlInitializeExceptionChain [0x777CCDEB+107]
+	RtlGetAppContainerNamedObjectPath [0x777CCD71+561]
+
+2025-03-11 11:05:33,555 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D6cee9990-9271-afc3-b9f2-e98c35551b81%26__kzn%3Db9948c3f9287.1.4%26__kzt%3D1741658700343%26_ga%3D2.10487...
+2025-03-11 11:05:33,557 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x005CB5A3+24387]
+	(No symbol) [0x00555904]
+	(No symbol) [0x00430753]
+	(No symbol) [0x00478BA9]
+	(No symbol) [0x00478EFB]
+	(No symbol) [0x004C19C2]
+	(No symbol) [0x0049D894]
+	(No symbol) [0x004BF138]
+	(No symbol) [0x0049D646]
+	(No symbol) [0x0046C59F]
+	(No symbol) [0x0046D8E4]
+	GetHandleVerifier [0x008CD883+3179043]
+	GetHandleVerifier [0x008E6CF9+3282585]
+	GetHandleVerifier [0x008E167C+3260444]
+	GetHandleVerifier [0x00664330+650448]
+	(No symbol) [0x0055ED0D]
+	(No symbol) [0x0055BAF8]
+	(No symbol) [0x0055BC99]
+	(No symbol) [0x0054E530]
+	BaseThreadInitThunk [0x76DC5D49+25]
+	RtlInitializeExceptionChain [0x777CCDEB+107]
+	RtlGetAppContainerNamedObjectPath [0x777CCD71+561]
+
+2025-03-11 11:05:33,564 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D6cee9990-9271-afc3-b9f2-e98c35551b81%26__kzn%3Db9948c3f9287.1.4%26__kzt%3D1741658700343%26_ga%3D2.10487...

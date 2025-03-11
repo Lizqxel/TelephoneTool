@@ -209,18 +209,23 @@ def search_service_area(postal_code, address):
                 logging.info("番地入力ダイアログが表示されました")
                 
                 # 番地入力フィールドを探す
-                banchi_field = banchi_dialog.find_element(By.XPATH, ".//div/div[2]/div[1]/input")
+                banchi_field = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[@id='DIALOG_ID01']//input"))
+                )
                 banchi_field.clear()
                 banchi_field.send_keys("1")  # 仮の番地として1を入力
                 logging.info("番地「1」を入力しました")
                 
+                # 少し待機して候補リストが表示されるのを待つ
+                time.sleep(1)
+                
                 # 候補リストが表示されるのを待つ
                 candidate_list = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='scrollBoxDIALOG_ID01']/ul/li[1]/a"))
+                    EC.element_to_be_clickable((By.XPATH, "//*[@id='scrollBoxDIALOG_ID01']/ul/li[1]/a"))
                 )
                 
-                # 最初の候補をクリック
-                candidate_list.click()
+                # JavaScriptでクリックを実行（より安定した方法）
+                driver.execute_script("arguments[0].click();", candidate_list)
                 logging.info(f"番地候補を選択しました: {candidate_list.text}")
                 
                 # 番地選択後の読み込みを待つ
@@ -230,6 +235,10 @@ def search_service_area(postal_code, address):
             except TimeoutException:
                 # 番地入力画面が表示されない場合はスキップ
                 logging.info("番地入力画面はスキップされました")
+            except Exception as e:
+                logging.error(f"番地入力処理中にエラーが発生しました: {str(e)}")
+                # エラーが発生しても処理を継続
+                pass
             
             # 6. 号入力画面が表示された場合は、最初の候補を選択
             try:
