@@ -26,8 +26,9 @@ def create_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--headless")  # ヘッドレスモードを有効化
+    # options.add_argument("--headless")  # デバッグ用にヘッドレスモードを無効化
     options.add_argument("--window-size=1920,1080")  # ウィンドウサイズを設定
+    options.add_argument("--start-maximized")  # ウィンドウを最大化
     options.add_argument("--disable-extensions")  # 拡張機能を無効化
     options.add_argument("--disable-popup-blocking")  # ポップアップブロックを無効化
     options.add_argument("--disable-blink-features=AutomationControlled")  # 自動化検出を回避
@@ -40,6 +41,9 @@ def create_driver():
         # ChromeDriverManagerを使用して自動的にドライバーをダウンロード
         service = ChromeService(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
+        
+        # ウィンドウを最大化（デバッグ用）
+        driver.maximize_window()
         
         # ページの読み込みタイムアウトを設定
         driver.set_page_load_timeout(30)
