@@ -52,7 +52,18 @@ class SettingsDialog(QDialog):
 提供判定：{judgment}
 
 料金認識：{fee}
-ネット利用：{net_usage}"""
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：なし
+電話機：プッシュ
+禁止回線：なし
+ND：
+
+備考：{remarks}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+※リスト名との関係性："""
         
         # レイアウトの設定
         layout = QVBoxLayout(self)
