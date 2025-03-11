@@ -9,11 +9,12 @@ import datetime
 import logging
 import json
 import os
+import re
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication)
-from PySide6.QtCore import Qt, QTimer
+                              QApplication, QToolTip)
+from PySide6.QtCore import Qt, QTimer, QPoint
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap
 
 from ui.settings_dialog import SettingsDialog
@@ -21,6 +22,7 @@ from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from ui.main_window_functions import MainWindowFunctions
+from utils.string_utils import validate_name, validate_furigana
 
 
 class MainWindow(QMainWindow, MainWindowFunctions):
@@ -451,9 +453,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.postal_code_input.textChanged.connect(self.convert_to_half_width)
         self.list_postal_code_input.textChanged.connect(self.format_postal_code)
         self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
-        self.address_input.textChanged.connect(self.convert_to_half_width)
-        self.list_address_input.textChanged.connect(self.convert_to_half_width)
+        self.address_input.textChanged.connect(self.convert_hyphen_to_half_width)
+        self.list_address_input.textChanged.connect(self.convert_hyphen_to_half_width_list)
         self.era_combo.currentTextChanged.connect(self.update_year_combo)
+        
+        # 名前とフリガナのバリデーション用のシグナル
+        self.contractor_input.textChanged.connect(self.validate_contractor_name)
+        self.furigana_input.textChanged.connect(self.validate_furigana_input)
+        self.list_name_input.textChanged.connect(self.validate_list_name)
+        self.list_furigana_input.textChanged.connect(self.validate_list_furigana)
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
@@ -499,4 +507,177 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.latest_screenshot_path = screenshot_path
             self.screenshot_btn.setEnabled(True)
         else:
-            self.screenshot_btn.setEnabled(False) 
+            self.screenshot_btn.setEnabled(False)
+
+    def convert_hyphen_to_half_width(self, text=None):
+        """住所の数字とハイフンを半角に変換"""
+        if text is None:
+            text = self.address_input.text()
+        
+        # 全角数字と全角ハイフンの変換マップ
+        conversion_map = str.maketrans({
+            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+            '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+            '－': '-', 'ー': '-', '―': '-', '‐': '-', '−': '-'
+        })
+        
+        # 変換を実行
+        half_width_text = text.translate(conversion_map)
+        
+        # テキストが変更された場合のみ更新
+        if text != half_width_text:
+            cursor_pos = self.address_input.cursorPosition()
+            self.address_input.setText(half_width_text)
+            self.address_input.setCursorPosition(cursor_pos)
+        
+        return half_width_text
+
+    def convert_hyphen_to_half_width_list(self, text=None):
+        """リスト住所の数字とハイフンを半角に変換"""
+        if text is None:
+            text = self.list_address_input.text()
+        
+        # 全角数字と全角ハイフンの変換マップ
+        conversion_map = str.maketrans({
+            '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+            '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+            '－': '-', 'ー': '-', '―': '-', '‐': '-', '−': '-'
+        })
+        
+        # 変換を実行
+        half_width_text = text.translate(conversion_map)
+        
+        # テキストが変更された場合のみ更新
+        if text != half_width_text:
+            cursor_pos = self.list_address_input.cursorPosition()
+            self.list_address_input.setText(half_width_text)
+            self.list_address_input.setCursorPosition(cursor_pos)
+        
+        return half_width_text
+
+    def validate_contractor_name(self):
+        """契約者名のバリデーション"""
+        text = self.contractor_input.text()
+        if not validate_name(text):
+            self.contractor_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFD7D7;
+                    border: 2px solid #FF8080;
+                }
+            """)
+            QToolTip.showText(
+                self.contractor_input.mapToGlobal(QPoint(0, 0)),
+                "名前に数字を含めることはできません",
+                self.contractor_input,
+            )
+        else:
+            self.contractor_input.setStyleSheet("")
+            QToolTip.hideText()
+
+    def validate_furigana_input(self):
+        """フリガナのバリデーション"""
+        text = self.furigana_input.text()
+        if not validate_furigana(text):
+            self.furigana_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFD7D7;
+                    border: 2px solid #FF8080;
+                }
+            """)
+            QToolTip.showText(
+                self.furigana_input.mapToGlobal(QPoint(0, 0)),
+                "フリガナに数字や不適切な文字を含めることはできません",
+                self.furigana_input
+            )
+        else:
+            self.furigana_input.setStyleSheet("")
+            QToolTip.hideText()
+
+    def validate_list_name(self):
+        """リスト名のバリデーション"""
+        text = self.list_name_input.text()
+        if not validate_name(text):
+            self.list_name_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFD7D7;
+                    border: 2px solid #FF8080;
+                }
+            """)
+            QToolTip.showText(
+                self.list_name_input.mapToGlobal(QPoint(0, 0)),
+                "名前に数字を含めることはできません",
+                self.list_name_input
+            )
+        else:
+            self.list_name_input.setStyleSheet("")
+            QToolTip.hideText()
+
+    def validate_list_furigana(self):
+        """リストフリガナのバリデーション"""
+        text = self.list_furigana_input.text()
+        if not validate_furigana(text):
+            self.list_furigana_input.setStyleSheet("""
+                QLineEdit {
+                    background-color: #FFD7D7;
+                    border: 2px solid #FF8080;
+                }
+            """)
+            QToolTip.showText(
+                self.list_furigana_input.mapToGlobal(QPoint(0, 0)),
+                "フリガナに数字や不適切な文字を含めることはできません",
+                self.list_furigana_input
+            )
+        else:
+            self.list_furigana_input.setStyleSheet("")
+            QToolTip.hideText()
+
+    def analyze_clipboard_content(self, text):
+        """クリップボードの内容を解析して適切なフィールドに入力"""
+        # 電話番号（ハイフンあり/なし）のパターン
+        phone_pattern = re.compile(r'(\d{2,4}[-\s]?\d{2,4}[-\s]?\d{4})')
+        phone_matches = phone_pattern.finditer(text)
+        
+        # 郵便番号（ハイフンあり/なし）のパターン
+        postal_pattern = re.compile(r'(\d{3}[-\s]?\d{4})')
+        postal_match = postal_pattern.search(text)
+        
+        # 電話番号の処理
+        for match in phone_matches:
+            phone_number = match.group(1)
+            # 携帯電話番号の判定（070, 080, 090で始まる番号）
+            if phone_number.replace('-', '').replace(' ', '').startswith(('070', '080', '090')):
+                self.mobile_input.setText(phone_number)
+                self.mobile_type_combo.setCurrentText("入力")
+            else:
+                self.list_phone_input.setText(phone_number)
+        
+        # 郵便番号の処理
+        if postal_match:
+            postal_code = postal_match.group(1)
+            self.postal_code_input.setText(postal_code)
+            self.list_postal_code_input.setText(postal_code)
+        
+        # 住所らしき文字列（漢字とカタカナが含まれる長い文字列）
+        if len(text) > 10 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
+            self.address_input.setText(text)
+            self.list_address_input.setText(text)
+        
+        # カタカナのみの文字列（フリガナとして扱う）
+        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF or c.isspace() for c in text):
+            self.list_furigana_input.setText(text)
+        
+        # その他の文字列（名前として扱う）
+        if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
+            # 数字が含まれていない場合のみ、名前として処理
+            if validate_name(text):
+                self.list_name_input.setText(text)
+                # フリガナが空の場合は、カタカナ変換を試みる
+                if not self.list_furigana_input.text():
+                    try:
+                        import pykakasi
+                        kakasi = pykakasi.kakasi()
+                        result = kakasi.convert(text)
+                        katakana = ''.join([item['kana'] for item in result])
+                        self.list_furigana_input.setText(katakana)
+                    except:
+                        pass  # カタカナ変換に失敗した場合は何もしない 

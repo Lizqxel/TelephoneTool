@@ -70,4 +70,48 @@ def calculate_similarity(str1, str2):
         if numbers1[0] == numbers2[0]:
             return 0.7
     
-    return 0.0 
+    return 0.0
+
+
+def validate_name(text):
+    """
+    名前が有効かどうかを検証する関数
+    
+    Args:
+        text (str): 検証する名前
+        
+    Returns:
+        bool: 名前が有効な場合はTrue、無効な場合はFalse
+    """
+    if not text:
+        return True  # 空文字列は許可
+        
+    # 数字を含む場合は無効
+    if re.search(r'\d', text):
+        return False
+        
+    return True
+
+
+def validate_furigana(text):
+    """
+    フリガナが有効かどうかを検証する関数
+    
+    Args:
+        text (str): 検証するフリガナ
+        
+    Returns:
+        bool: フリガナが有効な場合はTrue、無効な場合はFalse
+    """
+    if not text:
+        return True  # 空文字列は許可
+        
+    # 数字を含む場合は無効
+    if re.search(r'\d', text):
+        return False
+        
+    # カタカナ、ひらがな、スペース以外の文字を含む場合は無効
+    if re.search(r'[^\u3040-\u309F\u30A0-\u30FF\s]', text):
+        return False
+        
+    return True 
