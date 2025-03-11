@@ -235,114 +235,207 @@ def search_service_area(postal_code, address):
                 )
                 logging.info("番地入力ダイアログが表示されました")
                 
-                # 番地入力フィールドの検出を試みる（複数のセレクタを使用）
-                selectors = [
-                    "//*[@id='DIALOG_ID01']/div/div[2]/div[1]/input",
-                    "//input[contains(@class, 'banchi-input')]",
-                    "//*[@id='DIALOG_ID01']//input",
-                    "//input[@type='text' and ancestor::*[@id='DIALOG_ID01']]"
-                ]
+                # ダイアログのHTML構造を詳細にログ出力
+                dialog_html = banchi_dialog.get_attribute('outerHTML')
+                logging.info(f"番地入力ダイアログのHTML構造:\n{dialog_html}")
                 
-                banchi_field = None
-                for selector in selectors:
-                    try:
-                        banchi_field = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, selector))
-                        )
-                        logging.info(f"番地入力フィールドが見つかりました: {selector}")
-                        break
-                    except:
-                        continue
+                # iframeが存在する可能性があるため、確認
+                iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                if iframes:
+                    logging.info(f"ページ内のiframe数: {len(iframes)}")
+                    for i, iframe in enumerate(iframes):
+                        try:
+                            iframe_id = iframe.get_attribute('id')
+                            iframe_src = iframe.get_attribute('src')
+                            logging.info(f"iframe {i+1}: ID={iframe_id}, src={iframe_src}")
+                            
+                            # iframeの中身を確認
+                            driver.switch_to.frame(iframe)
+                            iframe_content = driver.page_source
+                            logging.info(f"iframe {i+1} の内容:\n{iframe_content[:1000]}...")  # 最初の1000文字のみ表示
+                            driver.switch_to.default_content()
+                        except Exception as e:
+                            logging.warning(f"iframe {i+1} の情報取得中にエラー: {str(e)}")
                 
-                if not banchi_field:
-                    raise NoSuchElementException("番地入力フィールドが見つかりませんでした")
+                # スクリーンショットを撮影（ダイアログ表示直後）
+                driver.save_screenshot("debug_banchi_dialog.png")
+                logging.info("番地入力ダイアログのスクリーンショットを保存しました")
                 
-                # 番地入力フィールドをクリアして入力
-                banchi_field.clear()
-                input_street_number = street_number if street_number else "1"
-                banchi_field.send_keys(input_street_number)
-                logging.info(f"番地「{input_street_number}」を入力しました")
-                
-                # 候補リストが表示されるのを待つ
-                time.sleep(3)  # 待機時間を延長
-                
+                # 番地選択のUIから直接番地を選択
                 try:
-                    # 候補リストの取得を試みる
-                    candidate_list = WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, "//*[@id='scrollBoxDIALOG_ID01']/ul"))
-                    )
-                    
-                    # 候補の取得
-                    candidates = candidate_list.find_elements(By.TAG_NAME, "li")
-                    if candidates:
-                        first_candidate = candidates[0].find_element(By.TAG_NAME, "a")
-                        first_candidate_text = first_candidate.text.strip()
-                        normalized_input = normalize_string(input_street_number)
-                        normalized_first_candidate = normalize_string(first_candidate_text)
-                        
-                        logging.info(f"入力した番地: '{input_street_number}' (正規化: '{normalized_input}')")
-                        logging.info(f"最初の候補: '{first_candidate_text}' (正規化: '{normalized_first_candidate}')")
-                        
-                        # JavaScriptでクリックを実行
-                        driver.execute_script("arguments[0].click();", first_candidate)
-                        logging.info(f"番地候補を選択しました: {first_candidate_text}")
-                        
-                        # 選択後の待機を追加
-                        time.sleep(2)
-                except Exception as e:
-                    logging.warning(f"番地候補の選択に失敗: {str(e)}")
-                    # 候補が見つからない場合は、Enterキーを送信
-                    banchi_field.send_keys(Keys.RETURN)
-                    logging.info("Enterキーを送信しました")
-                
-                # 番地選択後のダイアログが閉じるのを待つ
-                try:
-                    WebDriverWait(driver, 15).until(
-                        EC.invisibility_of_element_located((By.ID, "DIALOG_ID01"))
-                    )
-                    logging.info("番地入力ダイアログが閉じられました")
-                except TimeoutException:
-                    logging.warning("番地入力ダイアログが閉じられませんでした")
-                
-                # 最終検索ボタンの検出を改善
-                try:
-                    # 複数のセレクタを試行
+                    # 番地のボタンを探す（複数のセレクタを試行）
+                    input_street_number = street_number if street_number else "3"
                     button_selectors = [
-                        "//*[@id='id_tak_bt_nx']",
-                        "//button[contains(@class, 'next')]",
-                        "//button[contains(text(), '次へ')]",
-                        "//*[contains(@class, 'next-button')]"
+                        "#DIALOG_ID01 button",
+                        "#DIALOG_ID01 .btn",
+                        "#DIALOG_ID01 [role='button']",
+                        "#DIALOG_ID01 div[onclick]",
+                        "//div[@id='DIALOG_ID01']//div[contains(@class, 'clickable')]",
+                        "//div[@id='DIALOG_ID01']//div[not(contains(@class, 'header')) and not(contains(@class, 'footer'))]",
+                        "//div[@id='scrollBoxDIALOG_ID01']//a",  # 番地候補リンク
+                        "//div[@id='DIALOG_ID01']//div[contains(@class, 'number')]",  # 番地ボタンの可能性がある要素
+                        "//div[@id='DIALOG_ID01']//div[contains(@class, 'banchi')]",  # 番地関連の要素
+                        "//div[@id='DIALOG_ID01']//div[not(ancestor::div[contains(@class, 'header')]) and not(ancestor::div[contains(@class, 'footer')])]"  # ヘッダーとフッター以外の全div
                     ]
                     
-                    final_search_button = None
+                    # ページ全体のHTMLを取得してログ出力
+                    page_html = driver.page_source
+                    logging.info(f"ページのHTML構造:\n{page_html}")
+                    
+                    banchi_buttons = []
                     for selector in button_selectors:
                         try:
-                            final_search_button = WebDriverWait(driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, selector))
-                            )
-                            logging.info(f"検索ボタンが見つかりました: {selector}")
-                            break
-                        except:
-                            continue
+                            if selector.startswith('//'):
+                                elements = driver.find_elements(By.XPATH, selector)
+                            else:
+                                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elements:
+                                banchi_buttons.extend(elements)
+                                logging.info(f"セレクタ '{selector}' で {len(elements)} 個の要素が見つかりました")
+                                
+                                # 各要素の詳細情報をログ出力
+                                for element in elements:
+                                    try:
+                                        element_html = element.get_attribute('outerHTML')
+                                        element_text = element.text.strip()
+                                        element_classes = element.get_attribute('class')
+                                        element_style = element.get_attribute('style')
+                                        element_onclick = element.get_attribute('onclick')
+                                        element_role = element.get_attribute('role')
+                                        
+                                        logging.info(f"""要素の詳細:
+                                        HTML: {element_html}
+                                        テキスト: {element_text}
+                                        クラス: {element_classes}
+                                        スタイル: {element_style}
+                                        onclick: {element_onclick}
+                                        role: {element_role}
+                                        """)
+                                    except Exception as e:
+                                        logging.warning(f"要素の詳細情報取得中にエラー: {str(e)}")
+                        except Exception as e:
+                            logging.warning(f"セレクタ '{selector}' での検索中にエラー: {str(e)}")
                     
-                    if final_search_button:
-                        # ボタンの状態をログ出力
-                        logging.info(f"検索ボタンの状態 - 表示: {final_search_button.is_displayed()}, 有効: {final_search_button.is_enabled()}")
-                        
-                        # JavaScriptでスクロール
-                        driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
-                        time.sleep(1)
-                        
-                        # JavaScriptでクリック
-                        driver.execute_script("arguments[0].click();", final_search_button)
-                        logging.info("JavaScriptで最終検索ボタンをクリックしました")
-                    else:
-                        raise NoSuchElementException("検索ボタンが見つかりませんでした")
+                    # 重複を除去
+                    banchi_buttons = list(set(banchi_buttons))
+                    
+                    # 各ボタンの詳細情報をログ出力
+                    for button in banchi_buttons:
+                        try:
+                            text = button.text.strip()
+                            html = button.get_attribute('outerHTML')
+                            classes = button.get_attribute('class')
+                            is_displayed = button.is_displayed()
+                            is_enabled = button.is_enabled()
                             
+                            logging.info(f"""番地ボタン詳細:
+                            テキスト: '{text}'
+                            クラス: {classes}
+                            表示状態: {is_displayed}
+                            有効状態: {is_enabled}
+                            HTML: {html}
+                            """)
+                        except Exception as e:
+                            logging.warning(f"ボタン情報取得中にエラー: {str(e)}")
+                    
+                    # 入力したい番地と一致するボタンを探す
+                    best_match_button = None
+                    highest_similarity = 0
+                    
+                    for button in banchi_buttons:
+                        try:
+                            if not button.is_displayed() or not button.is_enabled():
+                                continue
+                                
+                            button_text = button.text.strip()
+                            if not button_text:
+                                # テキストが空の場合、div内のテキストを探す
+                                button_text = button.get_attribute('textContent').strip()
+                            
+                            if not button_text:
+                                continue
+                                
+                            similarity = calculate_similarity(
+                                normalize_string(input_street_number),
+                                normalize_string(button_text)
+                            )
+                            
+                            logging.info(f"番地ボタン '{button_text}' の類似度: {similarity}")
+                            
+                            if similarity > highest_similarity:
+                                highest_similarity = similarity
+                                best_match_button = button
+                        except Exception as e:
+                            logging.warning(f"ボタン類似度計算中にエラー: {str(e)}")
+                    
+                    if best_match_button:
+                        # ボタンが見つかった場合、クリックを試みる
+                        button_text = best_match_button.text.strip()
+                        logging.info(f"番地ボタン '{button_text}' を選択します")
+                        
+                        try:
+                            # スクロールしてボタンを表示
+                            driver.execute_script("arguments[0].scrollIntoView(true);", best_match_button)
+                            time.sleep(1)
+                            
+                            # クリックを試行（複数の方法）
+                            try:
+                                best_match_button.click()
+                                logging.info("通常のクリックで番地を選択しました")
+                            except Exception as click_error:
+                                logging.warning(f"通常のクリックに失敗: {str(click_error)}")
+                                try:
+                                    driver.execute_script("arguments[0].click();", best_match_button)
+                                    logging.info("JavaScriptでクリックしました")
+                                except Exception as js_error:
+                                    logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
+                                    ActionChains(driver).move_to_element(best_match_button).click().perform()
+                                    logging.info("ActionChainsでクリックしました")
+                            
+                            # クリック後の待機
+                            time.sleep(2)
+                            
+                        except Exception as e:
+                            logging.error(f"番地ボタンのクリックに失敗: {str(e)}")
+                            raise
+                    else:
+                        # ボタンが見つからない場合は、入力フィールドを探す（フォールバック）
+                        logging.warning("一致する番地ボタンが見つからないため、入力フィールドを使用します")
+                        
+                        # 番地入力フィールドの検出を試みる（複数のセレクタを使用）
+                        selectors = [
+                            "//input[@type='text' and ancestor::*[@id='DIALOG_ID01']]",
+                            "//*[@id='DIALOG_ID01']//input",
+                            "//input[contains(@class, 'banchi-input')]",
+                            "//*[@id='DIALOG_ID01']/div/div[2]/div[1]/input"
+                        ]
+                        
+                        banchi_field = None
+                        for selector in selectors:
+                            try:
+                                banchi_field = WebDriverWait(driver, 5).until(
+                                    EC.element_to_be_clickable((By.XPATH, selector))
+                                )
+                                logging.info(f"番地入力フィールドが見つかりました: {selector}")
+                                break
+                            except:
+                                continue
+                        
+                        if banchi_field:
+                            # 番地入力フィールドをクリアして入力
+                            banchi_field.clear()
+                            banchi_field.send_keys(input_street_number)
+                            logging.info(f"番地「{input_street_number}」を入力しました")
+                            time.sleep(1)
+                            banchi_field.send_keys(Keys.RETURN)
+                            logging.info("Enterキーを送信しました")
+                        else:
+                            raise NoSuchElementException("番地入力フィールドが見つかりませんでした")
+                
                 except Exception as e:
-                    logging.error(f"最終検索ボタンの操作に失敗: {str(e)}")
-                    driver.save_screenshot("debug_final_search_error.png")
-                    logging.info("エラー時のスクリーンショットを保存しました")
+                    logging.error(f"番地選択処理中にエラーが発生: {str(e)}")
+                    driver.save_screenshot("debug_banchi_error.png")
+                    logging.info("エラー発生時のスクリーンショットを保存しました")
                     raise
             
             except TimeoutException as e:
@@ -360,87 +453,239 @@ def search_service_area(postal_code, address):
             # 6. 号入力画面が表示された場合は、最初の候補を選択
             try:
                 # 号入力ダイアログが表示されるまで待機（ID指定）
-                gou_dialog = WebDriverWait(driver, 5).until(
+                gou_dialog = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.ID, "DIALOG_ID02"))
                 )
                 logging.info("号入力ダイアログが表示されました")
                 
-                # 号入力フィールドを探す
-                gou_field = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='DIALOG_ID02']//input"))
-                )
-                gou_field.clear()
+                # スクリーンショットを撮影（ダイアログ表示直後）
+                driver.save_screenshot("debug_gou_dialog.png")
+                logging.info("号入力ダイアログのスクリーンショットを保存しました")
                 
-                # 抽出した号を使用（ない場合は1を使用）
-                input_building_number = building_number if building_number else "1"
-                gou_field.send_keys(input_building_number)
-                logging.info(f"号「{input_building_number}」を入力しました")
+                # ダイアログのHTML構造を詳細にログ出力
+                dialog_html = gou_dialog.get_attribute('outerHTML')
+                logging.info(f"号入力ダイアログのHTML構造:\n{dialog_html}")
                 
-                time.sleep(2)
-                
+                # 号選択のUIから直接号を選択
                 try:
-                    # 候補リストが表示されるのを待つ
-                    gou_candidate = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//*[@id='scrollBoxDIALOG_ID02']/ul/li[1]/a"))
-                    )
+                    # 号のボタンを探す（複数のセレクタを試行）
+                    input_building_number = building_number if building_number else "7"
+                    button_selectors = [
+                        "#DIALOG_ID02 button",
+                        "#DIALOG_ID02 .btn",
+                        "#DIALOG_ID02 [role='button']",
+                        "#DIALOG_ID02 div[onclick]",
+                        "//div[@id='DIALOG_ID02']//div[contains(@class, 'clickable')]",
+                        "//div[@id='DIALOG_ID02']//div[not(contains(@class, 'header')) and not(contains(@class, 'footer'))]",
+                        "//div[@id='scrollBoxDIALOG_ID02']//a",  # 号候補リンク
+                        "//div[@id='DIALOG_ID02']//div[contains(@class, 'number')]",  # 号ボタンの可能性がある要素
+                        "//div[@id='DIALOG_ID02']//div[contains(@class, 'gou')]",  # 号関連の要素
+                        "//div[@id='DIALOG_ID02']//div[not(ancestor::div[contains(@class, 'header')]) and not(ancestor::div[contains(@class, 'footer')])]"  # ヘッダーとフッター以外の全div
+                    ]
                     
-                    # JavaScriptでクリックを実行
-                    driver.execute_script("arguments[0].click();", gou_candidate)
-                    logging.info(f"号候補を選択しました: {gou_candidate.text}")
-                except TimeoutException:
-                    # 候補が見つからない場合は、Enterキーを送信
-                    gou_field.send_keys(Keys.RETURN)
-                    logging.info("号候補が見つからないため、Enterキーを送信しました")
+                    gou_buttons = []
+                    for selector in button_selectors:
+                        try:
+                            if selector.startswith('//'):
+                                elements = driver.find_elements(By.XPATH, selector)
+                            else:
+                                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elements:
+                                gou_buttons.extend(elements)
+                                logging.info(f"セレクタ '{selector}' で {len(elements)} 個の要素が見つかりました")
+                                
+                                # 各要素の詳細情報をログ出力
+                                for element in elements:
+                                    try:
+                                        element_html = element.get_attribute('outerHTML')
+                                        element_text = element.text.strip()
+                                        element_classes = element.get_attribute('class')
+                                        element_style = element.get_attribute('style')
+                                        element_onclick = element.get_attribute('onclick')
+                                        element_role = element.get_attribute('role')
+                                        
+                                        logging.info(f"""号要素の詳細:
+                                        HTML: {element_html}
+                                        テキスト: {element_text}
+                                        クラス: {element_classes}
+                                        スタイル: {element_style}
+                                        onclick: {element_onclick}
+                                        role: {element_role}
+                                        """)
+                                    except Exception as e:
+                                        logging.warning(f"要素の詳細情報取得中にエラー: {str(e)}")
+                        except Exception as e:
+                            logging.warning(f"セレクタ '{selector}' での検索中にエラー: {str(e)}")
+                    
+                    # 重複を除去
+                    gou_buttons = list(set(gou_buttons))
+                    
+                    # 入力したい号と一致するボタンを探す
+                    best_match_button = None
+                    highest_similarity = 0
+                    
+                    for button in gou_buttons:
+                        try:
+                            if not button.is_displayed() or not button.is_enabled():
+                                continue
+                                
+                            button_text = button.text.strip()
+                            if not button_text:
+                                # テキストが空の場合、div内のテキストを探す
+                                button_text = button.get_attribute('textContent').strip()
+                            
+                            if not button_text:
+                                continue
+                                
+                            similarity = calculate_similarity(
+                                normalize_string(input_building_number),
+                                normalize_string(button_text)
+                            )
+                            
+                            logging.info(f"号ボタン '{button_text}' の類似度: {similarity}")
+                            
+                            if similarity > highest_similarity:
+                                highest_similarity = similarity
+                                best_match_button = button
+                        except Exception as e:
+                            logging.warning(f"ボタン類似度計算中にエラー: {str(e)}")
+                    
+                    if best_match_button:
+                        # ボタンが見つかった場合、クリックを試みる
+                        button_text = best_match_button.text.strip()
+                        logging.info(f"号ボタン '{button_text}' を選択します")
+                        
+                        try:
+                            # スクロールしてボタンを表示
+                            driver.execute_script("arguments[0].scrollIntoView(true);", best_match_button)
+                            time.sleep(1)
+                            
+                            # クリックを試行（複数の方法）
+                            try:
+                                best_match_button.click()
+                                logging.info("通常のクリックで号を選択しました")
+                            except Exception as click_error:
+                                logging.warning(f"通常のクリックに失敗: {str(click_error)}")
+                                try:
+                                    driver.execute_script("arguments[0].click();", best_match_button)
+                                    logging.info("JavaScriptでクリックしました")
+                                except Exception as js_error:
+                                    logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
+                                    ActionChains(driver).move_to_element(best_match_button).click().perform()
+                                    logging.info("ActionChainsでクリックしました")
+                            
+                            # クリック後の待機
+                            time.sleep(2)
+                            
+                        except Exception as e:
+                            logging.error(f"号ボタンのクリックに失敗: {str(e)}")
+                            raise
+                    else:
+                        # ボタンが見つからない場合は、入力フィールドを探す（フォールバック）
+                        logging.warning("一致する号ボタンが見つからないため、入力フィールドを使用します")
+                        
+                        # 号入力フィールドの検出を試みる（複数のセレクタを使用）
+                        selectors = [
+                            "//input[@type='text' and ancestor::*[@id='DIALOG_ID02']]",
+                            "//*[@id='DIALOG_ID02']//input",
+                            "//input[contains(@class, 'gou-input')]",
+                            "//*[@id='DIALOG_ID02']/div/div[2]/div[1]/input"
+                        ]
+                        
+                        gou_field = None
+                        for selector in selectors:
+                            try:
+                                gou_field = WebDriverWait(driver, 5).until(
+                                    EC.element_to_be_clickable((By.XPATH, selector))
+                                )
+                                logging.info(f"号入力フィールドが見つかりました: {selector}")
+                                break
+                            except:
+                                continue
+                        
+                        if gou_field:
+                            # 号入力フィールドをクリアして入力
+                            gou_field.clear()
+                            gou_field.send_keys(input_building_number)
+                            logging.info(f"号「{input_building_number}」を入力しました")
+                            time.sleep(1)
+                            gou_field.send_keys(Keys.RETURN)
+                            logging.info("Enterキーを送信しました")
+                        else:
+                            raise NoSuchElementException("号入力フィールドが見つかりませんでした")
                 
-                # 号選択後の読み込みを待つ
-                WebDriverWait(driver, 5).until(
-                    EC.invisibility_of_element_located((By.ID, "DIALOG_ID02"))
-                )
+                except Exception as e:
+                    logging.error(f"号選択処理中にエラーが発生: {str(e)}")
+                    driver.save_screenshot("debug_gou_error.png")
+                    logging.info("エラー発生時のスクリーンショットを保存しました")
+                    raise
+                    
+                    # 号選択後の読み込みを待つ
+                WebDriverWait(driver, 10).until(
+                        EC.invisibility_of_element_located((By.ID, "DIALOG_ID02"))
+                    )
+                logging.info("号選択ダイアログが閉じられました")
+                
+                # 号選択後の画面状態を確認
+                time.sleep(2)  # 画面の遷移を待つ
+                driver.save_screenshot("debug_after_gou_selection.png")
+                logging.info("号選択後の画面状態をスクリーンショットとして保存しました")
+                
+                # 画面全体のHTMLを取得してログ出力
+                page_html = driver.page_source
+                logging.info(f"号選択後の画面のHTML構造:\n{page_html}")
+                
             except TimeoutException:
                 # 号入力画面が表示されない場合はスキップ
                 logging.info("号入力画面はスキップされました")
             except Exception as e:
                 logging.error(f"号入力処理中にエラーが発生しました: {str(e)}")
+                driver.save_screenshot("debug_gou_error.png")
+                logging.info("エラー発生時のスクリーンショットを保存しました")
                 # エラーが発生しても処理を継続
                 pass
             
-            # 7. 結果が表示されるのを待つ
+            # 7. 結果の判定を改善
             try:
-                WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='nextForm']/div/div[2]/div/picture/img"))
-                )
-                logging.info("結果画像が表示されました")
-            except Exception as e:
-                logging.error(f"結果画像が見つかりませんでした: {str(e)}")
-                # ページのHTMLを出力してデバッグ
-                logging.info(f"ページのHTML: {driver.page_source[:500]}...")
-                # 画像が見つからなくても続行
-            
-            # 8. 結果を確認
-            try:
-                # 画像のsrc属性を確認
-                try:
-                    image_element = driver.find_element(By.XPATH, "//*[@id='nextForm']/div/div[2]/div/picture/img")
-                    image_src = image_element.get_attribute("src")
-                    logging.info(f"結果画像のsrc: {image_src}")
-                    
-                    if "ok" in image_src.lower():
-                        logging.info("提供可能と判定されました（画像src）")
-                        return {"status": "success", "message": "提供可能"}
-                except Exception as e:
-                    logging.info(f"画像要素が見つからないか、src属性の取得に失敗しました: {str(e)}")
+                # 結果判定の前にスクリーンショットを撮影
+                driver.save_screenshot("debug_result_screen.png")
+                logging.info("結果画面のスクリーンショットを保存しました")
                 
                 # ページ全体のテキストを取得して判断
                 page_text = driver.page_source.lower()
                 
-                if "ご利用いただけます" in page_text or "提供可能" in page_text or "ok" in page_text:
-                    logging.info("提供可能と判定されました（ページテキスト）")
+                # 判定条件を詳細に設定
+                availability_indicators = [
+                    "ご利用いただけます",
+                    "提供可能",
+                    "サービスのご利用が可能",
+                    "お申し込みいただけます"
+                ]
+                
+                unavailability_indicators = [
+                    "ご利用いただけません",
+                    "提供不可",
+                    "サービスのご利用ができません",
+                    "お申し込みいただけません"
+                ]
+                
+                # 利用可能性の判定
+                is_available = any(indicator in page_text for indicator in availability_indicators)
+                is_unavailable = any(indicator in page_text for indicator in unavailability_indicators)
+                
+                if is_available and not is_unavailable:
+                    logging.info("提供可能と判定されました（テキストベース）")
                     return {"status": "success", "message": "提供可能"}
-                else:
-                    logging.info("提供不可と判定されました")
+                elif is_unavailable:
+                    logging.info("提供不可と判定されました（テキストベース）")
                     return {"status": "error", "message": "提供不可"}
+                else:
+                    logging.warning("判定結果が不明確です")
+                    return {"status": "error", "message": "判定結果が不明確です"}
+                    
             except Exception as e:
-                logging.error(f"結果の判定に失敗しました: {str(e)}")
+                logging.error(f"結果の判定中にエラー: {str(e)}")
+                driver.save_screenshot("debug_result_error.png")
                 return {"status": "error", "message": f"結果の判定に失敗しました: {str(e)}"}
             
         except TimeoutException as e:
@@ -465,3 +710,87 @@ def search_service_area(postal_code, address):
         # ドライバーを閉じる
         if driver:
             driver.quit() 
+
+        # 9. 最終検索ボタンをクリック
+        try:
+            logging.info("検索結果確認ボタンの検出を開始します")
+            
+            # 検索結果確認ボタンクリック前のスクリーンショット
+            driver.save_screenshot("debug_before_search_confirm.png")
+            logging.info("検索結果確認ボタンクリック前のスクリーンショットを保存しました")
+            
+            # 最終検索ボタンの検出を試みる（複数のセレクタを使用）
+            button_selectors = [
+                "//button[contains(text(), '検索結果を確認')]",
+                "//div[contains(@class, 'search-confirm')]//button",
+                "//*[@id='id_tak_bt_nx']",
+                "//button[contains(@class, 'next')]",
+                "//button[contains(text(), '次へ')]"
+            ]
+            
+            # ボタン検出の待機時間を短縮
+            final_search_button = None
+            for selector in button_selectors:
+                try:
+                    element = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, selector))
+                    )
+                    if element.is_displayed() and element.is_enabled():
+                        final_search_button = element
+                        logging.info(f"検索結果確認ボタンが見つかりました: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not final_search_button:
+                raise NoSuchElementException("検索結果確認ボタンが見つかりませんでした")
+            
+            # ボタンをクリック
+            try:
+                # スクロールしてボタンを表示
+                driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
+                time.sleep(0.5)
+                
+                # クリックを実行
+                final_search_button.click()
+                logging.info("検索結果確認ボタンをクリックしました")
+                
+                # クリック後のスクリーンショット
+                time.sleep(0.5)
+                driver.save_screenshot("debug_after_search_confirm.png")
+                logging.info("検索結果確認ボタンクリック後のスクリーンショットを保存しました")
+                
+            except Exception as e:
+                logging.error(f"検索結果確認ボタンのクリックに失敗: {str(e)}")
+                raise
+            
+            # クリック後の画面遷移を待機（タイムアウトを短縮）
+            try:
+                result_text_selectors = [
+                    "//*[contains(text(), 'ご利用いただけます')]",
+                    "//*[contains(text(), 'ご利用いただけません')]",
+                    "//*[contains(text(), '提供可能')]",
+                    "//*[contains(text(), '提供不可')]"
+                ]
+                
+                # より短いタイムアウトで結果を待機
+                for selector in result_text_selectors:
+                    try:
+                        WebDriverWait(driver, 5).until(
+                            EC.presence_of_element_located((By.XPATH, selector))
+                        )
+                        logging.info(f"結果テキストが見つかりました: {selector}")
+                        break
+                    except:
+                        continue
+            
+            except TimeoutException:
+                logging.warning("結果テキストの待機中にタイムアウトが発生しました")
+                driver.save_screenshot("debug_result_timeout.png")
+                logging.info("タイムアウト時のスクリーンショットを保存しました")
+            
+        except Exception as e:
+            logging.error(f"検索結果確認ボタンの操作に失敗: {str(e)}")
+            driver.save_screenshot("debug_search_confirm_error.png")
+            logging.info("エラー時のスクリーンショットを保存しました")
+            raise 
