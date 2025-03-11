@@ -647,150 +647,152 @@ def search_service_area(postal_code, address):
             
             # 7. 結果の判定を改善
             try:
-                # 結果判定の前にスクリーンショットを撮影
-                driver.save_screenshot("debug_result_screen.png")
-                logging.info("結果画面のスクリーンショットを保存しました")
+                # 検索結果確認ボタンをクリック
+                logging.info("検索結果確認ボタンの検出を開始します")
                 
-                # ページ全体のテキストを取得して判断
-                page_text = driver.page_source.lower()
+                try:
+                    # 指定されたIDを持つボタンを待機して検出
+                    final_search_button = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                    )
+                    
+                    # ボタンが見つかった場合の情報をログ出力
+                    button_html = final_search_button.get_attribute('outerHTML')
+                    logging.info(f"検索結果確認ボタンが見つかりました: {button_html}")
+                    
+                    # スクロールしてボタンを表示
+                    driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
+                    time.sleep(1)
+                    
+                    # ボタンをクリック（複数の方法を試行）
+                    try:
+                        final_search_button.click()
+                        logging.info("通常のクリックで検索結果確認ボタンをクリックしました")
+                    except Exception as click_error:
+                        logging.warning(f"通常のクリックに失敗: {str(click_error)}")
+                        try:
+                            driver.execute_script("arguments[0].click();", final_search_button)
+                            logging.info("JavaScriptでクリックしました")
+                        except Exception as js_error:
+                            logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
+                            ActionChains(driver).move_to_element(final_search_button).click().perform()
+                            logging.info("ActionChainsでクリックしました")
+                    
+                    # クリック後の画面遷移を待機
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    logging.error(f"検索結果確認ボタンの操作に失敗: {str(e)}")
+                    driver.save_screenshot("debug_search_confirm_error.png")
+                    raise
                 
-                # 判定条件を詳細に設定
-                availability_indicators = [
-                    "ご利用いただけます",
-                    "提供可能",
-                    "サービスのご利用が可能",
-                    "お申し込みいただけます"
-                ]
-                
-                unavailability_indicators = [
-                    "ご利用いただけません",
-                    "提供不可",
-                    "サービスのご利用ができません",
-                    "お申し込みいただけません"
-                ]
-                
-                # 利用可能性の判定
-                is_available = any(indicator in page_text for indicator in availability_indicators)
-                is_unavailable = any(indicator in page_text for indicator in unavailability_indicators)
-                
-                if is_available and not is_unavailable:
-                    logging.info("提供可能と判定されました（テキストベース）")
-                    return {"status": "success", "message": "提供可能"}
-                elif is_unavailable:
-                    logging.info("提供不可と判定されました（テキストベース）")
-                    return {"status": "error", "message": "提供不可"}
-                else:
-                    logging.warning("判定結果が不明確です")
-                    return {"status": "error", "message": "判定結果が不明確です"}
+                # 提供可否の画像を確認
+                try:
+                    # 提供可能を示す画像の存在を確認
+                    available_image = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((
+                            By.XPATH,
+                            "//img[@src='https://flets.ntt-west.co.jp/resources/form_element/img/img_available_03.png']"
+                        ))
+                    )
+                    
+                    if available_image.is_displayed():
+                        # 提供可能画像確認時のスクリーンショットを保存
+                        driver.save_screenshot("debug_available_confirmation.png")
+                        logging.info("提供可能画像が確認されました - スクリーンショットを保存しました")
+                        # ドライバーを終了してからリターン
+                        if driver:
+                            driver.quit()
+                        return {
+                            "status": "success",
+                            "message": "提供可能",
+                            "details": {
+                                "判定結果": "OK",
+                                "提供エリア": "提供可能エリアです",
+                                "備考": "フレッツ光のサービスがご利用いただけます"
+                            }
+                        }
+                    else:
+                        # 提供不可時のスクリーンショットを保存
+                        driver.save_screenshot("debug_unavailable_confirmation.png")
+                        logging.info("提供不可と判定されました（画像非表示） - スクリーンショットを保存しました")
+                        # ドライバーを終了してからリターン
+                        if driver:
+                            driver.quit()
+                        return {
+                            "status": "error",
+                            "message": "提供不可",
+                            "details": {
+                                "判定結果": "NG",
+                                "提供エリア": "提供対象外エリアです",
+                                "備考": "申し訳ございませんが、フレッツ光のサービスはご利用いただけません"
+                            }
+                        }
+                        
+                except TimeoutException:
+                    # タイムアウト時のスクリーンショットを保存
+                    driver.save_screenshot("debug_timeout_confirmation.png")
+                    logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
+                    # ドライバーを終了してからリターン
+                    if driver:
+                        driver.quit()
+                    return {
+                        "status": "error",
+                        "message": "提供不可",
+                        "details": {
+                            "判定結果": "NG",
+                            "提供エリア": "判定できませんでした",
+                            "備考": "提供可否の確認中にタイムアウトが発生しました"
+                        }
+                    }
+                except Exception as e:
+                    # エラー時のスクリーンショットを保存
+                    driver.save_screenshot("debug_error_confirmation.png")
+                    logging.error(f"提供判定の確認中にエラー: {str(e)}")
+                    # ドライバーを終了してからリターン
+                    if driver:
+                        driver.quit()
+                    return {
+                        "status": "error",
+                        "message": f"提供判定の確認に失敗しました: {str(e)}",
+                        "details": {
+                            "判定結果": "エラー",
+                            "提供エリア": "判定できませんでした",
+                            "備考": f"エラーが発生しました: {str(e)}"
+                        }
+                    }
                     
             except Exception as e:
                 logging.error(f"結果の判定中にエラー: {str(e)}")
                 driver.save_screenshot("debug_result_error.png")
+                if driver:
+                    driver.quit()
                 return {"status": "error", "message": f"結果の判定に失敗しました: {str(e)}"}
             
         except TimeoutException as e:
             logging.error(f"住所候補の表示待ちでタイムアウトしました: {str(e)}")
-            # ページのHTMLを出力してデバッグ
-            logging.info(f"ページのHTML: {driver.page_source[:500]}...")
+            if driver:
+                driver.quit()
             return {"status": "error", "message": "住所候補が見つかりませんでした"}
         
     except TimeoutException as e:
         logging.error(f"タイムアウトが発生しました: {str(e)}")
+        if driver:
+            driver.quit()
         return {"status": "error", "message": f"処理中にタイムアウトが発生しました"}
         
     except NoSuchElementException as e:
         logging.error(f"要素が見つかりませんでした: {str(e)}")
+        if driver:
+            driver.quit()
         return {"status": "error", "message": f"必要な要素が見つかりませんでした"}
         
     except Exception as e:
         logging.error(f"自動化に失敗しました: {str(e)}")
+        if driver:
+            driver.quit()
         return {"status": "error", "message": f"エラーが発生しました: {str(e)}"}
         
     finally:
-        # ドライバーを閉じる
         if driver:
             driver.quit() 
-
-        # 9. 最終検索ボタンをクリック
-        try:
-            logging.info("検索結果確認ボタンの検出を開始します")
-            
-            # 検索結果確認ボタンクリック前のスクリーンショット
-            driver.save_screenshot("debug_before_search_confirm.png")
-            logging.info("検索結果確認ボタンクリック前のスクリーンショットを保存しました")
-            
-            # 最終検索ボタンの検出を試みる（複数のセレクタを使用）
-            button_selectors = [
-                "//button[contains(text(), '検索結果を確認')]",
-                "//div[contains(@class, 'search-confirm')]//button",
-                "//*[@id='id_tak_bt_nx']",
-                "//button[contains(@class, 'next')]",
-                "//button[contains(text(), '次へ')]"
-            ]
-            
-            # ボタン検出の待機時間を短縮
-            final_search_button = None
-            for selector in button_selectors:
-                try:
-                    element = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, selector))
-                    )
-                    if element.is_displayed() and element.is_enabled():
-                        final_search_button = element
-                        logging.info(f"検索結果確認ボタンが見つかりました: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not final_search_button:
-                raise NoSuchElementException("検索結果確認ボタンが見つかりませんでした")
-            
-            # ボタンをクリック
-            try:
-                # スクロールしてボタンを表示
-                driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
-                time.sleep(0.5)
-                
-                # クリックを実行
-                final_search_button.click()
-                logging.info("検索結果確認ボタンをクリックしました")
-                
-                # クリック後のスクリーンショット
-                time.sleep(0.5)
-                driver.save_screenshot("debug_after_search_confirm.png")
-                logging.info("検索結果確認ボタンクリック後のスクリーンショットを保存しました")
-                
-            except Exception as e:
-                logging.error(f"検索結果確認ボタンのクリックに失敗: {str(e)}")
-                raise
-            
-            # クリック後の画面遷移を待機（タイムアウトを短縮）
-            try:
-                result_text_selectors = [
-                    "//*[contains(text(), 'ご利用いただけます')]",
-                    "//*[contains(text(), 'ご利用いただけません')]",
-                    "//*[contains(text(), '提供可能')]",
-                    "//*[contains(text(), '提供不可')]"
-                ]
-                
-                # より短いタイムアウトで結果を待機
-                for selector in result_text_selectors:
-                    try:
-                        WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.XPATH, selector))
-                        )
-                        logging.info(f"結果テキストが見つかりました: {selector}")
-                        break
-                    except:
-                        continue
-            
-            except TimeoutException:
-                logging.warning("結果テキストの待機中にタイムアウトが発生しました")
-                driver.save_screenshot("debug_result_timeout.png")
-                logging.info("タイムアウト時のスクリーンショットを保存しました")
-            
-        except Exception as e:
-            logging.error(f"検索結果確認ボタンの操作に失敗: {str(e)}")
-            driver.save_screenshot("debug_search_confirm_error.png")
-            logging.info("エラー時のスクリーンショットを保存しました")
-            raise 
