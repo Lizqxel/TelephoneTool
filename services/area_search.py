@@ -154,25 +154,6 @@ def search_service_area(postal_code, address):
             logging.info(f"有効な候補: {len(valid_candidates)} 件")
             
             if not valid_candidates:
-                # 候補が見つからない場合は、モーダル内の全要素を取得して調査
-                try:
-                    all_elements = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//*")
-                    logging.info(f"モーダル内の全要素数: {len(all_elements)}")
-                    
-                    # テキストを持つ要素を探す
-                    text_elements = [e for e in all_elements if e.text.strip()]
-                    logging.info(f"テキストを持つ要素数: {len(text_elements)}")
-                    
-                    for i, elem in enumerate(text_elements[:5]):  # 最初の5つだけログ出力
-                        logging.info(f"要素 {i+1}: タグ={elem.tag_name}, テキスト='{elem.text.strip()}'")
-                    
-                    # クリック可能な要素を候補として使用
-                    valid_candidates = [e for e in text_elements if e.is_displayed() and e.is_enabled()]
-                    logging.info(f"クリック可能な要素数: {len(valid_candidates)}")
-                except Exception as e:
-                    logging.warning(f"モーダル内の全要素取得に失敗: {str(e)}")
-            
-            if not valid_candidates:
                 raise NoSuchElementException("有効な住所候補が見つかりませんでした")
             
             # 各候補のテキストをログに出力
@@ -180,20 +161,81 @@ def search_service_area(postal_code, address):
                 candidate_text = candidate.text.strip()
                 logging.info(f"候補 {i+1}: '{candidate_text}'")
             
-            # 4. 住所を選択（一致するもの、なければ近似値）
-            best_candidate = max(
-                valid_candidates,
-                key=lambda c: calculate_similarity(
-                    normalize_string(address),
-                    normalize_string(c.text.strip())
-                ),
-                default=None
-            )
+            # 住所候補が多い場合（スクロール可能な場合）は、検索フィールドで絞り込み
+            try:
+                search_field = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='絞り込みワードを入力']"))
+                )
+                logging.info("住所検索フィールドが見つかりました")
+                
+                # 検索用の住所フォーマットを作成（都道府県、市区町村、町名の間に半角スペースを挿入）
+                search_address = base_address.replace("県", "県 ").replace("市", "市 ").replace("町", "町 ").replace("区", "区 ").strip()
+                logging.info(f"検索用にフォーマットされた住所: {search_address}")
+                
+                # 検索フィールドをクリアして入力
+                search_field.clear()
+                search_field.send_keys(search_address)
+                logging.info(f"検索フィールドに '{search_address}' を入力しました")
+                
+                # 入力後の表示更新を待機（少し長めに）
+                time.sleep(2)
+                
+                # 絞り込み後の候補を取得
+                filtered_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
+                if filtered_candidates:
+                    valid_candidates = filtered_candidates
+                    logging.info(f"絞り込み後の候補数: {len(valid_candidates)}")
+                    
+                    # 絞り込み後の候補をログ出力
+                    for i, candidate in enumerate(valid_candidates[:5]):
+                        logging.info(f"絞り込み後の候補 {i+1}: '{candidate.text.strip()}'")
+                else:
+                    logging.warning("絞り込み後の候補が見つかりませんでした")
+                    # 絞り込みに失敗した場合、元の候補リストを使用
+                    logging.info("元の候補リストを使用します")
+            except Exception as e:
+                logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
             
-            if not best_candidate:
-                raise NoSuchElementException("一致する住所が見つかりませんでした")
+            # 4. 住所を選択（完全一致のみ）
+            best_candidate = None
+            exact_match = None
             
-            logging.info(f"最適な住所候補: '{best_candidate.text.strip()}'")
+            normalized_input_address = normalize_string(base_address)
+            logging.info(f"正規化された入力住所: {normalized_input_address}")
+            
+            # 各候補を個別に処理
+            for candidate in valid_candidates:
+                try:
+                    # 候補のテキストを取得（改行で分割された場合は最初の行のみ使用）
+                    candidate_text = candidate.text.strip().split('\n')[0]
+                    normalized_candidate = normalize_string(candidate_text)
+                    logging.info(f"候補住所の比較: {normalized_candidate}")
+                    
+                    # 完全一致を確認
+                    if normalized_input_address == normalized_candidate:
+                        exact_match = candidate
+                        logging.info(f"完全一致する住所が見つかりました: {candidate_text}")
+                        break
+                except Exception as e:
+                    logging.warning(f"候補の処理中にエラー: {str(e)}")
+                    continue
+            
+            # 完全一致する候補のみを選択
+            if exact_match:
+                best_candidate = exact_match
+                logging.info("完全一致する住所を選択します")
+            else:
+                logging.error(f"完全一致する住所が見つかりませんでした。入力住所: {base_address}")
+                raise ValueError("完全一致する住所が見つかりませんでした")
+            
+            # 選択された住所の確認
+            selected_address = best_candidate.text.strip().split('\n')[0]
+            logging.info(f"最終的に選択された住所: '{selected_address}'")
+            
+            # 選択された住所が期待する住所と完全一致することを確認
+            if normalize_string(selected_address) != normalized_input_address:
+                logging.error(f"選択された住所が期待する住所と一致しません。期待: {base_address}, 実際: {selected_address}")
+                raise ValueError("正しい住所を選択できませんでした")
             
             # クリック可能になるまで待機
             WebDriverWait(driver, 15).until(EC.element_to_be_clickable(best_candidate))
@@ -277,10 +319,6 @@ def search_service_area(postal_code, address):
                         "//div[@id='DIALOG_ID01']//div[contains(@class, 'banchi')]",  # 番地関連の要素
                         "//div[@id='DIALOG_ID01']//div[not(ancestor::div[contains(@class, 'header')]) and not(ancestor::div[contains(@class, 'footer')])]"  # ヘッダーとフッター以外の全div
                     ]
-                    
-                    # ページ全体のHTMLを取得してログ出力
-                    page_html = driver.page_source
-                    logging.info(f"ページのHTML構造:\n{page_html}")
                     
                     banchi_buttons = []
                     for selector in button_selectors:
