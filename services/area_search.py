@@ -8,6 +8,7 @@
 import logging
 import time
 import re
+import os
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -736,7 +737,8 @@ def search_service_area(postal_code, address):
                     
                     if available_image.is_displayed():
                         # 提供可能画像確認時のスクリーンショットを保存
-                        driver.save_screenshot("debug_available_confirmation.png")
+                        screenshot_path = "debug_available_confirmation.png"
+                        driver.save_screenshot(screenshot_path)
                         logging.info("提供可能画像が確認されました - スクリーンショットを保存しました")
                         # ドライバーを終了してからリターン
                         if driver:
@@ -748,11 +750,13 @@ def search_service_area(postal_code, address):
                                 "判定結果": "OK",
                                 "提供エリア": "提供可能エリアです",
                                 "備考": "フレッツ光のサービスがご利用いただけます"
-                            }
+                            },
+                            "screenshot": os.path.abspath(screenshot_path)
                         }
                     else:
                         # 提供不可時のスクリーンショットを保存
-                        driver.save_screenshot("debug_unavailable_confirmation.png")
+                        screenshot_path = "debug_unavailable_confirmation.png"
+                        driver.save_screenshot(screenshot_path)
                         logging.info("提供不可と判定されました（画像非表示） - スクリーンショットを保存しました")
                         # ドライバーを終了してからリターン
                         if driver:
@@ -764,12 +768,14 @@ def search_service_area(postal_code, address):
                                 "判定結果": "NG",
                                 "提供エリア": "提供対象外エリアです",
                                 "備考": "申し訳ございませんが、フレッツ光のサービスはご利用いただけません"
-                            }
+                            },
+                            "screenshot": os.path.abspath(screenshot_path)
                         }
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存
-                    driver.save_screenshot("debug_timeout_confirmation.png")
+                    screenshot_path = "debug_timeout_confirmation.png"
+                    driver.save_screenshot(screenshot_path)
                     logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
                     # ドライバーを終了してからリターン
                     if driver:
@@ -781,11 +787,13 @@ def search_service_area(postal_code, address):
                             "判定結果": "NG",
                             "提供エリア": "判定できませんでした",
                             "備考": "提供可否の確認中にタイムアウトが発生しました"
-                        }
+                        },
+                        "screenshot": os.path.abspath(screenshot_path)
                     }
                 except Exception as e:
                     # エラー時のスクリーンショットを保存
-                    driver.save_screenshot("debug_error_confirmation.png")
+                    screenshot_path = "debug_error_confirmation.png"
+                    driver.save_screenshot(screenshot_path)
                     logging.error(f"提供判定の確認中にエラー: {str(e)}")
                     # ドライバーを終了してからリターン
                     if driver:
@@ -797,39 +805,69 @@ def search_service_area(postal_code, address):
                             "判定結果": "エラー",
                             "提供エリア": "判定できませんでした",
                             "備考": f"エラーが発生しました: {str(e)}"
-                        }
+                        },
+                        "screenshot": os.path.abspath(screenshot_path)
                     }
                     
             except Exception as e:
                 logging.error(f"結果の判定中にエラー: {str(e)}")
-                driver.save_screenshot("debug_result_error.png")
+                screenshot_path = "debug_result_error.png"
+                driver.save_screenshot(screenshot_path)
                 if driver:
                     driver.quit()
-                return {"status": "error", "message": f"結果の判定に失敗しました: {str(e)}"}
+                return {
+                    "status": "error", 
+                    "message": f"結果の判定に失敗しました: {str(e)}",
+                    "screenshot": os.path.abspath(screenshot_path)
+                }
             
         except TimeoutException as e:
             logging.error(f"住所候補の表示待ちでタイムアウトしました: {str(e)}")
+            screenshot_path = "debug_address_timeout.png"
+            driver.save_screenshot(screenshot_path)
             if driver:
                 driver.quit()
-            return {"status": "error", "message": "住所候補が見つかりませんでした"}
+            return {
+                "status": "error", 
+                "message": "住所候補が見つかりませんでした",
+                "screenshot": os.path.abspath(screenshot_path)
+            }
         
     except TimeoutException as e:
         logging.error(f"タイムアウトが発生しました: {str(e)}")
+        screenshot_path = "debug_timeout.png"
+        driver.save_screenshot(screenshot_path)
         if driver:
             driver.quit()
-        return {"status": "error", "message": f"処理中にタイムアウトが発生しました"}
+        return {
+            "status": "error", 
+            "message": f"処理中にタイムアウトが発生しました",
+            "screenshot": os.path.abspath(screenshot_path)
+        }
         
     except NoSuchElementException as e:
         logging.error(f"要素が見つかりませんでした: {str(e)}")
+        screenshot_path = "debug_element_not_found.png"
+        driver.save_screenshot(screenshot_path)
         if driver:
             driver.quit()
-        return {"status": "error", "message": f"必要な要素が見つかりませんでした"}
+        return {
+            "status": "error", 
+            "message": f"必要な要素が見つかりませんでした",
+            "screenshot": os.path.abspath(screenshot_path)
+        }
         
     except Exception as e:
         logging.error(f"自動化に失敗しました: {str(e)}")
+        screenshot_path = "debug_general_error.png"
+        driver.save_screenshot(screenshot_path)
         if driver:
             driver.quit()
-        return {"status": "error", "message": f"エラーが発生しました: {str(e)}"}
+        return {
+            "status": "error", 
+            "message": f"エラーが発生しました: {str(e)}",
+            "screenshot": os.path.abspath(screenshot_path)
+        }
         
     finally:
         if driver:
