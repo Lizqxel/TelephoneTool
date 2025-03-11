@@ -168,3 +168,767 @@ Stacktrace:
 
 2025-03-11 11:05:33,564 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
     <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D6cee9990-9271-afc3-b9f2-e98c35551b81%26__kzn%3Db9948c3f9287.1.4%26__kzt%3D1741658700343%26_ga%3D2.10487...
+2025-03-11 12:00:57,655 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:00:57,656 - INFO - ====== WebDriver manager ======
+2025-03-11 12:00:58,704 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:00:58,804 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:00:58,883 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:01:30,008 - ERROR - タイムアウトが発生しました: Message: timeout: Timed out receiving message from renderer: 29.798
+  (Session info: chrome=133.0.6943.142)
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B0116B]
+	(No symbol) [0x00B00EA1]
+	(No symbol) [0x00AFED80]
+	(No symbol) [0x00AFF92D]
+	(No symbol) [0x00B0BDF9]
+	(No symbol) [0x00B1D2B5]
+	(No symbol) [0x00B22BA6]
+	(No symbol) [0x00AFFF3D]
+	(No symbol) [0x00B1D07E]
+	(No symbol) [0x00B9EA66]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:02:13,201 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:02:13,202 - INFO - ====== WebDriver manager ======
+2025-03-11 12:02:14,337 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:02:14,426 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:02:14,501 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:02:16,443 - INFO - ページが読み込まれました
+2025-03-11 12:02:47,478 - ERROR - 郵便番号入力フィールドが見つかりませんでした: Message: timeout: Timed out receiving message from renderer: 30.000
+  (Session info: chrome=133.0.6943.142)
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B0116B]
+	(No symbol) [0x00B00EA1]
+	(No symbol) [0x00AFED80]
+	(No symbol) [0x00AFF92D]
+	(No symbol) [0x00B0BDF9]
+	(No symbol) [0x00B1D2B5]
+	(No symbol) [0x00B22BA6]
+	(No symbol) [0x00AFFF3D]
+	(No symbol) [0x00B1D07E]
+	(No symbol) [0x00B9E687]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:02:47,486 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script async="" src="//sync.im-apps.net/imid/segment?token=5OqttiJgEGgxiIkb8Mzm7Q&amp;callback=__karte_im_cb"></script><script async="" src="https://www.clarity.ms/s/0.8.0/clarity.js"></script><script async="" src="https://www.clarity.ms/tag/uet/97031626"></script><script type="text/javascript" async="" src="...
+2025-03-11 12:02:47,487 - ERROR - タイムアウトが発生しました: Message: timeout: Timed out receiving message from renderer: 30.000
+  (Session info: chrome=133.0.6943.142)
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B0116B]
+	(No symbol) [0x00B00EA1]
+	(No symbol) [0x00AFED80]
+	(No symbol) [0x00AFF92D]
+	(No symbol) [0x00B0BDF9]
+	(No symbol) [0x00B1D2B5]
+	(No symbol) [0x00B22BA6]
+	(No symbol) [0x00AFFF3D]
+	(No symbol) [0x00B1D07E]
+	(No symbol) [0x00B9E687]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:03:25,882 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:03:25,883 - INFO - ====== WebDriver manager ======
+2025-03-11 12:03:26,937 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:03:27,094 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:03:27,311 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:03:35,466 - INFO - ページが読み込まれました
+2025-03-11 12:03:50,769 - ERROR - 郵便番号入力フィールドが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:03:50,772 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n5-active wf-notosansjp-n4-active wf-notosansjp-n7-active wf-active" data-js-focus-visible=""><head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>NTT西日本公式｜フレッツ光｜光インターネット接続（光回線）</title>
+        <meta name="format-detection" content="telephone=no">
+        <link rel="shortcut icon" hr...
+2025-03-11 12:03:50,772 - ERROR - タイムアウトが発生しました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:04:11,045 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:04:11,045 - INFO - ====== WebDriver manager ======
+2025-03-11 12:04:12,140 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:04:12,299 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:04:12,476 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:04:32,519 - INFO - ページが読み込まれました
+2025-03-11 12:04:32,705 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:04:32,966 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:04:33,499 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:04:34,779 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:04:34,820 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:04:34,863 - INFO - 有効な候補: 1 件
+2025-03-11 12:04:34,875 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:04:34,899 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:04:35,082 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:04:35,095 - INFO - 選択された住所: 
+2025-03-11 12:04:35,113 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:04:35,642 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:04:40,787 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:04:45,933 - INFO - 号入力画面はスキップされました
+2025-03-11 12:05:01,334 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:05:01,342 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D9aec92d0-2039-74dd-5344-37fb86ea0e53%26__kzn%3Dcc8e101de512.1.4%26__kzt%3D1741662256924%26_ga%3D2.12181...
+2025-03-11 12:05:01,343 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:05:01,352 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D9aec92d0-2039-74dd-5344-37fb86ea0e53%26__kzn%3Dcc8e101de512.1.4%26__kzt%3D1741662256924%26_ga%3D2.12181...
+2025-03-11 12:28:37,454 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:28:37,455 - INFO - ====== WebDriver manager ======
+2025-03-11 12:28:38,520 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:28:38,641 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:28:38,707 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:29:09,787 - ERROR - タイムアウトが発生しました: Message: timeout: Timed out receiving message from renderer: 29.732
+  (Session info: chrome=133.0.6943.142)
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B0116B]
+	(No symbol) [0x00B00EA1]
+	(No symbol) [0x00AFED80]
+	(No symbol) [0x00AFF92D]
+	(No symbol) [0x00B0BDF9]
+	(No symbol) [0x00B1D2B5]
+	(No symbol) [0x00B22BA6]
+	(No symbol) [0x00AFFF3D]
+	(No symbol) [0x00B1D07E]
+	(No symbol) [0x00B9EA66]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:29:55,193 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:29:55,194 - INFO - ====== WebDriver manager ======
+2025-03-11 12:29:56,405 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:29:56,512 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:29:56,578 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:30:14,614 - INFO - ページが読み込まれました
+2025-03-11 12:30:14,706 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:30:14,872 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:30:15,418 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:30:16,569 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:30:16,592 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:30:16,615 - INFO - 有効な候補: 1 件
+2025-03-11 12:30:16,622 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:30:16,635 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:30:17,040 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:30:17,048 - INFO - 選択された住所: 
+2025-03-11 12:30:17,059 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:30:17,588 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:30:22,691 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:30:27,801 - INFO - 号入力画面はスキップされました
+2025-03-11 12:30:43,166 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:30:43,175 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3Df06e5d04-7cc3-0f9e-3c0a-9039046e4ce3%26__kzn%3D7bbcccc150ce.1.4%26__kzt%3D1741663799197%26_ga%3D2.21378...
+2025-03-11 12:30:43,175 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:30:43,184 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3Df06e5d04-7cc3-0f9e-3c0a-9039046e4ce3%26__kzn%3D7bbcccc150ce.1.4%26__kzt%3D1741663799197%26_ga%3D2.21378...
+2025-03-11 12:35:15,853 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:35:15,853 - INFO - ====== WebDriver manager ======
+2025-03-11 12:35:16,916 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:35:17,050 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:35:17,127 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:35:48,204 - ERROR - タイムアウトが発生しました: Message: timeout: Timed out receiving message from renderer: 29.776
+  (Session info: chrome=133.0.6943.142)
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B0116B]
+	(No symbol) [0x00B00EA1]
+	(No symbol) [0x00AFED80]
+	(No symbol) [0x00AFF92D]
+	(No symbol) [0x00B0BDF9]
+	(No symbol) [0x00B1D2B5]
+	(No symbol) [0x00B22BA6]
+	(No symbol) [0x00AFFF3D]
+	(No symbol) [0x00B1D07E]
+	(No symbol) [0x00B9EA66]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:37:51,397 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:37:51,398 - INFO - ====== WebDriver manager ======
+2025-03-11 12:37:52,555 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:37:52,647 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:37:52,725 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:38:15,971 - INFO - ページが読み込まれました
+2025-03-11 12:38:16,062 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:38:16,209 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:38:16,738 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:38:17,898 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:38:17,920 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:38:17,945 - INFO - 有効な候補: 1 件
+2025-03-11 12:38:17,951 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:38:17,963 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:38:18,334 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:38:18,343 - INFO - 選択された住所: 
+2025-03-11 12:38:18,354 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:38:18,879 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:38:23,973 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:38:29,081 - INFO - 号入力画面はスキップされました
+2025-03-11 12:38:44,450 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:38:44,459 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D9dc88681-c376-547d-0783-82a7791a4fff%26__kzn%3D1813ff6fefdd.1.4%26__kzt%3D1741664275349%26_ga%3D2.61547...
+2025-03-11 12:38:44,459 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:38:44,466 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D9dc88681-c376-547d-0783-82a7791a4fff%26__kzn%3D1813ff6fefdd.1.4%26__kzt%3D1741664275349%26_ga%3D2.61547...
+2025-03-11 12:39:48,034 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:39:48,035 - INFO - ====== WebDriver manager ======
+2025-03-11 12:39:49,193 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:39:49,268 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:39:49,350 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:44:57,598 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:44:57,599 - INFO - ====== WebDriver manager ======
+2025-03-11 12:44:58,720 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:44:58,793 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:44:58,865 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:45:11,349 - INFO - ページが読み込まれました
+2025-03-11 12:45:11,464 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:45:11,674 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:45:12,203 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:45:13,340 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:45:13,361 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:45:13,394 - INFO - 有効な候補: 1 件
+2025-03-11 12:45:13,403 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:45:13,421 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:45:13,580 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:45:13,588 - INFO - 選択された住所: 
+2025-03-11 12:45:13,603 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:45:14,131 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:45:19,255 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:45:24,376 - INFO - 号入力画面はスキップされました
+2025-03-11 12:45:39,707 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:45:39,715 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-active wf-notosansjp-n5-active wf-notosansjp-n6-active wf-notosansjp-n7-active wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3Dea902770-3850-c5fe-003c-90883af47a35%26__kzn%3D735c0cff7732.1.4%26__kzt%3D1741664701546%26_ga%3D2.64240232.61...
+2025-03-11 12:45:39,716 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:45:39,723 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-active wf-notosansjp-n5-active wf-notosansjp-n6-active wf-notosansjp-n7-active wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3Dea902770-3850-c5fe-003c-90883af47a35%26__kzn%3D735c0cff7732.1.4%26__kzt%3D1741664701546%26_ga%3D2.64240232.61...
+2025-03-11 12:48:08,821 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:48:08,822 - INFO - ====== WebDriver manager ======
+2025-03-11 12:48:09,898 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:48:09,982 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:48:10,059 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:48:24,336 - INFO - ページが読み込まれました
+2025-03-11 12:48:24,442 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:48:24,631 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:48:25,169 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:48:26,345 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:48:26,363 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:48:26,393 - INFO - 有効な候補: 1 件
+2025-03-11 12:48:26,401 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:48:26,416 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:48:26,825 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:48:26,838 - INFO - 選択された住所: 
+2025-03-11 12:48:26,856 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:48:27,380 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:48:32,490 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:48:37,594 - INFO - 号入力画面はスキップされました
+2025-03-11 12:48:52,920 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:48:52,927 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n6-inactive wf-notosansjp-n7-inactive wf-inactive" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D74533489-fb95-cb9a-8326-7f3eef8699bb%26__kzn%3De70cae3ef1e1.1.4%26__kzt%3D1741664892713%26_ga%3D2.1...
+2025-03-11 12:48:52,927 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:48:52,935 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n6-inactive wf-notosansjp-n7-inactive wf-inactive" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D74533489-fb95-cb9a-8326-7f3eef8699bb%26__kzn%3De70cae3ef1e1.1.4%26__kzt%3D1741664892713%26_ga%3D2.1...
+2025-03-11 12:52:26,327 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:52:26,328 - INFO - ====== WebDriver manager ======
+2025-03-11 12:52:27,473 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:52:27,558 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:52:27,635 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:52:38,150 - INFO - ページが読み込まれました
+2025-03-11 12:52:38,297 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:52:38,588 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:52:39,121 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:52:40,291 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:52:40,318 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:52:40,351 - INFO - 有効な候補: 1 件
+2025-03-11 12:52:40,360 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:52:40,376 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:52:40,586 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:52:40,603 - INFO - 選択された住所: 
+2025-03-11 12:52:40,618 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:52:41,145 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:52:46,296 - INFO - 番地入力画面はスキップされました
+2025-03-11 12:52:51,385 - INFO - 号入力画面はスキップされました
+2025-03-11 12:53:06,744 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:53:06,767 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n6-inactive wf-notosansjp-n7-inactive wf-inactive" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D96e7e4d0-376b-a8fb-5930-6bc51c3ea526%26__kzn%3D5b4644e89f2a.1.4%26__kzt%3D1741665150226%26_ga%3D2.9...
+2025-03-11 12:53:06,768 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 12:53:06,775 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n6-inactive wf-notosansjp-n7-inactive wf-inactive" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3D96e7e4d0-376b-a8fb-5930-6bc51c3ea526%26__kzn%3D5b4644e89f2a.1.4%26__kzt%3D1741665150226%26_ga%3D2.9...
+2025-03-11 12:59:37,135 - INFO - 郵便番号 500-8354、住所 岐阜県岐阜市六条福寿町3-7 の処理を開始します
+2025-03-11 12:59:37,136 - INFO - ====== WebDriver manager ======
+2025-03-11 12:59:38,290 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:59:38,363 - INFO - Get LATEST chromedriver version for google-chrome
+2025-03-11 12:59:38,434 - INFO - Driver [C:\Users\Owner\.wdm\drivers\chromedriver\win64\133.0.6943.141\chromedriver-win32/chromedriver.exe] found in cache
+2025-03-11 12:59:51,255 - INFO - ページが読み込まれました
+2025-03-11 12:59:51,358 - INFO - 郵便番号 5008354 を入力しました
+2025-03-11 12:59:51,539 - INFO - 検索ボタンをクリックしました
+2025-03-11 12:59:52,075 - INFO - 住所選択モーダルが表示されました
+2025-03-11 12:59:53,221 - INFO - デバッグ用スクリーンショットを保存しました
+2025-03-11 12:59:53,240 - INFO - 方法1: 1 件の候補が見つかりました
+2025-03-11 12:59:53,268 - INFO - 有効な候補: 1 件
+2025-03-11 12:59:53,275 - INFO - 候補 1: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:59:53,290 - INFO - 最適な住所候補: '岐阜県 岐阜市 六条福寿町'
+2025-03-11 12:59:53,433 - INFO - 通常のクリックで住所を選択しました
+2025-03-11 12:59:53,442 - INFO - 選択された住所: 
+2025-03-11 12:59:53,456 - INFO - 住所選択モーダルが閉じられました
+2025-03-11 12:59:53,986 - INFO - 番地入力ダイアログが表示されました
+2025-03-11 12:59:59,093 - INFO - 番地入力画面はスキップされました
+2025-03-11 13:00:04,224 - INFO - 号入力画面はスキップされました
+2025-03-11 13:00:19,600 - ERROR - 最終検索ボタンが見つかりませんでした: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 13:00:19,627 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3De90cd2b6-5121-f7b7-cd3f-a22c84ce86aa%26__kzn%3Dd43a479afd85.1.4%26__kzt%3D1741665581099%26_ga%3D2.10776...
+2025-03-11 13:00:19,627 - ERROR - 住所候補の表示待ちでタイムアウトしました: Message: 
+Stacktrace:
+	GetHandleVerifier [0x00CA0B43+25139]
+	(No symbol) [0x00C313F4]
+	(No symbol) [0x00B104E3]
+	(No symbol) [0x00B583D7]
+	(No symbol) [0x00B5872B]
+	(No symbol) [0x00BA1002]
+	(No symbol) [0x00B7D014]
+	(No symbol) [0x00B9E778]
+	(No symbol) [0x00B7CDC6]
+	(No symbol) [0x00B4BDE9]
+	(No symbol) [0x00B4D124]
+	GetHandleVerifier [0x00FA4373+3185251]
+	GetHandleVerifier [0x00FC291A+3309578]
+	GetHandleVerifier [0x00FBCF42+3286578]
+	GetHandleVerifier [0x00D37AE0+643536]
+	(No symbol) [0x00C3A20D]
+	(No symbol) [0x00C370B8]
+	(No symbol) [0x00C37257]
+	(No symbol) [0x00C29E00]
+	BaseThreadInitThunk [0x760A5D49+25]
+	RtlInitializeExceptionChain [0x77C1CE3B+107]
+	RtlGetAppContainerNamedObjectPath [0x77C1CDC1+561]
+
+2025-03-11 13:00:19,636 - INFO - ページのHTML: <html lang="ja" class="js-focus-visible wf-notosansjp-n6-active wf-notosansjp-n4-inactive wf-notosansjp-n5-inactive wf-notosansjp-n7-inactive wf-active" data-js-focus-visible=""><head>
+    <script type="text/javascript" async="" src="https://efo-cast.gyro-n.com/config?cl=WTTRJLWIG8&amp;fm=areaSearch&amp;url=https%3A%2F%2Fflets.ntt-west.co.jp%2Farea%2FareaSearch%3F__kzd%3D.flets-w.com%26__kzi%3De90cd2b6-5121-f7b7-cd3f-a22c84ce86aa%26__kzn%3Dd43a479afd85.1.4%26__kzt%3D1741665581099%26_ga%3D2.10776...
