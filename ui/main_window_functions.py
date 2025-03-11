@@ -11,13 +11,33 @@ import json
 import os
 import re
 from PySide6.QtWidgets import QMessageBox, QApplication
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QThread, Signal
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 
+
+class ServiceAreaSearchWorker(QThread):
+    """提供エリア検索を実行するワーカースレッド"""
+    finished = Signal(dict)
+    
+    def __init__(self, postal_code, address):
+        super().__init__()
+        self.postal_code = postal_code
+        self.address = address
+    
+    def run(self):
+        """検索を実行して結果を発行"""
+        try:
+            result = search_service_area(self.postal_code, self.address)
+            self.finished.emit(result)
+        except Exception as e:
+            self.finished.emit({
+                "status": "error",
+                "message": f"検索中にエラーが発生しました: {str(e)}"
+            })
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
@@ -319,52 +339,59 @@ class MainWindowFunctions:
             QMessageBox.warning(self, "エラー", "郵便番号と住所を入力してください。")
             return
         
-        try:
-            # 提供エリア検索を実行
-            result = search_service_area(postal_code, address)
-            
-            # スクリーンショットボタンを更新
-            self.update_screenshot_button(result.get("screenshot"))
-            
-            if result["status"] == "success":
-                # 提供可能の場合
-                self.area_result_label.setText("提供エリア: 提供可能")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #27AE60;
-                        border-radius: 4px;
-                        background-color: #E8F5E9;
-                        color: #27AE60;
-                    }
-                """)
-                self.judgment_combo.setCurrentText("○")
-            else:
-                # 提供不可の場合
-                self.area_result_label.setText("提供エリア: 提供不可")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #E74C3C;
-                        border-radius: 4px;
-                        background-color: #FFEBEE;
-                        color: #E74C3C;
-                    }
-                """)
-                self.judgment_combo.setCurrentText("×")
-            
-            # 詳細情報がある場合は表示
-            if "details" in result:
-                details = result["details"]
-                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
-                QMessageBox.information(self, "検索結果", details_text)
-            
-        except Exception as e:
-            QMessageBox.warning(self, "エラー", f"提供エリア検索に失敗しました: {str(e)}")
-            # エラー時もスクリーンショットボタンを更新
-            self.update_screenshot_button(None)
+        # 検索ボタンを無効化し、進捗状態を表示
+        self.area_search_btn.setEnabled(False)
+        self.area_search_btn.setText("検索中...")
+        
+        # ワーカースレッドを作成して開始
+        self.search_worker = ServiceAreaSearchWorker(postal_code, address)
+        self.search_worker.finished.connect(self.on_search_completed)
+        self.search_worker.start()
+    
+    def on_search_completed(self, result):
+        """検索完了時の処理"""
+        # UIを元の状態に戻す
+        self.area_search_btn.setEnabled(True)
+        self.area_search_btn.setText("検索")
+        
+        # スクリーンショットボタンを更新
+        self.update_screenshot_button(result.get("screenshot"))
+        
+        # 結果表示を更新
+        if result["status"] == "success":
+            # 提供可能の場合
+            self.area_result_label.setText("提供エリア: 提供可能")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #27AE60;
+                    border-radius: 4px;
+                    background-color: #E8F5E9;
+                    color: #27AE60;
+                }
+            """)
+            self.judgment_combo.setCurrentText("○")
+        else:
+            # 提供不可の場合
+            self.area_result_label.setText("提供エリア: 提供不可")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #E74C3C;
+                    border-radius: 4px;
+                    background-color: #FFEBEE;
+                    color: #E74C3C;
+                }
+            """)
+            self.judgment_combo.setCurrentText("×")
+        
+        # 詳細情報がある場合は表示
+        if "details" in result:
+            details = result["details"]
+            details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+            QMessageBox.information(self, "検索結果", details_text)
     
     def update_screenshot_button(self, screenshot_path):
         """スクリーンショットボタンを更新"""
