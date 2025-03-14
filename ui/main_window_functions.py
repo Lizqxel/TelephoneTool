@@ -17,6 +17,7 @@ from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
+from utils.furigana_utils import convert_to_furigana
 
 
 class ServiceAreaSearchWorker(QThread):
@@ -399,6 +400,138 @@ class MainWindowFunctions:
         pass
     
     def update_screenshot_button(self):
-        """スクリーンショットボタンを更新"""
-        # このメソッドは実装しない（必要に応じて実装）
-        pass 
+        """スクリーンショットボタンの状態を更新"""
+        # 実装は必要に応じて追加
+        pass
+        
+    def show_screenshot(self):
+        """スクリーンショットを表示する"""
+        try:
+            # スクリーンショットファイルのパスを取得
+            screenshot_path = "debug_screenshot.png"
+            
+            # ファイルが存在するか確認
+            if not os.path.exists(screenshot_path):
+                QMessageBox.warning(
+                    self,
+                    "エラー",
+                    "スクリーンショットファイルが見つかりません。"
+                )
+                return
+                
+            # QPixmapを使用して画像を表示
+            from PySide6.QtGui import QPixmap
+            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("スクリーンショット")
+            layout = QVBoxLayout(dialog)
+            
+            label = QLabel()
+            pixmap = QPixmap(screenshot_path)
+            label.setPixmap(pixmap)
+            layout.addWidget(label)
+            
+            dialog.setLayout(layout)
+            dialog.exec()
+            
+        except Exception as e:
+            logging.error(f"スクリーンショット表示エラー: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"スクリーンショットの表示中にエラーが発生しました: {str(e)}"
+            )
+            
+    def open_street_view(self):
+        """住所からGoogleマップを開く"""
+        try:
+            # 住所を取得
+            address = self.address_input.text()
+            if not address:
+                QMessageBox.warning(self, "エラー", "住所が入力されていません。")
+                return
+                
+            # URLエンコード
+            from urllib.parse import quote
+            encoded_address = quote(address)
+            
+            # Google Mapの検索URL（ストリートビューではなく通常の検索結果）
+            url = f"https://www.google.com/maps/search/{encoded_address}"
+            
+            # ブラウザで開く
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            QDesktopServices.openUrl(QUrl(url))
+            
+            logging.info(f"Googleマップを開きました: {address}")
+            
+        except Exception as e:
+            logging.error(f"Googleマップ表示エラー: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"Googleマップの表示中にエラーが発生しました: {str(e)}"
+            )
+            
+    def apply_font_size(self):
+        """フォントサイズを適用する"""
+        try:
+            from PySide6.QtGui import QFont
+            
+            # 設定ファイルからフォントサイズを取得
+            font_size = 10  # デフォルト値
+            
+            if hasattr(self, 'settings') and 'font_size' in self.settings:
+                font_size = self.settings['font_size']
+            
+            # アプリケーション全体のフォントを設定
+            app = QApplication.instance()
+            font = app.font()
+            font.setPointSize(font_size)
+            app.setFont(font)
+            
+            logging.info(f"フォントサイズを {font_size} に設定しました")
+            
+        except Exception as e:
+            logging.error(f"フォントサイズ適用エラー: {str(e)}")
+            
+    def auto_generate_furigana(self):
+        """契約者名からフリガナを自動生成する"""
+        # 自動モードの場合のみ処理
+        if self.furigana_mode_combo.currentText() != "自動":
+            return
+            
+        # 契約者名が空の場合は何もしない
+        name = self.contractor_input.text()
+        if not name:
+            return
+            
+        try:
+            # フリガナ変換APIを使用
+            furigana = convert_to_furigana(name)
+            if furigana:
+                self.furigana_input.setText(furigana)
+                logging.info(f"フリガナを自動生成しました: {name} → {furigana}")
+        except Exception as e:
+            logging.error(f"フリガナ自動生成エラー: {str(e)}")
+            
+    def auto_generate_list_furigana(self):
+        """リスト名からフリガナを自動生成する"""
+        # 自動モードの場合のみ処理
+        if self.list_furigana_mode_combo.currentText() != "自動":
+            return
+            
+        # リスト名が空の場合は何もしない
+        name = self.list_name_input.text()
+        if not name:
+            return
+            
+        try:
+            # フリガナ変換APIを使用
+            furigana = convert_to_furigana(name)
+            if furigana:
+                self.list_furigana_input.setText(furigana)
+                logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
+        except Exception as e:
+            logging.error(f"リストフリガナ自動生成エラー: {str(e)}") 

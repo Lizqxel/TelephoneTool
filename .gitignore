@@ -1,0 +1,51 @@
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ログファイル
+*.log
+logs/
+
+# デバッグ用スクリーンショット
+debug_*.png
+error_*.png
+*_screenshot.png
+
+# 設定ファイル
+settings.json
+
+# 仮想環境
+venv/
+env/
+ENV/
+
+# IDE関連
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS関連
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/ 
