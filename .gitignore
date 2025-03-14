@@ -29,9 +29,6 @@ debug_*.png
 error_*.png
 *_screenshot.png
 
-# 設定ファイル
-settings.json
-
 # 仮想環境
 venv/
 env/
