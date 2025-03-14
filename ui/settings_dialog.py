@@ -69,6 +69,12 @@ ND：
         # デフォルトのフォントサイズ
         self.default_font_size = 9
         
+        # 親ウィンドウから現在のフォントサイズを取得
+        if parent and hasattr(parent, 'settings') and 'font_size' in parent.settings:
+            self.current_font_size = parent.settings['font_size']
+        else:
+            self.current_font_size = self.default_font_size
+        
         # レイアウトの設定
         layout = QVBoxLayout(self)
         
@@ -78,13 +84,13 @@ ND：
         
         # フォントサイズスライダー
         font_size_slider_layout = QHBoxLayout()
-        self.font_size_label = QLabel("フォントサイズ: 9pt")
+        self.font_size_label = QLabel(f"フォントサイズ: {self.current_font_size}pt")
         font_size_slider_layout.addWidget(self.font_size_label)
         
         self.font_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.font_size_slider.setMinimum(8)
         self.font_size_slider.setMaximum(24)
-        self.font_size_slider.setValue(9)
+        self.font_size_slider.setValue(self.current_font_size)
         self.font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.font_size_slider.setTickInterval(1)
         self.font_size_slider.valueChanged.connect(self.update_font_size_label)

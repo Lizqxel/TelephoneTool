@@ -10,8 +10,9 @@ import logging
 import json
 import os
 import re
-from PySide6.QtWidgets import QMessageBox, QApplication
+from PySide6.QtWidgets import QMessageBox, QApplication, QWidget
 from PySide6.QtCore import QTimer, QThread, Signal
+from PySide6.QtGui import QFont
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
@@ -46,10 +47,18 @@ class MainWindowFunctions:
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
+            # 初期設定を設定
+            self.settings = {
+                'format_template': "",
+                'font_size': 10  # デフォルトのフォントサイズ
+            }
+            
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     self.format_template = settings.get('format_template', "")
+                    # settingsオブジェクトを更新
+                    self.settings = settings
             else:
                 # デフォルトのフォーマットテンプレート
                 self.format_template = """対応者（お客様の名前）：{operator}
@@ -75,9 +84,25 @@ class MainWindowFunctions:
 
 料金認識：{fee}
 ネット利用：{net_usage}"""
+                # デフォルト設定をsettingsに保存
+                self.settings['format_template'] = self.format_template
+                
+                # デフォルト設定をファイルに保存
+                with open(self.settings_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.settings, f, ensure_ascii=False, indent=2)
+                    
+            logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 10)}")
+                
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
+            
+            # エラーが発生した場合でもデフォルト設定を使用
+            self.settings = {
+                'format_template': "",
+                'font_size': 10
+            }
+            logging.info("エラーが発生したため、デフォルト設定を使用します")
     
     def format_phone_number(self):
         """電話番号の自動フォーマット処理"""
@@ -269,6 +294,14 @@ class MainWindowFunctions:
         if dialog.exec():
             # ダイアログがOKで閉じられた場合、設定を再読み込み
             self.load_settings()
+            # フォントサイズを適用
+            self.apply_font_size()
+            # ウィジェットを更新
+            self.update()
+            # 全てのウィジェットを再描画
+            for widget in self.findChildren(QWidget):
+                widget.update()
+            logging.info("設定を更新しました")
     
     def toggle_mobile_input(self, text):
         """携帯電話番号入力フィールドの有効/無効を切り替え"""
@@ -394,16 +427,14 @@ class MainWindowFunctions:
             details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
             QMessageBox.information(self, "検索結果", details_text)
     
-    def update_screenshot_button(self, screenshot_path):
+    def update_screenshot_button(self, screenshot_path=None):
         """スクリーンショットボタンを更新"""
-        # このメソッドは実装しない（必要に応じて実装）
-        pass
+        if screenshot_path:
+            self.screenshot_path = screenshot_path
+            self.screenshot_btn.setEnabled(True)
+        else:
+            self.screenshot_btn.setEnabled(False)
     
-    def update_screenshot_button(self):
-        """スクリーンショットボタンの状態を更新"""
-        # 実装は必要に応じて追加
-        pass
-        
     def show_screenshot(self):
         """スクリーンショットを表示する"""
         try:
@@ -477,24 +508,39 @@ class MainWindowFunctions:
     def apply_font_size(self):
         """フォントサイズを適用する"""
         try:
-            from PySide6.QtGui import QFont
-            
             # 設定ファイルからフォントサイズを取得
             font_size = 10  # デフォルト値
             
             if hasattr(self, 'settings') and 'font_size' in self.settings:
                 font_size = self.settings['font_size']
+            else:
+                logging.warning("設定が見つからないため、デフォルトのフォントサイズ(10)を使用します")
+                # 設定が存在しない場合は初期化
+                if not hasattr(self, 'settings'):
+                    self.settings = {'font_size': font_size}
+                else:
+                    self.settings['font_size'] = font_size
             
             # アプリケーション全体のフォントを設定
             app = QApplication.instance()
-            font = app.font()
+            font = QFont()
             font.setPointSize(font_size)
             app.setFont(font)
+            
+            # スタイルシートを使用してフォントサイズを設定
+            self.setStyleSheet(f"* {{ font-size: {font_size}pt; }}")
+            
+            # メインウィンドウの全てのウィジェットに対してフォントを再設定
+            for widget in self.findChildren(QWidget):
+                widget_font = widget.font()
+                widget_font.setPointSize(font_size)
+                widget.setFont(widget_font)
             
             logging.info(f"フォントサイズを {font_size} に設定しました")
             
         except Exception as e:
             logging.error(f"フォントサイズ適用エラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"フォントサイズの適用に失敗しました: {str(e)}")
             
     def auto_generate_furigana(self):
         """契約者名からフリガナを自動生成する"""
