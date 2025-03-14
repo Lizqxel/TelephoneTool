@@ -10,12 +10,14 @@ import logging
 import json
 import os
 import re
+import requests
+from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip)
-from PySide6.QtCore import Qt, QTimer, QPoint
-from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl
+from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
@@ -286,8 +288,27 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 住所
         address_layout.addWidget(QLabel("住所"))
+        address_container = QHBoxLayout()
         self.address_input = QLineEdit()
-        address_layout.addWidget(self.address_input)
+        address_container.addWidget(self.address_input)
+        
+        # マップアイコンボタン
+        self.map_btn = QPushButton()
+        self.map_btn.setFixedSize(24, 24)
+        self.map_btn.setIcon(QIcon("map.png"))
+        self.map_btn.setToolTip("ストリートビューを表示")
+        self.map_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background-color: transparent;
+            }
+            QPushButton:hover {
+                background-color: #f0f0f0;
+                border-radius: 12px;
+            }
+        """)
+        address_container.addWidget(self.map_btn)
+        address_layout.addLayout(address_container)
         
         # 提供エリア検索ボタンを追加
         self.area_search_btn = QPushButton("提供エリア検索")
@@ -480,6 +501,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
+        
+        # マップボタンのシグナル接続
+        self.map_btn.clicked.connect(self.open_street_view)
     
     def show_screenshot(self):
         """最新のスクリーンショットを表示"""
@@ -771,3 +795,21 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         QMessageBox.warning(self, "エラー", "フリガナを取得できませんでした。")
                 except Exception as e:
                     QMessageBox.warning(self, "エラー", f"リストフリガナの自動生成に失敗しました。\n{str(e)}") 
+
+    def open_street_view(self):
+        """住所のGoogleマップ検索結果を開く"""
+        address = self.address_input.text().strip()
+        if not address:
+            QMessageBox.warning(self, "警告", "住所を入力してください。")
+            return
+            
+        try:
+            # 検索用のURLを生成
+            encoded_address = quote(address)
+            maps_url = f"https://www.google.co.jp/maps/search/{encoded_address}"
+            
+            # デフォルトブラウザでURLを開く
+            QDesktopServices.openUrl(QUrl(maps_url))
+            
+        except Exception as e:
+            QMessageBox.warning(self, "エラー", f"地図の表示に失敗しました。\nエラー: {str(e)}") 
