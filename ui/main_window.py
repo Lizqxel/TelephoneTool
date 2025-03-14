@@ -23,6 +23,7 @@ from utils.format_utils import (format_phone_number, format_phone_number_without
                                format_postal_code, convert_to_half_width)
 from ui.main_window_functions import MainWindowFunctions
 from utils.string_utils import validate_name, validate_furigana
+from utils.furigana_utils import convert_to_furigana
 
 
 class MainWindow(QMainWindow, MainWindowFunctions):
@@ -225,7 +226,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         basic_layout.addWidget(self.contractor_input)
         
         # フリガナ
-        basic_layout.addWidget(QLabel("フリガナ"))
+        furigana_layout = QHBoxLayout()
+        furigana_layout.addWidget(QLabel("フリガナ"))
+        self.furigana_mode_combo = QComboBox()
+        self.furigana_mode_combo.addItems(["自動", "手動"])
+        furigana_layout.addWidget(self.furigana_mode_combo)
+        basic_layout.addLayout(furigana_layout)
         self.furigana_input = QLineEdit()
         basic_layout.addWidget(self.furigana_input)
         
@@ -331,7 +337,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         list_layout.addWidget(self.list_name_input)
         
         # リストフリガナ
-        list_layout.addWidget(QLabel("リストフリガナ"))
+        list_furigana_layout = QHBoxLayout()
+        list_furigana_layout.addWidget(QLabel("リストフリガナ"))
+        self.list_furigana_mode_combo = QComboBox()
+        self.list_furigana_mode_combo.addItems(["自動", "手動"])
+        list_furigana_layout.addWidget(self.list_furigana_mode_combo)
+        list_layout.addLayout(list_furigana_layout)
         self.list_furigana_input = QLineEdit()
         list_layout.addWidget(self.list_furigana_input)
         
@@ -446,10 +457,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
         self.clipboard_toggle_btn.clicked.connect(self.toggle_clipboard_monitor)
         
-        # スクリーンショット表示ボタンのシグナル設定
-        self.screenshot_btn.clicked.connect(self.show_screenshot)
+        # フリガナ自動入力のシグナル設定
+        self.contractor_input.textChanged.connect(self.update_furigana)
+        self.list_name_input.textChanged.connect(self.update_list_furigana)
         
-        # 自動フォーマット用のシグナル
+        # その他の既存のシグナル設定
         self.mobile_input.textChanged.connect(self.format_phone_number)
         self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
         self.postal_code_input.textChanged.connect(self.format_postal_code)
@@ -731,3 +743,31 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.font_size = settings['font_size']
             self.apply_font_size()
             self.load_settings()  # 設定を再読み込み 
+
+    def update_furigana(self):
+        """契約者名からフリガナを自動生成"""
+        if self.furigana_mode_combo.currentText() == "自動":
+            text = self.contractor_input.text()
+            if text:
+                try:
+                    result = convert_to_furigana(text)
+                    if result:
+                        self.furigana_input.setText(result)
+                    else:
+                        QMessageBox.warning(self, "エラー", "フリガナを取得できませんでした。")
+                except Exception as e:
+                    QMessageBox.warning(self, "エラー", f"フリガナの自動生成に失敗しました。\n{str(e)}")
+
+    def update_list_furigana(self):
+        """リスト名からフリガナを自動生成"""
+        if self.list_furigana_mode_combo.currentText() == "自動":
+            text = self.list_name_input.text()
+            if text:
+                try:
+                    result = convert_to_furigana(text)
+                    if result:
+                        self.list_furigana_input.setText(result)
+                    else:
+                        QMessageBox.warning(self, "エラー", "フリガナを取得できませんでした。")
+                except Exception as e:
+                    QMessageBox.warning(self, "エラー", f"リストフリガナの自動生成に失敗しました。\n{str(e)}") 
