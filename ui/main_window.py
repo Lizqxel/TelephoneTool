@@ -158,6 +158,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.cti_copy_btn = QPushButton("CTIコピー")
         self.spreadsheet_btn = QPushButton("スプレッドシート転記")
         
+        # クリップボード監視トグルボタン
+        self.clipboard_toggle_btn = QPushButton("クリップボード監視")
+        self.clipboard_toggle_btn.setCheckable(True)
+        
+        # スクリーンショット表示ボタン
+        self.screenshot_btn = QPushButton("スクリーンショット")
+        
         # ボタンのスタイル設定
         button_style = """
             QPushButton {
@@ -175,11 +182,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """
         
         for btn in [self.settings_btn, self.clear_btn, 
-                   self.cti_copy_btn, self.spreadsheet_btn]:
+                   self.cti_copy_btn, self.spreadsheet_btn,
+                   self.clipboard_toggle_btn, self.screenshot_btn]:
             btn.setStyleSheet(button_style)
         
         # ボタンの接続
-        self.settings_btn.clicked.connect(self.show_settings_dialog)
+        self.settings_btn.clicked.connect(self.show_settings)
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
@@ -189,6 +197,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         top_bar_layout.addWidget(self.clear_btn)
         top_bar_layout.addWidget(self.cti_copy_btn)
         top_bar_layout.addWidget(self.spreadsheet_btn)
+        top_bar_layout.addWidget(self.clipboard_toggle_btn)
+        top_bar_layout.addWidget(self.screenshot_btn)
         
         parent_layout.addWidget(top_bar)
     
@@ -288,7 +298,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.map_btn = QPushButton()
         self.map_btn.setFixedSize(24, 24)
         self.map_btn.setIcon(QIcon("map.png"))
-        self.map_btn.setToolTip("ストリートビューを表示")
+        self.map_btn.setToolTip("Googleマップで住所を検索")
         self.map_btn.setStyleSheet("""
             QPushButton {
                 border: none;
@@ -464,7 +474,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def setup_signals(self):
         """シグナルの設定"""
         # 既存のシグナル設定
-        self.settings_btn.clicked.connect(self.show_settings_dialog)
+        self.settings_btn.clicked.connect(self.show_settings)
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
@@ -489,6 +499,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.furigana_input.textChanged.connect(self.validate_furigana_input)
         self.list_name_input.textChanged.connect(self.validate_list_name)
         self.list_furigana_input.textChanged.connect(self.validate_list_furigana)
+        
+        # フリガナ自動変換のシグナル
+        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
+        self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
