@@ -8,7 +8,8 @@
 import json
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                              QTextEdit, QPushButton, QMessageBox)
+                              QTextEdit, QPushButton, QMessageBox, QSlider,
+                              QGroupBox)
 from PySide6.QtCore import Qt
 
 
@@ -64,9 +65,39 @@ ND：
 お客様が今使っている回線：アナログ
 案内料金：2500円
 ※リスト名との関係性："""
+
+        # デフォルトのフォントサイズ
+        self.default_font_size = 9
         
         # レイアウトの設定
         layout = QVBoxLayout(self)
+        
+        # フォントサイズ設定グループ
+        font_size_group = QGroupBox("フォントサイズ設定")
+        font_size_layout = QVBoxLayout()
+        
+        # フォントサイズスライダー
+        font_size_slider_layout = QHBoxLayout()
+        self.font_size_label = QLabel("フォントサイズ: 9pt")
+        font_size_slider_layout.addWidget(self.font_size_label)
+        
+        self.font_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_size_slider.setMinimum(8)
+        self.font_size_slider.setMaximum(24)
+        self.font_size_slider.setValue(9)
+        self.font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.font_size_slider.setTickInterval(1)
+        self.font_size_slider.valueChanged.connect(self.update_font_size_label)
+        font_size_slider_layout.addWidget(self.font_size_slider)
+        
+        # フォントサイズリセットボタン
+        self.font_size_reset_btn = QPushButton("デフォルトに戻す")
+        self.font_size_reset_btn.clicked.connect(self.reset_font_size)
+        font_size_slider_layout.addWidget(self.font_size_reset_btn)
+        
+        font_size_layout.addLayout(font_size_slider_layout)
+        font_size_group.setLayout(font_size_layout)
+        layout.addWidget(font_size_group)
         
         # 説明ラベル
         description = QLabel("CTIフォーマットのテンプレートを編集できます。\n"
@@ -109,6 +140,14 @@ ND：
         # 設定の読み込み
         self.load_settings()
     
+    def update_font_size_label(self, value):
+        """フォントサイズラベルを更新する"""
+        self.font_size_label.setText(f"フォントサイズ: {value}pt")
+    
+    def reset_font_size(self):
+        """フォントサイズをデフォルトに戻す"""
+        self.font_size_slider.setValue(self.default_font_size)
+    
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
@@ -116,18 +155,23 @@ ND：
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     format_template = settings.get('format_template', self.default_format)
+                    font_size = settings.get('font_size', self.default_font_size)
                     self.format_edit.setText(format_template)
+                    self.font_size_slider.setValue(font_size)
             else:
                 self.format_edit.setText(self.default_format)
+                self.font_size_slider.setValue(self.default_font_size)
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
+            self.font_size_slider.setValue(self.default_font_size)
     
     def save_settings(self):
         """設定をファイルに保存する"""
         try:
             settings = {
-                'format_template': self.format_edit.toPlainText()
+                'format_template': self.format_edit.toPlainText(),
+                'font_size': self.font_size_slider.value()
             }
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -139,6 +183,7 @@ ND：
     def reset_to_default(self):
         """設定をデフォルトに戻す"""
         self.format_edit.setText(self.default_format)
+        self.font_size_slider.setValue(self.default_font_size)
     
     def accept(self):
         """ダイアログを受け入れる（OKボタン）"""
@@ -148,5 +193,6 @@ ND：
     def get_settings(self):
         """現在の設定を取得する"""
         return {
-            'format_template': self.format_edit.toPlainText()
+            'format_template': self.format_edit.toPlainText(),
+            'font_size': self.font_size_slider.value()
         } 

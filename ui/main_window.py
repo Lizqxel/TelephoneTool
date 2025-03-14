@@ -32,7 +32,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """メインウィンドウの初期化"""
         super().__init__()
         self.setWindowTitle("コールセンター業務効率化ツール")
-        self.setMinimumSize(1000, 800)
+        self.setMinimumSize(800, 600)  # 最小ウィンドウサイズを縮小
         
         # クリップボード監視用の変数
         self.clipboard = QApplication.clipboard()
@@ -115,6 +115,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # Google Sheetsの設定
         self.setup_google_sheets()
+        
+        # フォントサイズの適用
+        self.apply_font_size()
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -437,7 +440,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def setup_signals(self):
         """シグナルの設定"""
         # 既存のシグナル設定
-        self.settings_btn.clicked.connect(self.show_settings)
+        self.settings_btn.clicked.connect(self.show_settings_dialog)
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
@@ -680,4 +683,51 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         katakana = ''.join([item['kana'] for item in result])
                         self.list_furigana_input.setText(katakana)
                     except:
-                        pass  # カタカナ変換に失敗した場合は何もしない 
+                        pass  # カタカナ変換に失敗した場合は何もしない
+
+    def load_settings(self):
+        """設定ファイルから設定を読み込む"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    self.format_template = settings.get('format_template', '')
+                    self.font_size = settings.get('font_size', 9)
+            else:
+                self.format_template = ''
+                self.font_size = 9
+        except Exception as e:
+            logging.error(f"設定の読み込みに失敗しました: {str(e)}")
+            self.format_template = ''
+            self.font_size = 9
+
+    def apply_font_size(self):
+        """アプリケーション全体のフォントサイズを設定する"""
+        # アプリケーション全体のデフォルトフォントを設定
+        font = QApplication.font()
+        font.setPointSize(self.font_size)
+        QApplication.setFont(font)
+        
+        # メインウィンドウ内のすべてのウィジェットにフォントを適用
+        for widget in self.findChildren(QWidget):
+            widget_font = widget.font()
+            widget_font.setPointSize(self.font_size)
+            widget.setFont(widget_font)
+        
+        # プレビューテキストエリアのフォントサイズを設定
+        preview_font = self.preview_text.font()
+        preview_font.setPointSize(self.font_size)
+        self.preview_text.setFont(preview_font)
+        
+        # ウィジェットを更新
+        self.update()
+
+    def show_settings_dialog(self):
+        """設定ダイアログを表示する"""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            settings = dialog.get_settings()
+            self.format_template = settings['format_template']
+            self.font_size = settings['font_size']
+            self.apply_font_size()
+            self.load_settings()  # 設定を再読み込み 
