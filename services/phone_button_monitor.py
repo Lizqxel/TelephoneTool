@@ -13,6 +13,8 @@ from typing import Optional, Callable, List, Tuple
 import time
 import threading
 from ctypes import windll, CFUNCTYPE, POINTER, c_int, c_void_p, byref, Structure, c_long, c_ulong, c_uint, c_ulonglong
+import json
+import os
 
 class PhoneButtonMonitor:
     """電話ボタン監視クラス"""
@@ -34,6 +36,78 @@ class PhoneButtonMonitor:
         self.redetect_interval = 10  # 再検出間隔（秒）
         self.last_click_time = 0  # 最後のクリック時間
         self.click_interval = 0.5  # クリック間隔（秒）
+        self.delay_seconds = 0  # 遅延時間（秒）
+        self.countdown_thread = None  # カウントダウン用スレッド
+        self.is_counting_down = False  # カウントダウン中かどうか
+        self.settings_file = "settings.json"  # 設定ファイルのパス
+        
+        # 設定の読み込み
+        self.load_settings()
+        
+    def load_settings(self):
+        """設定ファイルから設定を読み込む"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    self.delay_seconds = settings.get('delay_seconds', 0)
+            else:
+                self.delay_seconds = 0
+        except Exception as e:
+            logging.error(f"設定の読み込みに失敗しました: {str(e)}")
+            self.delay_seconds = 0
+            
+    def update_settings(self):
+        """設定を更新する"""
+        self.load_settings()
+        
+    def start_countdown(self):
+        """カウントダウンを開始する"""
+        if self.is_counting_down:
+            # 既にカウントダウン中の場合は、カウントダウンをリセット
+            self.is_counting_down = False
+            if self.countdown_thread:
+                self.countdown_thread.join(timeout=0.1)
+            logging.info("カウントダウンをリセットしました")
+            return
+            
+        if self.delay_seconds <= 0:
+            # 遅延時間が0の場合は即座にコールバックを実行
+            if self.callback:
+                try:
+                    self.callback()
+                except Exception as e:
+                    logging.error(f"コールバック実行中にエラー: {e}")
+            return
+            
+        self.is_counting_down = True
+        self.countdown_start_time = time.time()
+        self.countdown_thread = threading.Thread(target=self._countdown_loop)
+        self.countdown_thread.daemon = True
+        self.countdown_thread.start()
+        logging.info(f"カウントダウンを開始しました（{self.delay_seconds}秒）")
+        
+    def _countdown_loop(self):
+        """カウントダウンループ"""
+        try:
+            remaining_time = self.delay_seconds
+            while self.is_counting_down and remaining_time > 0:
+                logging.info(f"残り時間: {remaining_time}秒")
+                time.sleep(1)
+                remaining_time -= 1
+                
+            if self.is_counting_down and remaining_time <= 0:
+                # カウントダウンが正常に完了した場合
+                if self.callback:
+                    try:
+                        self.callback()
+                    except Exception as e:
+                        logging.error(f"コールバック実行中にエラー: {e}")
+                self.is_counting_down = False
+                logging.info("カウントダウンが完了しました")
+        except Exception as e:
+            logging.error(f"カウントダウン中にエラーが発生しました: {e}")
+            self.is_counting_down = False
         
     def find_cti_window(self) -> bool:
         """CTIメインウィンドウを検索"""
@@ -184,11 +258,8 @@ class PhoneButtonMonitor:
                         if self.button_rect:
                             if (self.button_rect[0] <= x <= self.button_rect[2] and 
                                 self.button_rect[1] <= y <= self.button_rect[3]):
-                                if self.callback:
-                                    try:
-                                        self.callback()
-                                    except Exception as e:
-                                        logging.error(f"コールバック実行中にエラー: {e}")
+                                # カウントダウンを開始
+                                self.start_countdown()
                                 self.last_click_time = current_time
                 
                 # 最小限の待機時間
@@ -200,10 +271,13 @@ class PhoneButtonMonitor:
     def stop_monitoring(self):
         """ボタン監視を停止"""
         self.is_monitoring = False
+        self.is_counting_down = False
         if hasattr(self, 'redetect_thread'):
             self.redetect_thread.join()
         if hasattr(self, 'monitor_thread'):
             self.monitor_thread.join()
+        if self.countdown_thread:
+            self.countdown_thread.join()
         logging.info("電話ボタン監視を停止しました")
 
     def _redetect_loop(self):
