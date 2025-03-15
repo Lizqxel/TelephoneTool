@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from ui.settings_dialog import SettingsDialog
@@ -130,6 +130,26 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 電話ボタン監視の初期化と開始
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
+        
+        # カウントダウン表示用のラベル
+        self.countdown_label = QLabel()
+        self.countdown_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #E74C3C;
+                padding: 5px;
+                border: 1px solid #E74C3C;
+                border-radius: 4px;
+                background-color: #FFEBEE;
+            }
+        """)
+        self.countdown_label.hide()
+        main_layout.addWidget(self.countdown_label)
+        
+        # カウントダウン更新用のタイマー
+        self.countdown_timer = QTimer()
+        self.countdown_timer.timeout.connect(self.update_countdown)
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -515,42 +535,117 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # マップボタンのシグナル接続
         self.map_btn.clicked.connect(self.open_street_view)
     
-    def fetch_cti_data(self):
+    def show_settings(self):
+        """設定ダイアログを表示"""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            try:
+                # ダイアログがOKで閉じられた場合、設定を再読み込み
+                self.load_settings()
+                # フォントサイズを適用
+                self.apply_font_size()
+                # 電話ボタン監視の設定を更新
+                self.phone_monitor.update_settings()
+                # ウィンドウ全体を更新
+                self.update()
+                logging.info("設定を更新しました")
+            except Exception as e:
+                logging.error(f"設定の更新中にエラーが発生しました: {e}")
+                QMessageBox.critical(self, "エラー", f"設定の更新中にエラーが発生しました: {e}")
+            
+    def update_countdown(self):
+        """カウントダウン表示を更新"""
+        try:
+            if hasattr(self.phone_monitor, 'is_counting_down') and self.phone_monitor.is_counting_down:
+                remaining_time = self.phone_monitor.delay_seconds - (time.time() - self.phone_monitor.countdown_start_time)
+                if remaining_time > 0:
+                    self.countdown_label.setText(f"情報取得まで: {int(remaining_time)}秒")
+                    self.countdown_label.show()
+                else:
+                    self.countdown_label.hide()
+                    self.countdown_timer.stop()
+            else:
+                self.countdown_label.hide()
+                self.countdown_timer.stop()
+        except Exception as e:
+            logging.error(f"カウントダウン表示の更新中にエラー: {e}")
+            self.countdown_label.hide()
+            self.countdown_timer.stop()
+            
+    def update_form_with_data(self, data):
         """
-        CTIメインウィンドウからデータを取得し、
-        フォームに反映します。
+        CTIデータをフォームに反映します
+        
+        Args:
+            data: CTIから取得したデータ
         """
         try:
-            # データ取得
-            data = self.cti_service.get_all_fields_data()
-            if not data:
-                QMessageBox.warning(
-                    self,
-                    "データ取得エラー",
-                    "CTIメインウィンドウからデータを取得できませんでした。\n"
-                    "CTIメインウィンドウが開いているか確認してください。"
-                )
-                return
-
-            # フォームに反映
-            self.list_name_input.setText(data.customer_name)
-            self.contractor_input.setText(data.customer_name)
-            self.address_input.setText(data.address)
-            self.list_address_input.setText(data.address)
-            self.list_phone_input.setText(data.phone)
-            self.postal_code_input.setText(data.postal_code)
-            self.list_postal_code_input.setText(data.postal_code)
-
+            # 顧客名
+            if data.customer_name:
+                self.list_name_input.setText(data.customer_name)
+                self.contractor_input.setText(data.customer_name)
+            
+            # 住所
+            if data.address:
+                self.address_input.setText(data.address)
+                self.list_address_input.setText(data.address)
+            
+            # 電話番号
+            if data.phone:
+                self.list_phone_input.setText(data.phone)
+            
+            # 郵便番号
+            if data.postal_code:
+                self.postal_code_input.setText(data.postal_code)
+                self.list_postal_code_input.setText(data.postal_code)
+                
+            # プレビューを更新
+            self.update_preview()
+            
             # 成功メッセージ
             self.statusBar().showMessage("データを取得しました", 5000)
-
+            
         except Exception as e:
-            logging.error(f"データ取得中にエラー: {str(e)}")
-            QMessageBox.critical(
-                self,
-                "エラー",
-                f"データ取得中にエラーが発生しました。\n{str(e)}"
-            ) 
+            logging.error(f"フォーム更新中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"フォームの更新中にエラーが発生しました: {e}")
+            
+    def fetch_cti_data(self):
+        """CTIデータを取得"""
+        try:
+            # カウントダウン表示を非表示
+            self.countdown_label.hide()
+            self.countdown_timer.stop()
+            
+            # CTIデータの取得処理
+            data = self.cti_service.get_all_fields_data()
+            if data:
+                # メインスレッドでUIを更新
+                QApplication.instance().postEvent(self, QEvent(QEvent.User))
+                self.update_form_with_data(data)
+                logging.info("CTIデータの取得に成功しました")
+            else:
+                logging.warning("CTIデータの取得に失敗しました")
+        except Exception as e:
+            logging.error(f"CTIデータの取得中にエラーが発生しました: {e}")
+            QMessageBox.critical(self, "エラー", f"CTIデータの取得中にエラーが発生しました: {e}")
+            
+    def event(self, event):
+        """イベントハンドラ"""
+        if event.type() == QEvent.User:
+            # メインスレッドでUIを更新
+            self.update_form_with_data(self.cti_service.get_all_fields_data())
+            return True
+        elif event.type() == QEvent.User + 1:
+            # メインスレッドでプレビューを更新
+            try:
+                preview_text = self.generate_cti_format()
+                if preview_text:
+                    self.preview_text.setText(preview_text)
+            except Exception as e:
+                logging.error(f"プレビュー更新中にエラー: {e}")
+                self.preview_text.setText("プレビューの更新に失敗しました")
+            return True
+        return super().event(event)
 
     def validate_contractor_name(self, text):
         """
@@ -700,8 +795,17 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         pass  # カタカナ変換に失敗した場合は何もしない 
 
     def closeEvent(self, event):
-        """ウィンドウが閉じられる際の処理"""
+        """ウィンドウを閉じる際の処理"""
         # 電話ボタン監視を停止
         if hasattr(self, 'phone_monitor'):
             self.phone_monitor.stop_monitoring()
         event.accept()
+
+    def update_preview(self):
+        """プレビューを更新"""
+        try:
+            # メインスレッドでプレビューを更新
+            QApplication.instance().postEvent(self, QEvent(QEvent.User + 1))
+        except Exception as e:
+            logging.error(f"プレビュー更新中にエラー: {e}")
+
