@@ -27,6 +27,7 @@ from ui.main_window_functions import MainWindowFunctions
 from utils.string_utils import validate_name, validate_furigana
 from utils.furigana_utils import convert_to_furigana
 from services.oneclick import OneClickService
+from services.phone_button_monitor import PhoneButtonMonitor
 
 
 class MainWindow(QMainWindow, MainWindowFunctions):
@@ -125,6 +126,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # CTI連携サービスの初期化
         self.cti_service = OneClickService()
+        
+        # 電話ボタン監視の初期化と開始
+        self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
+        self.phone_monitor.start_monitoring()
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -693,3 +698,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         self.list_furigana_input.setText(katakana)
                     except:
                         pass  # カタカナ変換に失敗した場合は何もしない 
+
+    def closeEvent(self, event):
+        """ウィンドウが閉じられる際の処理"""
+        # 電話ボタン監視を停止
+        if hasattr(self, 'phone_monitor'):
+            self.phone_monitor.stop_monitoring()
+        event.accept()
