@@ -9,7 +9,7 @@ import json
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
-                              QGroupBox)
+                              QGroupBox, QSpinBox)
 from PySide6.QtCore import Qt
 
 
@@ -69,11 +69,16 @@ ND：
         # デフォルトのフォントサイズ
         self.default_font_size = 9
         
-        # 親ウィンドウから現在のフォントサイズを取得
-        if parent and hasattr(parent, 'settings') and 'font_size' in parent.settings:
-            self.current_font_size = parent.settings['font_size']
+        # デフォルトの遅延時間（秒）
+        self.default_delay = 0
+        
+        # 親ウィンドウから現在の設定を取得
+        if parent and hasattr(parent, 'settings'):
+            self.current_font_size = parent.settings.get('font_size', self.default_font_size)
+            self.current_delay = parent.settings.get('delay_seconds', self.default_delay)
         else:
             self.current_font_size = self.default_font_size
+            self.current_delay = self.default_delay
         
         # レイアウトの設定
         layout = QVBoxLayout(self)
@@ -104,6 +109,34 @@ ND：
         font_size_layout.addLayout(font_size_slider_layout)
         font_size_group.setLayout(font_size_layout)
         layout.addWidget(font_size_group)
+        
+        # 遅延時間設定グループ
+        delay_group = QGroupBox("遅延時間設定")
+        delay_layout = QVBoxLayout()
+        
+        # 遅延時間の説明
+        delay_description = QLabel("CTIボタンクリック後、情報取得を開始するまでの遅延時間を設定します。")
+        delay_description.setWordWrap(True)
+        delay_layout.addWidget(delay_description)
+        
+        # 遅延時間スピンボックス
+        delay_spin_layout = QHBoxLayout()
+        delay_spin_layout.addWidget(QLabel("遅延時間:"))
+        
+        self.delay_spin = QSpinBox()
+        self.delay_spin.setRange(0, 300)  # 0-300秒
+        self.delay_spin.setValue(self.current_delay)
+        self.delay_spin.setSuffix(" 秒")
+        delay_spin_layout.addWidget(self.delay_spin)
+        
+        # 遅延時間リセットボタン
+        self.delay_reset_btn = QPushButton("デフォルトに戻す")
+        self.delay_reset_btn.clicked.connect(self.reset_delay)
+        delay_spin_layout.addWidget(self.delay_reset_btn)
+        
+        delay_layout.addLayout(delay_spin_layout)
+        delay_group.setLayout(delay_layout)
+        layout.addWidget(delay_group)
         
         # 説明ラベル
         description = QLabel("CTIフォーマットのテンプレートを編集できます。\n"
@@ -154,6 +187,10 @@ ND：
         """フォントサイズをデフォルトに戻す"""
         self.font_size_slider.setValue(self.default_font_size)
     
+    def reset_delay(self):
+        """遅延時間をデフォルトに戻す"""
+        self.delay_spin.setValue(self.default_delay)
+    
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
@@ -162,22 +199,27 @@ ND：
                     settings = json.load(f)
                     format_template = settings.get('format_template', self.default_format)
                     font_size = settings.get('font_size', self.default_font_size)
+                    delay_seconds = settings.get('delay_seconds', self.default_delay)
                     self.format_edit.setText(format_template)
                     self.font_size_slider.setValue(font_size)
+                    self.delay_spin.setValue(delay_seconds)
             else:
                 self.format_edit.setText(self.default_format)
                 self.font_size_slider.setValue(self.default_font_size)
+                self.delay_spin.setValue(self.default_delay)
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
             self.font_size_slider.setValue(self.default_font_size)
+            self.delay_spin.setValue(self.default_delay)
     
     def save_settings(self):
         """設定をファイルに保存する"""
         try:
             settings = {
                 'format_template': self.format_edit.toPlainText(),
-                'font_size': self.font_size_slider.value()
+                'font_size': self.font_size_slider.value(),
+                'delay_seconds': self.delay_spin.value()
             }
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -190,6 +232,7 @@ ND：
         """設定をデフォルトに戻す"""
         self.format_edit.setText(self.default_format)
         self.font_size_slider.setValue(self.default_font_size)
+        self.delay_spin.setValue(self.default_delay)
     
     def accept(self):
         """ダイアログを受け入れる（OKボタン）"""
@@ -200,5 +243,6 @@ ND：
         """現在の設定を取得する"""
         return {
             'format_template': self.format_edit.toPlainText(),
-            'font_size': self.font_size_slider.value()
+            'font_size': self.font_size_slider.value(),
+            'delay_seconds': self.delay_spin.value()
         } 
