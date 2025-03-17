@@ -13,33 +13,54 @@ import re
 from PySide6.QtWidgets import QMessageBox, QApplication, QWidget
 from PySide6.QtCore import QTimer, QThread, Signal
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QMessageBox, QApplication
 
 from ui.settings_dialog import SettingsDialog
 from services import area_search
+from services import oneclick
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
 
 
 class ServiceAreaSearchWorker(QThread):
-    """提供エリア検索を実行するワーカースレッド"""
+    """
+    提供エリア検索を非同期で実行するワーカースレッド
+    
+    Attributes:
+        finished (Signal): 検索完了時に発火する信号
+        postal_code (str): 検索対象の郵便番号
+        address (str): 検索対象の住所
+    """
     finished = Signal(dict)
     
     def __init__(self, postal_code, address):
+        """
+        コンストラクタ
+        
+        Args:
+            postal_code (str): 検索対象の郵便番号
+            address (str): 検索対象の住所
+        """
         super().__init__()
         self.postal_code = postal_code
         self.address = address
     
     def run(self):
-        """検索を実行して結果を発行"""
+        """スレッド実行時に呼び出される関数"""
         try:
+            # 提供エリア検索を実行
             result = area_search.search_service_area(self.postal_code, self.address)
+            # 結果を信号で送信
             self.finished.emit(result)
         except Exception as e:
-            self.finished.emit({
+            # エラーが発生した場合はエラー情報を送信
+            error_result = {
                 "status": "error",
-                "message": f"検索中にエラーが発生しました: {str(e)}"
-            })
+                "message": str(e),
+                "details": {"エラー": str(e)}
+            }
+            self.finished.emit(error_result)
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
