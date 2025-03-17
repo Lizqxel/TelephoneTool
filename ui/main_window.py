@@ -39,15 +39,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.setWindowTitle("コールセンター業務効率化ツール")
         self.setMinimumSize(1000, 800)
         
-        # クリップボード監視用の変数
-        self.clipboard = QApplication.clipboard()
-        self.last_clipboard_text = ""
-        self.clipboard_timer = QTimer()
-        self.clipboard_timer.timeout.connect(self.check_clipboard)
-        
-        # 受注者名の初期化
-        self.order_person = ""
-        
         # メインウィジェットの設定
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -98,12 +89,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 border: none;
-                background: none;
-                height: 0px;
             }
         """)
         
-        # スクロールエリアをレイアウトに追加（左側70%）
+        # レイアウトにスクロールエリアを追加
         content_layout.addWidget(scroll_area, 70)
         
         # プレビューエリア（右側30%）
@@ -112,7 +101,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.create_preview_area(preview_layout)
         content_layout.addWidget(preview_group, 30)
         
-        # コンテンツレイアウトをメインレイアウトに追加
+        # メインレイアウトに追加
         main_layout.addLayout(content_layout)
         
         # シグナルの設定
@@ -157,8 +146,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         top_bar.setStyleSheet("background-color: #2C3E50; color: white;")
         top_bar_layout = QHBoxLayout(top_bar)
         
-        # ワンクリック取得ボタン
-        self.oneclick_btn = QPushButton("ワンクリック取得")
+        # ワンクリック取得ボタン（名称変更：顧客情報取得）
+        self.oneclick_btn = QPushButton("顧客情報取得")
         self.oneclick_btn.setStyleSheet("""
             QPushButton {
                 color: white;
@@ -178,17 +167,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         top_bar_layout.addWidget(self.oneclick_btn)
         
         # 既存のボタン
-        self.settings_btn = QPushButton("設定")
         self.clear_btn = QPushButton("入力クリア")
-        self.cti_copy_btn = QPushButton("CTIコピー")
-        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
-        
-        # クリップボード監視トグルボタン
-        self.clipboard_toggle_btn = QPushButton("クリップボード監視")
-        self.clipboard_toggle_btn.setCheckable(True)
-        
-        # スクリーンショット表示ボタン
-        self.screenshot_btn = QPushButton("スクリーンショット")
+        self.cti_copy_btn = QPushButton("営コメ作成")
+        self.screenshot_btn = QPushButton("提供判定のスクリーンショット確認")
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記（未実装）")
+        self.settings_btn = QPushButton("設定")
         
         # ボタンのスタイル設定
         button_style = """
@@ -206,24 +189,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """
         
-        for btn in [self.settings_btn, self.clear_btn, 
-                   self.cti_copy_btn, self.spreadsheet_btn,
-                   self.clipboard_toggle_btn, self.screenshot_btn]:
+        for btn in [self.clear_btn, self.cti_copy_btn, 
+                   self.screenshot_btn, self.spreadsheet_btn, self.settings_btn]:
             btn.setStyleSheet(button_style)
         
         # ボタンの接続
-        self.settings_btn.clicked.connect(self.show_settings)
         self.clear_btn.clicked.connect(self.clear_all_inputs)
         self.cti_copy_btn.clicked.connect(self.generate_cti_format)
+        self.screenshot_btn.clicked.connect(self.show_screenshot)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
+        self.settings_btn.clicked.connect(self.show_settings)
         
-        # ボタンをレイアウトに追加
-        top_bar_layout.addWidget(self.settings_btn)
+        # ボタンをレイアウトに追加（指定された順序で）
         top_bar_layout.addWidget(self.clear_btn)
         top_bar_layout.addWidget(self.cti_copy_btn)
-        top_bar_layout.addWidget(self.spreadsheet_btn)
-        top_bar_layout.addWidget(self.clipboard_toggle_btn)
         top_bar_layout.addWidget(self.screenshot_btn)
+        top_bar_layout.addWidget(self.spreadsheet_btn)
+        top_bar_layout.addWidget(self.settings_btn)
         
         parent_layout.addWidget(top_bar)
     
@@ -498,16 +480,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def setup_signals(self):
         """シグナルの設定"""
-        # 既存のシグナル設定
-        self.settings_btn.clicked.connect(self.show_settings)
-        self.clear_btn.clicked.connect(self.clear_all_inputs)
-        self.cti_copy_btn.clicked.connect(self.generate_cti_format)
-        self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
-        self.clipboard_toggle_btn.clicked.connect(self.toggle_clipboard_monitor)
-        
-        # スクリーンショット表示ボタンのシグナル設定
-        self.screenshot_btn.clicked.connect(self.show_screenshot)
-        
         # 自動フォーマット用のシグナル
         self.mobile_input.textChanged.connect(self.format_phone_number)
         self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
@@ -742,57 +714,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         else:
             self.list_furigana_input.setStyleSheet("")
             QToolTip.hideText()
-
-    def analyze_clipboard_content(self, text):
-        """クリップボードの内容を解析して適切なフィールドに入力"""
-        # 電話番号（ハイフンあり/なし）のパターン
-        phone_pattern = re.compile(r'(\d{2,4}[-\s]?\d{2,4}[-\s]?\d{4})')
-        phone_matches = phone_pattern.finditer(text)
-        
-        # 郵便番号（ハイフンあり/なし）のパターン
-        postal_pattern = re.compile(r'(\d{3}[-\s]?\d{4})')
-        postal_match = postal_pattern.search(text)
-        
-        # 電話番号の処理
-        for match in phone_matches:
-            phone_number = match.group(1)
-            # 携帯電話番号の判定（070, 080, 090で始まる番号）
-            if phone_number.replace('-', '').replace(' ', '').startswith(('070', '080', '090')):
-                self.mobile_input.setText(phone_number)
-                self.mobile_type_combo.setCurrentText("入力")
-            else:
-                self.list_phone_input.setText(phone_number)
-        
-        # 郵便番号の処理
-        if postal_match:
-            postal_code = postal_match.group(1)
-            self.postal_code_input.setText(postal_code)
-            self.list_postal_code_input.setText(postal_code)
-        
-        # 住所らしき文字列（漢字とカタカナが含まれる長い文字列）
-        if len(text) > 10 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            self.address_input.setText(text)
-            self.list_address_input.setText(text)
-        
-        # カタカナのみの文字列（フリガナとして扱う）
-        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF or c.isspace() for c in text):
-            self.list_furigana_input.setText(text)
-        
-        # その他の文字列（名前として扱う）
-        if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            # 数字が含まれていない場合のみ、名前として処理
-            if validate_name(text):
-                self.list_name_input.setText(text)
-                # フリガナが空の場合は、カタカナ変換を試みる
-                if not self.list_furigana_input.text():
-                    try:
-                        import pykakasi
-                        kakasi = pykakasi.kakasi()
-                        result = kakasi.convert(text)
-                        katakana = ''.join([item['kana'] for item in result])
-                        self.list_furigana_input.setText(katakana)
-                    except:
-                        pass  # カタカナ変換に失敗した場合は何もしない 
 
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
