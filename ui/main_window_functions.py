@@ -15,7 +15,7 @@ from PySide6.QtCore import QTimer, QThread, Signal
 from PySide6.QtGui import QFont
 
 from ui.settings_dialog import SettingsDialog
-from services.area_search import search_service_area
+from services import area_search
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
@@ -33,7 +33,7 @@ class ServiceAreaSearchWorker(QThread):
     def run(self):
         """検索を実行して結果を発行"""
         try:
-            result = search_service_area(self.postal_code, self.address)
+            result = area_search.search_service_area(self.postal_code, self.address)
             self.finished.emit(result)
         except Exception as e:
             self.finished.emit({
@@ -366,16 +366,33 @@ class MainWindowFunctions:
     
     def search_service_area(self):
         """提供エリア検索を実行"""
-        postal_code = self.postal_code_input.text()
-        address = self.address_input.text()
+        # 郵便番号と住所を取得
+        postal_code = self.postal_code_input.text().strip()
+        address = self.address_input.text().strip()
         
+        # 入力チェック
         if not postal_code or not address:
-            QMessageBox.warning(self, "エラー", "郵便番号と住所を入力してください。")
+            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
             return
         
-        # 検索ボタンを無効化し、進捗状態を表示
-        self.area_search_btn.setEnabled(False)
-        self.area_search_btn.setText("検索中...")
+        # 検索中の表示
+        self.area_result_label.setText("提供エリア: 検索中...")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #3498DB;
+                border-radius: 4px;
+                background-color: #E3F2FD;
+                color: #3498DB;
+            }
+        """)
+        QApplication.processEvents()
+        
+        # 検索ボタンを無効化
+        if hasattr(self, 'area_search_btn'):
+            self.area_search_btn.setEnabled(False)
+            self.area_search_btn.setText("検索中...")
         
         # ワーカースレッドを作成して開始
         self.search_worker = ServiceAreaSearchWorker(postal_code, address)
@@ -384,12 +401,10 @@ class MainWindowFunctions:
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
-        # UIを元の状態に戻す
-        self.area_search_btn.setEnabled(True)
-        self.area_search_btn.setText("検索")
-        
-        # スクリーンショットボタンを更新
-        self.update_screenshot_button(result.get("screenshot"))
+        # 検索ボタンを有効化
+        if hasattr(self, 'area_search_btn'):
+            self.area_search_btn.setEnabled(True)
+            self.area_search_btn.setText("検索")
         
         # 結果表示を更新
         if result["status"] == "success":
@@ -422,10 +437,14 @@ class MainWindowFunctions:
             self.judgment_combo.setCurrentText("×")
         
         # 詳細情報がある場合は表示
-        if "details" in result:
+        if "details" in result and result.get("show_popup", True):
             details = result["details"]
             details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
             QMessageBox.information(self, "検索結果", details_text)
+        
+        # スクリーンショットパスを更新
+        if "screenshot" in result:
+            self.update_screenshot_button(result["screenshot"])
     
     def update_screenshot_button(self, screenshot_path=None):
         """スクリーンショットボタンを更新"""

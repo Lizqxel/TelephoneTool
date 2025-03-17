@@ -9,6 +9,7 @@ import logging
 import time
 import re
 import os
+import json
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -234,10 +235,25 @@ def search_service_area(postal_code, address):
     if len(postal_code_clean) != 7 or not postal_code_clean.isdigit():
         return {"status": "error", "message": "郵便番号は7桁の数字で入力してください。"}
     
+    # ブラウザ設定を読み込む
+    browser_settings = {}
+    try:
+        if os.path.exists("settings.json"):
+            with open("settings.json", "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                browser_settings = settings.get("browser_settings", {})
+    except Exception as e:
+        logging.warning(f"ブラウザ設定の読み込みに失敗しました: {str(e)}")
+    
+    # ヘッドレスモードの設定を取得
+    headless_mode = browser_settings.get("headless", False)
+    # ポップアップ表示設定を取得
+    show_popup = browser_settings.get("show_popup", True)
+    
     driver = None
     try:
         # 1. ドライバーを作成してサイトを開く
-        driver = create_driver()
+        driver = create_driver(headless=headless_mode)
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         driver.get("https://flets-w.com/cart/")
         WebDriverWait(driver, 15).until(
@@ -831,6 +847,7 @@ def search_service_area(postal_code, address):
                         
                         result = found_pattern.copy()
                         result["screenshot"] = os.path.abspath(screenshot_path)
+                        result["show_popup"] = show_popup  # ポップアップ表示設定を追加
                         return result
                     else:
                         # 提供不可時のスクリーンショットを保存
@@ -845,7 +862,8 @@ def search_service_area(postal_code, address):
                                 "提供エリア": "提供対象外エリアです",
                                 "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
                             },
-                            "screenshot": os.path.abspath(screenshot_path)
+                            "screenshot": os.path.abspath(screenshot_path),
+                            "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
                         
                 except TimeoutException:
@@ -861,7 +879,8 @@ def search_service_area(postal_code, address):
                             "提供エリア": "判定できませんでした",
                             "備考": "提供可否の確認中にタイムアウトが発生しました"
                         },
-                        "screenshot": os.path.abspath(screenshot_path)
+                        "screenshot": os.path.abspath(screenshot_path),
+                        "show_popup": show_popup  # ポップアップ表示設定を追加
                     }
                 except Exception as e:
                     # エラー時のスクリーンショットを保存
@@ -876,7 +895,8 @@ def search_service_area(postal_code, address):
                             "提供エリア": "判定できませんでした",
                             "備考": f"エラーが発生しました: {str(e)}"
                         },
-                        "screenshot": os.path.abspath(screenshot_path)
+                        "screenshot": os.path.abspath(screenshot_path),
+                        "show_popup": show_popup  # ポップアップ表示設定を追加
                     }
             
             except Exception as e:
@@ -886,7 +906,8 @@ def search_service_area(postal_code, address):
                 return {
                     "status": "error", 
                     "message": f"結果の判定に失敗しました: {str(e)}",
-                    "screenshot": os.path.abspath(screenshot_path)
+                    "screenshot": os.path.abspath(screenshot_path),
+                    "show_popup": show_popup  # ポップアップ表示設定を追加
                 }
                 
         except TimeoutException as e:
@@ -896,7 +917,8 @@ def search_service_area(postal_code, address):
             return {
                 "status": "error",
                 "message": "住所候補が見つかりませんでした",
-                "screenshot": os.path.abspath(screenshot_path)
+                "screenshot": os.path.abspath(screenshot_path),
+                "show_popup": show_popup  # ポップアップ表示設定を追加
             }
         except Exception as e:
             logging.error(f"住所選択処理中にエラーが発生しました: {str(e)}")
@@ -905,7 +927,8 @@ def search_service_area(postal_code, address):
             return {
                 "status": "error",
                 "message": f"住所選択に失敗しました: {str(e)}",
-                "screenshot": os.path.abspath(screenshot_path)
+                "screenshot": os.path.abspath(screenshot_path),
+                "show_popup": show_popup  # ポップアップ表示設定を追加
             }
     
     except Exception as e:
@@ -916,7 +939,8 @@ def search_service_area(postal_code, address):
         return {
             "status": "error",
             "message": f"エラーが発生しました: {str(e)}",
-            "screenshot": os.path.abspath(screenshot_path)
+            "screenshot": os.path.abspath(screenshot_path),
+            "show_popup": show_popup  # ポップアップ表示設定を追加
         }
     
     finally:
