@@ -231,6 +231,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         mobile_layout.addWidget(self.mobile_input)
         basic_layout.addLayout(mobile_layout)
         
+        # 出やすい時間帯を追加
+        basic_layout.addWidget(QLabel("出やすい時間帯"))
+        self.available_time_input = QLineEdit()
+        self.available_time_input.setPlaceholderText("例: 午前中、13時以降など")
+        basic_layout.addWidget(self.available_time_input)
+        
         # 契約者名
         basic_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
@@ -729,4 +735,48 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QApplication.instance().postEvent(self, QEvent(QEvent.User + 1))
         except Exception as e:
             logging.error(f"プレビュー更新中にエラー: {e}")
+
+    def clear_all_inputs(self):
+        """全ての入力フィールドをクリア"""
+        self.operator_input.clear()
+        self.mobile_input.clear()
+        self.available_time_input.clear()  # 出やすい時間帯をクリア
+        self.contractor_input.clear()
+        self.furigana_input.clear()
+        self.postal_code_input.clear()
+        self.address_input.clear()
+        self.list_name_input.clear()
+        self.list_furigana_input.clear()
+        self.list_phone_input.clear()
+        self.list_postal_code_input.clear()
+        self.list_address_input.clear()
+        self.order_person_input.clear()
+        self.fee_input.clear()
+        self.remarks_input.clear()
+        # コンボボックスをデフォルト値に
+        self.mobile_type_combo.setCurrentIndex(0)
+        self.era_combo.setCurrentIndex(0)
+        self.year_combo.setCurrentIndex(0)
+        self.month_combo.setCurrentIndex(0)
+        self.day_combo.setCurrentIndex(0)
+        self.current_line_combo.setCurrentIndex(0)
+        self.judgment_combo.setCurrentIndex(0)
+        self.net_usage_combo.setCurrentIndex(0)
+        self.family_approval_combo.setCurrentIndex(0)
+        # 結果ラベルをクリア
+        self.area_result_label.setText("提供エリア: 未検索")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #95a5a6;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                color: #95a5a6;
+            }
+        """)
+        # スクリーンショットボタンをクリア
+        self.update_screenshot_button()
+        # プレビューもクリア
+        self.preview_text.clear()
 

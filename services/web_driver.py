@@ -8,6 +8,7 @@ Webドライバーサービス
 import logging
 import json
 import os
+import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
@@ -28,47 +29,61 @@ def create_driver(headless=False):
         Exception: ドライバーの作成に失敗した場合
     """
     options = Options()
+    
+    # 基本的な安定性のための設定
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
     
     # ブラウザ設定を読み込む
     browser_settings = load_browser_settings()
     
     # ヘッドレスモードの設定
-    if headless or browser_settings.get("headless", False):
+    is_headless = headless or browser_settings.get("headless", False)
+    if is_headless:
         options.add_argument("--headless=new")  # 新しいヘッドレスモード
+        logging.info("ヘッドレスモードで起動します")
+    else:
+        logging.info("通常モード（ウィンドウ表示）で起動します")
+    
+    # WebGLとグラフィックス関連のエラーを回避するための設定
+    options.add_argument("--use-gl=swiftshader")  # SwiftShaderによるソフトウェアレンダリング
+    options.add_argument("--use-angle=swiftshader")  # ANGLEバックエンドとしてSwiftShaderを使用
+    options.add_argument("--ignore-gpu-blocklist")  # GPUブロックリストを無視
+    options.add_argument("--allow-insecure-localhost")  # 安全でないlocalhostを許可
+    options.add_argument("--allow-running-insecure-content")  # 安全でないコンテンツの実行を許可
+    
+    # ブラウザのクラッシュを防ぐための設定
+    options.add_argument("--disable-features=NetworkService")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--disable-breakpad")  # クラッシュレポート機能を無効化
+    options.add_argument("--disable-component-update")  # コンポーネント更新を無効化
+    
+    # ウィンドウサイズの設定を変更して軽量化する
+    # ウィンドウサイズの設定（ヘッドレスモードでなければ適度な小さいサイズに）
+    if not is_headless:
+        # options.add_argument("--start-maximized")  # 最大化はしない
+        options.add_argument("--window-size=800,600")  # より小さなウィンドウサイズ
+        logging.info("ウィンドウサイズを 800x600 に設定しました（処理負荷軽減のため）")
+    else:
+        options.add_argument("--window-size=800,600")  # ヘッドレスモード用のサイズも小さく
     
     # パフォーマンス最適化のための設定
-    options.add_argument("--window-size=1280,720")  # さらに小さいウィンドウサイズ
-    options.add_argument("--disable-extensions")  # 拡張機能を無効化
-    options.add_argument("--disable-popup-blocking")  # ポップアップブロックを無効化
-    options.add_argument("--disable-blink-features=AutomationControlled")  # 自動化検出を回避
-    options.add_argument("--lang=ja")  # 言語を日本語に設定
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--lang=ja")
     
-    # メモリ使用量を制限
-    options.add_argument("--js-flags=--max-old-space-size=256")  # JavaScriptのメモリ制限をさらに小さく
-    options.add_argument("--disable-infobars")  # 情報バーを無効化
-    options.add_argument("--disable-notifications")  # 通知を無効化
-    options.add_argument("--disable-default-apps")  # デフォルトアプリを無効化
+    # 通知関連の設定
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-infobars")
     
-    # 画像読み込みを無効化（大幅な高速化）
-    if browser_settings.get("disable_images", True):
+    # 画像読み込みを無効化（高速化） - ウィンドウ表示の場合は画像を有効化
+    if browser_settings.get("disable_images", True) and is_headless:
         options.add_argument("--blink-settings=imagesEnabled=false")
     
-    # キャッシュを無効化
-    options.add_argument("--disable-application-cache")
-    options.add_argument("--disable-cache")
-    
-    # プロセス数を制限
-    options.add_argument("--single-process")
-    
-    # 追加の高速化オプション
-    options.add_argument("--disable-accelerated-2d-canvas")
-    options.add_argument("--disable-accelerated-jpeg-decoding")
-    options.add_argument("--disable-accelerated-video-decode")
-    options.add_argument("--disable-web-security")
-    options.add_argument("--disable-site-isolation-trials")
+    # プロセス関連の安定性向上設定
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
     
     # User-Agentを設定
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
@@ -84,6 +99,16 @@ def create_driver(headless=False):
         # JavaScriptの実行を待機
         driver.set_script_timeout(browser_settings.get("script_timeout", 30))
         
+        # 非ヘッドレスモードの場合のウィンドウ処理修正
+        # 非ヘッドレスモードの場合、ウィンドウを前面に表示
+        if not is_headless:
+            # JavaScriptを使ってウィンドウをフォーカス
+            driver.execute_script("window.focus();")
+            # ウィンドウサイズを確実に適用（最大化はしない）
+            # driver.maximize_window()
+            logging.info(f"ブラウザウィンドウを表示しました: {driver.get_window_size()}")
+        
+        logging.info("Chromeドライバーが正常に初期化されました")
         return driver
     except Exception as e:
         logging.error(f"ドライバーの作成に失敗しました: {str(e)}")

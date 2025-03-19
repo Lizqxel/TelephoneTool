@@ -250,12 +250,26 @@ def search_service_area(postal_code, address):
     # ポップアップ表示設定を取得
     show_popup = browser_settings.get("show_popup", True)
     
+    # ポップアップを表示する場合は強制的にヘッドレスモードを無効化
+    if show_popup:
+        headless_mode = False
+        logging.info("ポップアップ表示が有効なため、ヘッドレスモードを無効化します")
+    
     driver = None
     try:
         # 1. ドライバーを作成してサイトを開く
         driver = create_driver(headless=headless_mode)
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
+        
+        # 非ヘッドレスモードの場合、ウィンドウが確実に表示されるよう少し待機
+        if not headless_mode:
+            time.sleep(2)  # ウィンドウが初期化されるまで2秒待機
+            logging.info("表示モードでブラウザを起動しました - ウィンドウが表示されていることを確認してください")
+        
         driver.get("https://flets-w.com/cart/")
+        logging.info("NTT西日本のサイトにアクセスしています...")
+        
+        # ページが完全に読み込まれるまで待機（10秒まで）
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.TAG_NAME, "body"))
         )
@@ -811,7 +825,9 @@ def search_service_area(postal_code, address):
                                 "//img[contains(@alt, '未提供')]"
                             ],
                             "status": "error",
-                            "message": {
+                            "message": "提供不可",
+                            "details": {
+                                "判定結果": "NG",
                                 "提供エリア": "提供対象外エリアです",
                                 "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
                             }
@@ -843,8 +859,10 @@ def search_service_area(postal_code, address):
                         # 画像確認時のスクリーンショットを保存
                         screenshot_path = f"debug_{found_pattern['status']}_confirmation.png"
                         driver.save_screenshot(screenshot_path)
-                        logging.info(f"{found_pattern['message']}状態が確認されました - スクリーンショットを保存しました")
+                        result_message = f"{found_pattern['message']}状態が確認されました"
+                        logging.info(f"{result_message} - スクリーンショットを保存しました")
                         
+                        # 結果を返す（JavaScriptによる画面書き換えは行わない）
                         result = found_pattern.copy()
                         result["screenshot"] = os.path.abspath(screenshot_path)
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
@@ -944,5 +962,10 @@ def search_service_area(postal_code, address):
         }
     
     finally:
-        if driver:
-            driver.quit() 
+        # show_popupがTrueの場合は常にブラウザを閉じない
+        if driver and show_popup:
+            logging.info("ポップアップ表示モードが有効です。ブラウザウィンドウは手動で閉じるまで維持されます。")
+        # show_popupがFalseならブラウザを閉じる
+        elif driver:
+            driver.quit()
+            logging.info("ブラウザウィンドウを閉じました") 
