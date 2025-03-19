@@ -109,6 +109,12 @@ def create_driver(headless=False):
             logging.info(f"ブラウザウィンドウを表示しました: {driver.get_window_size()}")
         
         logging.info("Chromeドライバーが正常に初期化されました")
+        
+        # 自動終了設定をドライバーに追加
+        driver._auto_close = browser_settings.get("auto_close", False)
+        driver._headless = is_headless
+        driver._show_popup = browser_settings.get("show_popup", False)
+        
         return driver
     except Exception as e:
         logging.error(f"ドライバーの作成に失敗しました: {str(e)}")
@@ -126,7 +132,8 @@ def load_browser_settings():
         "page_load_timeout": 30,
         "script_timeout": 30,
         "disable_images": True,
-        "show_popup": False
+        "show_popup": False,
+        "auto_close": False
     }
     
     try:
@@ -135,6 +142,11 @@ def load_browser_settings():
                 settings = json.load(f)
                 # ブラウザ設定が含まれていない場合はデフォルト値を使用
                 browser_settings = settings.get("browser_settings", default_settings)
+                
+                # auto_closeが設定に含まれていない場合はデフォルト値を使用
+                if "auto_close" not in browser_settings:
+                    browser_settings["auto_close"] = default_settings["auto_close"]
+                    
                 return browser_settings
     except Exception as e:
         logging.warning(f"ブラウザ設定の読み込みに失敗しました: {str(e)}")

@@ -20,6 +20,9 @@ from selenium.webdriver.common.keys import Keys
 from services.web_driver import create_driver
 from utils.string_utils import normalize_string, calculate_similarity
 
+# グローバル変数でブラウザドライバーを保持
+global_driver = None
+
 def normalize_address(address):
     """
     住所文字列を正規化する関数
@@ -224,6 +227,8 @@ def search_service_area(postal_code, address):
     Returns:
         dict: 検索結果を含む辞書
     """
+    global global_driver
+    
     logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
     
     # 住所を分割
@@ -249,6 +254,8 @@ def search_service_area(postal_code, address):
     headless_mode = browser_settings.get("headless", False)
     # ポップアップ表示設定を取得
     show_popup = browser_settings.get("show_popup", True)
+    # ブラウザ自動終了設定を取得
+    auto_close = browser_settings.get("auto_close", True)
     
     # ポップアップを表示する場合は強制的にヘッドレスモードを無効化
     if show_popup:
@@ -259,6 +266,9 @@ def search_service_area(postal_code, address):
     try:
         # 1. ドライバーを作成してサイトを開く
         driver = create_driver(headless=headless_mode)
+        # グローバル変数に保存
+        global_driver = driver
+        
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
         # 非ヘッドレスモードの場合、ウィンドウが確実に表示されるよう少し待機
@@ -982,10 +992,9 @@ def search_service_area(postal_code, address):
         }
     
     finally:
-        # ヘッドレスモードがオフまたはポップアップ表示モードが有効の場合はブラウザを閉じない
-        if driver and (show_popup or not headless_mode):
-            logging.info("ブラウザウィンドウは手動で閉じるまで維持されます。ヘッドレスモード: " + str(headless_mode))
-        # それ以外の場合（ヘッドレスモードかつshow_popup=False）はブラウザを閉じる
-        elif driver:
-            driver.quit()
-            logging.info("ブラウザウィンドウを閉じました") 
+        # どのような場合でもブラウザは閉じない
+        if driver:
+            logging.info("ブラウザウィンドウを維持します - 手動で閉じてください")
+            # driver.quit() を呼び出さない
+            # グローバル変数にドライバーを保持
+            global_driver = driver

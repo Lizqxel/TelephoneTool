@@ -7,6 +7,7 @@
     "disable_images": true,
     "show_popup": false,
     "page_load_timeout": 60,
-    "script_timeout": 60
+    "script_timeout": 60,
+    "auto_close": false
   }
 }

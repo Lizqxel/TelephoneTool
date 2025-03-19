@@ -75,9 +75,11 @@ ND：
         # デフォルトのブラウザ設定
         self.default_browser_settings = {
             "headless": False,
+            "disable_images": True,
             "show_popup": True,
             "page_load_timeout": 30,
-            "script_timeout": 30
+            "script_timeout": 30,
+            "auto_close": False
         }
         
         # 親ウィンドウから現在の設定を取得
@@ -186,6 +188,12 @@ ND：
         self.popup_checkbox.setToolTip("無効にすると提供判定結果のポップアップが表示されなくなります")
         browser_layout.addWidget(self.popup_checkbox)
         
+        # ブラウザ自動終了設定
+        self.auto_close_checkbox = QCheckBox("ブラウザを自動的に閉じる")
+        self.auto_close_checkbox.setChecked(self.current_browser_settings.get("auto_close", False))
+        self.auto_close_checkbox.setToolTip("有効にするとブラウザウィンドウが自動的に閉じられます")
+        browser_layout.addWidget(self.auto_close_checkbox)
+        
         # タイムアウト設定
         timeout_layout = QHBoxLayout()
         timeout_layout.addWidget(QLabel("ページ読み込みタイムアウト:"))
@@ -288,6 +296,7 @@ ND：
         self.headless_checkbox.setChecked(self.default_browser_settings["headless"])
         self.disable_images_checkbox.setChecked(self.default_browser_settings["disable_images"])
         self.popup_checkbox.setChecked(self.default_browser_settings["show_popup"])
+        self.auto_close_checkbox.setChecked(self.default_browser_settings["auto_close"])
         self.page_timeout_spin.setValue(self.default_browser_settings["page_load_timeout"])
         self.script_timeout_spin.setValue(self.default_browser_settings["script_timeout"])
     
@@ -310,6 +319,7 @@ ND：
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
                     self.disable_images_checkbox.setChecked(browser_settings.get("disable_images", True))
                     self.popup_checkbox.setChecked(browser_settings.get("show_popup", True))
+                    self.auto_close_checkbox.setChecked(browser_settings.get("auto_close", False))
                     self.page_timeout_spin.setValue(browser_settings.get("page_load_timeout", 30))
                     self.script_timeout_spin.setValue(browser_settings.get("script_timeout", 30))
             else:
@@ -332,6 +342,7 @@ ND：
                 "headless": self.headless_checkbox.isChecked(),
                 "disable_images": self.disable_images_checkbox.isChecked(),
                 "show_popup": self.popup_checkbox.isChecked(),
+                "auto_close": self.auto_close_checkbox.isChecked(),
                 "page_load_timeout": self.page_timeout_spin.value(),
                 "script_timeout": self.script_timeout_spin.value()
             }
@@ -367,6 +378,7 @@ ND：
             "headless": self.headless_checkbox.isChecked(),
             "disable_images": self.disable_images_checkbox.isChecked(),
             "show_popup": self.popup_checkbox.isChecked(),
+            "auto_close": self.auto_close_checkbox.isChecked(),
             "page_load_timeout": self.page_timeout_spin.value(),
             "script_timeout": self.script_timeout_spin.value()
         }
