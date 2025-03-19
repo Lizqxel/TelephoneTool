@@ -9,7 +9,7 @@ import json
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
-                              QGroupBox, QSpinBox, QCheckBox)
+                              QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget)
 from PySide6.QtCore import Qt
 
 
@@ -25,7 +25,7 @@ class SettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("設定")
-        self.setMinimumSize(600, 500)  # 高さを少し増やす
+        self.setFixedSize(700, 600)  # ダイアログサイズを固定
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -33,7 +33,7 @@ class SettingsDialog(QDialog):
         # デフォルトのフォーマットテンプレート
         self.default_format = """対応者（お客様の名前）：{operator}
 工事希望日
-★出やすい時間帯：携帯：{mobile}
+★出やすい時間帯：{available_time} 携帯：{mobile}
 ★電話取次：アナログ→光電話
 ★電話OP：
 ★無線
@@ -90,8 +90,19 @@ ND：
             self.current_delay = self.default_delay
             self.current_browser_settings = self.default_browser_settings
         
-        # レイアウトの設定
-        layout = QVBoxLayout(self)
+        # メインレイアウト
+        main_layout = QVBoxLayout(self)
+        
+        # スクロールエリアの設定
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # スクロールエリア内のコンテンツウィジェット
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(10)
         
         # フォントサイズ設定グループ
         font_size_group = QGroupBox("フォントサイズ設定")
@@ -118,7 +129,7 @@ ND：
         
         font_size_layout.addLayout(font_size_slider_layout)
         font_size_group.setLayout(font_size_layout)
-        layout.addWidget(font_size_group)
+        content_layout.addWidget(font_size_group)
         
         # 遅延時間設定グループ
         delay_group = QGroupBox("遅延時間設定")
@@ -146,7 +157,7 @@ ND：
         
         delay_layout.addLayout(delay_spin_layout)
         delay_group.setLayout(delay_layout)
-        layout.addWidget(delay_group)
+        content_layout.addWidget(delay_group)
         
         # ブラウザ設定グループ
         browser_group = QGroupBox("ブラウザ設定")
@@ -205,21 +216,33 @@ ND：
         
         browser_layout.addLayout(browser_reset_layout)
         browser_group.setLayout(browser_layout)
-        layout.addWidget(browser_group)
+        content_layout.addWidget(browser_group)
+        
+        # CTIフォーマットグループ
+        cti_format_group = QGroupBox("CTIフォーマットテンプレート")
+        cti_format_layout = QVBoxLayout()
         
         # 説明ラベル
         description = QLabel("CTIフォーマットのテンプレートを編集できます。\n"
                             "以下のプレースホルダーが使用可能です：\n"
-                            "{operator}, {mobile}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
+                            "{operator}, {available_time}, {mobile}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
                             "{list_name}, {list_furigana}, {list_phone}, {list_postal_code}, {list_address}, "
                             "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}")
         description.setWordWrap(True)
-        layout.addWidget(description)
+        cti_format_layout.addWidget(description)
         
         # テキスト編集エリア
         self.format_edit = QTextEdit()
         self.format_edit.setPlaceholderText("フォーマットテンプレートを入力してください")
-        layout.addWidget(self.format_edit)
+        self.format_edit.setMinimumHeight(300)  # テキスト編集エリアの高さを増やす
+        cti_format_layout.addWidget(self.format_edit)
+        
+        cti_format_group.setLayout(cti_format_layout)
+        content_layout.addWidget(cti_format_group)
+        
+        # スクロールエリアにウィジェットを設定
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)  # 1は伸縮比率
         
         # ボタンレイアウト
         button_layout = QHBoxLayout()
@@ -243,7 +266,7 @@ ND：
         self.save_btn.setDefault(True)
         button_layout.addWidget(self.save_btn)
         
-        layout.addLayout(button_layout)
+        main_layout.addLayout(button_layout)
         
         # 設定の読み込み
         self.load_settings()

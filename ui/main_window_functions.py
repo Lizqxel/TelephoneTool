@@ -84,7 +84,7 @@ class MainWindowFunctions:
                 # デフォルトのフォーマットテンプレート
                 self.format_template = """対応者（お客様の名前）：{operator}
 工事希望日
-★出やすい時間帯：携帯：{mobile}
+★出やすい時間帯：{available_time} 携帯：{mobile}
 ★電話取次：アナログ→光電話
 ★電話OP：
 ★無線
@@ -198,6 +198,7 @@ class MainWindowFunctions:
         format_data = {
             'operator': self.operator_input.text(),
             'mobile': "なし" if self.mobile_type_combo.currentText() == "なし" else self.mobile_input.text(),
+            'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
             'contractor': self.contractor_input.text(),
             'furigana': self.furigana_input.text(),
             'birth_date': birth_date,
@@ -479,7 +480,10 @@ class MainWindowFunctions:
         """スクリーンショットを表示する"""
         try:
             # スクリーンショットファイルのパスを取得
-            screenshot_path = "debug_screenshot.png"
+            if hasattr(self, 'screenshot_path') and self.screenshot_path:
+                screenshot_path = self.screenshot_path
+            else:
+                screenshot_path = "debug_screenshot.png"
             
             # ファイルが存在するか確認
             if not os.path.exists(screenshot_path):
@@ -495,12 +499,14 @@ class MainWindowFunctions:
             from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout
             
             dialog = QDialog(self)
-            dialog.setWindowTitle("スクリーンショット")
+            dialog.setWindowTitle("スクリーンショット - 提供判定結果")
+            dialog.setMinimumSize(800, 600)
             layout = QVBoxLayout(dialog)
             
             label = QLabel()
             pixmap = QPixmap(screenshot_path)
             label.setPixmap(pixmap)
+            label.setScaledContents(True)
             layout.addWidget(label)
             
             dialog.setLayout(layout)
