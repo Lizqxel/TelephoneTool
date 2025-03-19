@@ -45,6 +45,7 @@ class ServiceAreaSearchWorker(QThread):
         super().__init__()
         self.postal_code = postal_code
         self.address = address
+        self.driver = None
     
     def run(self):
         """スレッド実行時に呼び出される関数"""
@@ -61,6 +62,10 @@ class ServiceAreaSearchWorker(QThread):
                 "details": {"エラー": str(e)}
             }
             self.finished.emit(error_result)
+    
+    def __del__(self):
+        """デストラクタ - スレッド終了時にブラウザを閉じないようにする"""
+        logging.info("ServiceAreaSearchWorkerが終了しました - ブラウザは手動で閉じる必要があります")
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
