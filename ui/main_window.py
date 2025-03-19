@@ -507,6 +507,22 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
         
+        # 入力時に背景色をリセットするシグナル
+        self.operator_input.textChanged.connect(self.reset_background_color)
+        self.mobile_input.textChanged.connect(self.reset_background_color)
+        self.available_time_input.textChanged.connect(self.reset_background_color)
+        self.contractor_input.textChanged.connect(self.reset_background_color)
+        self.furigana_input.textChanged.connect(self.reset_background_color)
+        self.postal_code_input.textChanged.connect(self.reset_background_color)
+        self.address_input.textChanged.connect(self.reset_background_color)
+        self.list_name_input.textChanged.connect(self.reset_background_color)
+        self.list_furigana_input.textChanged.connect(self.reset_background_color)
+        self.list_phone_input.textChanged.connect(self.reset_background_color)
+        self.list_postal_code_input.textChanged.connect(self.reset_background_color)
+        self.list_address_input.textChanged.connect(self.reset_background_color)
+        self.order_person_input.textChanged.connect(self.reset_background_color)
+        self.fee_input.textChanged.connect(self.reset_background_color)
+        
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
         
@@ -648,12 +664,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         if has_half_width:
             self.statusBar().showMessage("契約者名は全角文字で入力してください", 5000)
-            # 入力フィールドの背景色を変更して警告
-            self.contractor_input.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+            # 背景色変更を削除
         else:
-            # 正常な入力の場合は背景色をリセット
-            self.contractor_input.setStyleSheet("")
-            self.statusBar().clearMessage() 
+            # 背景色変更を削除
+            self.statusBar().clearMessage()
 
     def validate_furigana_input(self, text):
         """
@@ -674,12 +688,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         if not re.match(katakana_pattern, text):
             self.statusBar().showMessage("フリガナは全角カタカナで入力してください", 5000)
-            # 入力フィールドの背景色を変更して警告
-            self.furigana_input.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+            # 背景色変更を削除
         else:
-            # 正常な入力の場合は背景色をリセット
-            self.furigana_input.setStyleSheet("")
-            self.statusBar().clearMessage() 
+            # 背景色変更を削除
+            self.statusBar().clearMessage()
 
     def validate_list_name(self, text):
         """
@@ -700,30 +712,35 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         if not re.match(pattern, text):
             self.statusBar().showMessage("リスト名は半角英数字とハイフンのみ使用できます", 5000)
-            # 入力フィールドの背景色を変更して警告
-            self.list_name_input.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+            # 背景色変更を削除
         else:
-            # 正常な入力の場合は背景色をリセット
-            self.list_name_input.setStyleSheet("")
-            self.statusBar().clearMessage() 
+            # 背景色変更を削除
+            self.statusBar().clearMessage()
 
     def validate_list_furigana(self):
         """リストフリガナのバリデーション"""
         text = self.list_furigana_input.text()
         if not validate_furigana(text):
-            self.list_furigana_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #FFE4E1;
-                }
-            """)
+            # 背景色変更を削除
             QToolTip.showText(
                 self.list_furigana_input.mapToGlobal(QPoint(0, 0)),
                 "フリガナに数字や不適切な文字を含めることはできません",
                 self.list_furigana_input
             )
         else:
-            self.list_furigana_input.setStyleSheet("")
+            # 背景色変更を削除
             QToolTip.hideText()
+
+    def reset_background_color(self):
+        """
+        テキストが入力されたフィールドの背景色をリセットする
+        
+        入力があった場合にのみ背景色をリセットします。
+        空の場合はリセットしません。
+        """
+        sender = self.sender()
+        if sender and sender.text().strip():
+            sender.setStyleSheet("")
 
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
