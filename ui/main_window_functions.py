@@ -511,7 +511,9 @@ class MainWindowFunctions:
             self.area_search_btn.setText("検索")
         
         # 結果表示を更新
-        if result["status"] == "success":
+        status = result.get("status", "failure")
+        
+        if status == "available":
             # 提供可能の場合
             self.area_result_label.setText("提供エリア: 提供可能")
             self.area_result_label.setStyleSheet("""
@@ -525,9 +527,9 @@ class MainWindowFunctions:
                 }
             """)
             self.judgment_combo.setCurrentText("○")
-        else:
-            # 提供不可の場合
-            self.area_result_label.setText("提供エリア: 提供不可")
+        elif status == "unavailable":
+            # 未提供の場合
+            self.area_result_label.setText("提供エリア: 未提供")
             self.area_result_label.setStyleSheet("""
                 QLabel {
                     font-size: 14px;
@@ -539,6 +541,20 @@ class MainWindowFunctions:
                 }
             """)
             self.judgment_combo.setCurrentText("×")
+        else:
+            # 判定失敗の場合
+            self.area_result_label.setText("提供エリア: 判定失敗")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #F39C12;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #F39C12;
+                }
+            """)
+            self.judgment_combo.setCurrentText("")
         
         # 詳細情報がある場合は表示
         if "details" in result and result.get("show_popup", True):

@@ -794,7 +794,7 @@ def search_service_area(postal_code, address):
                                 "//img[contains(@src, 'available')]",
                                 "//img[@alt='提供可能']"
                             ],
-                            "status": "success",
+                            "status": "available",
                             "message": "提供可能",
                             "details": {
                                 "判定結果": "OK",
@@ -808,10 +808,10 @@ def search_service_area(postal_code, address):
                                 "//img[contains(@src, 'img_investigation_03')]",
                                 "//img[contains(@src, 'investigation')]"
                             ],
-                            "status": "pending",
-                            "message": "調査中",
+                            "status": "failure",
+                            "message": "判定失敗",
                             "details": {
-                                "判定結果": "調査中",
+                                "判定結果": "判定失敗",
                                 "提供エリア": "調査が必要なエリアです",
                                 "備考": "住所を特定できないため、担当者がお調べします"
                             }
@@ -824,8 +824,8 @@ def search_service_area(postal_code, address):
                                 "//img[contains(@alt, '提供不可')]",
                                 "//img[contains(@alt, '未提供')]"
                             ],
-                            "status": "error",
-                            "message": "提供不可",
+                            "status": "unavailable",
+                            "message": "未提供",
                             "details": {
                                 "判定結果": "NG",
                                 "提供エリア": "提供対象外エリアです",
@@ -871,14 +871,14 @@ def search_service_area(postal_code, address):
                         # 提供不可時のスクリーンショットを保存
                         screenshot_path = "debug_unavailable_confirmation.png"
                         driver.save_screenshot(screenshot_path)
-                        logging.info("提供不可と判定されました（画像非表示） - スクリーンショットを保存しました")
+                        logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
                         return {
-                            "status": "error",
-                            "message": "提供不可",
+                            "status": "failure",
+                            "message": "判定失敗",
                             "details": {
-                                "判定結果": "NG",
-                                "提供エリア": "提供対象外エリアです",
-                                "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
+                                "判定結果": "判定失敗",
+                                "提供エリア": "判定できませんでした",
+                                "備考": "提供可否を判定できませんでした"
                             },
                             "screenshot": os.path.abspath(screenshot_path),
                             "show_popup": show_popup  # ポップアップ表示設定を追加
@@ -890,10 +890,10 @@ def search_service_area(postal_code, address):
                     driver.save_screenshot(screenshot_path)
                     logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
                     return {
-                        "status": "error",
-                        "message": "提供不可",
+                        "status": "failure",
+                        "message": "判定失敗",
                         "details": {
-                            "判定結果": "NG",
+                            "判定結果": "判定失敗",
                             "提供エリア": "判定できませんでした",
                             "備考": "提供可否の確認中にタイムアウトが発生しました"
                         },
@@ -906,10 +906,10 @@ def search_service_area(postal_code, address):
                     driver.save_screenshot(screenshot_path)
                     logging.error(f"提供判定の確認中にエラー: {str(e)}")
                     return {
-                        "status": "error",
-                        "message": f"提供判定の確認に失敗しました: {str(e)}",
+                        "status": "failure",
+                        "message": "判定失敗",
                         "details": {
-                            "判定結果": "エラー",
+                            "判定結果": "判定失敗",
                             "提供エリア": "判定できませんでした",
                             "備考": f"エラーが発生しました: {str(e)}"
                         },
@@ -922,8 +922,13 @@ def search_service_area(postal_code, address):
                 screenshot_path = "debug_result_error.png"
                 driver.save_screenshot(screenshot_path)
                 return {
-                    "status": "error", 
-                    "message": f"結果の判定に失敗しました: {str(e)}",
+                    "status": "failure", 
+                    "message": "判定失敗",
+                    "details": {
+                        "判定結果": "判定失敗",
+                        "提供エリア": "判定できませんでした",
+                        "備考": f"結果の判定中にエラーが発生しました: {str(e)}"
+                    },
                     "screenshot": os.path.abspath(screenshot_path),
                     "show_popup": show_popup  # ポップアップ表示設定を追加
                 }
@@ -933,8 +938,13 @@ def search_service_area(postal_code, address):
             screenshot_path = "debug_address_timeout.png"
             driver.save_screenshot(screenshot_path)
             return {
-                "status": "error",
-                "message": "住所候補が見つかりませんでした",
+                "status": "failure",
+                "message": "判定失敗",
+                "details": {
+                    "判定結果": "判定失敗",
+                    "提供エリア": "判定できませんでした",
+                    "備考": "住所候補が見つかりませんでした"
+                },
                 "screenshot": os.path.abspath(screenshot_path),
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
@@ -943,8 +953,13 @@ def search_service_area(postal_code, address):
             screenshot_path = "debug_address_error.png"
             driver.save_screenshot(screenshot_path)
             return {
-                "status": "error",
-                "message": f"住所選択に失敗しました: {str(e)}",
+                "status": "failure",
+                "message": "判定失敗",
+                "details": {
+                    "判定結果": "判定失敗",
+                    "提供エリア": "判定できませんでした",
+                    "備考": f"住所選択に失敗しました: {str(e)}"
+                },
                 "screenshot": os.path.abspath(screenshot_path),
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
@@ -955,17 +970,22 @@ def search_service_area(postal_code, address):
         if driver:
             driver.save_screenshot(screenshot_path)
         return {
-            "status": "error",
-            "message": f"エラーが発生しました: {str(e)}",
+            "status": "failure",
+            "message": "判定失敗",
+            "details": {
+                "判定結果": "判定失敗",
+                "提供エリア": "判定できませんでした",
+                "備考": f"エラーが発生しました: {str(e)}"
+            },
             "screenshot": os.path.abspath(screenshot_path),
             "show_popup": show_popup  # ポップアップ表示設定を追加
         }
     
     finally:
-        # show_popupがTrueの場合は常にブラウザを閉じない
-        if driver and show_popup:
-            logging.info("ポップアップ表示モードが有効です。ブラウザウィンドウは手動で閉じるまで維持されます。")
-        # show_popupがFalseならブラウザを閉じる
+        # ヘッドレスモードがオフまたはポップアップ表示モードが有効の場合はブラウザを閉じない
+        if driver and (show_popup or not headless_mode):
+            logging.info("ブラウザウィンドウは手動で閉じるまで維持されます。ヘッドレスモード: " + str(headless_mode))
+        # それ以外の場合（ヘッドレスモードかつshow_popup=False）はブラウザを閉じる
         elif driver:
             driver.quit()
             logging.info("ブラウザウィンドウを閉じました") 
