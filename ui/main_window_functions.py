@@ -173,6 +173,85 @@ class MainWindowFunctions:
     
     def generate_cti_format(self):
         """CTIフォーマットを生成してクリップボードにコピー"""
+        # 必須項目の検証
+        required_fields = {
+            'operator': self.operator_input,
+            'contractor': self.contractor_input,
+            'furigana': self.furigana_input,
+            'address': self.address_input,
+            'postal_code': self.postal_code_input,  # 郵便番号を追加
+            'list_name': self.list_name_input,  # リスト名を追加
+            'list_furigana': self.list_furigana_input,  # リストフリガナを追加
+            'list_phone': self.list_phone_input,
+            'list_postal_code': self.list_postal_code_input,  # リスト郵便番号を追加
+            'list_address': self.list_address_input,  # リスト住所を追加
+            'order_person': self.order_person_input,
+            'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
+            'fee': self.fee_input  # 料金認識を追加
+        }
+        
+        # すべてのフィールドの背景色をリセット
+        for field in required_fields.values():
+            field.setStyleSheet("")
+        
+        # 携帯電話番号の入力チェック（「入力」モードの場合）
+        if self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip():
+            self.mobile_input.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+        else:
+            self.mobile_input.setStyleSheet("")
+        
+        # 未入力のフィールドをチェック
+        missing_fields = []
+        for name, field in required_fields.items():
+            if not field.text().strip():
+                # 背景を赤くする
+                field.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+                missing_fields.append(name)
+        
+        # 未入力フィールドがある場合、または携帯が「入力」モードで空の場合
+        has_empty_fields = len(missing_fields) > 0 or (self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip())
+        
+        # 未入力項目があることを警告し、続行するか確認
+        if has_empty_fields:
+            # 日本語のフィールド名に変換
+            field_names_ja = {
+                'operator': '対応者名',
+                'contractor': '契約者名',
+                'furigana': 'フリガナ',
+                'address': '住所',
+                'postal_code': '郵便番号',  # 追加
+                'list_name': 'リスト名',  # 追加
+                'list_furigana': 'リストフリガナ',  # 追加
+                'list_phone': '電話番号',
+                'list_postal_code': 'リスト郵便番号',  # 追加
+                'list_address': 'リスト住所',  # 追加
+                'order_person': '受注者名',
+                'available_time': '出やすい時間帯',
+                'fee': '料金認識'  # 追加
+            }
+            
+            # 未入力項目の日本語名のリスト
+            missing_fields_ja = [field_names_ja[field] for field in missing_fields]
+            
+            # 携帯電話番号が未入力の場合、リストに追加
+            if self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip():
+                missing_fields_ja.append('携帯電話番号')
+            
+            # 確認ダイアログを表示（日本語ボタン）
+            message_box = QMessageBox()
+            message_box.setWindowTitle("未入力項目があります")
+            message_box.setText(f"以下の項目が未入力です:\n\n{', '.join(missing_fields_ja)}\n\n営コメを作成しますか？")
+            message_box.setIcon(QMessageBox.Question)
+            yes_button = message_box.addButton("はい", QMessageBox.YesRole)
+            no_button = message_box.addButton("いいえ", QMessageBox.NoRole)
+            message_box.setDefaultButton(no_button)
+            
+            message_box.exec()
+            
+            # いいえが選択された場合は処理を中止
+            if message_box.clickedButton() == no_button:
+                return None
+        
         # 生年月日の計算
         era = self.era_combo.currentText()
         year = int(self.year_combo.currentText())
@@ -242,11 +321,14 @@ class MainWindowFunctions:
             clipboard = QApplication.clipboard()
             clipboard.setText(formatted_text)
             
-            QMessageBox.information(self, "成功", "CTIフォーマットをクリップボードにコピーしました。")
+            # 完了ポップアップを削除
+            return formatted_text
         except KeyError as e:
             QMessageBox.warning(self, "エラー", f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"フォーマットの生成に失敗しました: {str(e)}")
+        
+        return None
     
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""

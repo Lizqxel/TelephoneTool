@@ -3,7 +3,7 @@
   "font_size": 10,
   "delay_seconds": 0,
   "browser_settings": {
-    "headless": true,
+    "headless": false,
     "disable_images": true,
     "show_popup": false,
     "page_load_timeout": 60,
