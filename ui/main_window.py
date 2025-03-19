@@ -24,7 +24,7 @@ from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from ui.main_window_functions import MainWindowFunctions
-from utils.string_utils import validate_name, validate_furigana
+from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space
 from utils.furigana_utils import convert_to_furigana
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
@@ -560,22 +560,26 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         try:
             # 顧客名
             if data.customer_name:
-                self.list_name_input.setText(data.customer_name)
-                self.contractor_input.setText(data.customer_name)
+                converted_customer_name = convert_to_half_width_except_space(data.customer_name)
+                self.list_name_input.setText(converted_customer_name)
+                self.contractor_input.setText(converted_customer_name)
             
             # 住所
             if data.address:
-                self.address_input.setText(data.address)
-                self.list_address_input.setText(data.address)
+                converted_address = convert_to_half_width_except_space(data.address)
+                self.address_input.setText(converted_address)
+                self.list_address_input.setText(converted_address)
             
             # 電話番号
             if data.phone:
-                self.list_phone_input.setText(data.phone)
+                converted_phone = convert_to_half_width_except_space(data.phone)
+                self.list_phone_input.setText(converted_phone)
             
             # 郵便番号
             if data.postal_code:
-                self.postal_code_input.setText(data.postal_code)
-                self.list_postal_code_input.setText(data.postal_code)
+                converted_postal_code = convert_to_half_width_except_space(data.postal_code)
+                self.postal_code_input.setText(converted_postal_code)
+                self.list_postal_code_input.setText(converted_postal_code)
                 
             # プレビューを更新
             self.update_preview()
