@@ -13,6 +13,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
 
 
 def create_driver(headless=False):
@@ -89,8 +90,24 @@ def create_driver(headless=False):
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
     
     try:
-        # ChromeDriverManagerを使用して自動的にドライバーをダウンロード
-        service = ChromeService(ChromeDriverManager().install())
+        # 相対パスで直接ドライバーを指定する
+        driver_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "drivers", "chromedriver-win32", "chromedriver.exe")
+        
+        # ドライバーパスが存在しない場合、ChromeDriverManagerにフォールバック
+        if not os.path.exists(driver_path):
+            logging.warning(f"ドライバーが見つかりません: {driver_path}")
+            logging.info("ChromeDriverManagerを使用してドライバーをダウンロードします")
+            try:
+                driver_path = ChromeDriverManager().install()
+                # ダウンロードされたパスが実際に存在するか確認
+                if not os.path.exists(driver_path):
+                    raise FileNotFoundError(f"ダウンロードされたドライバーが見つかりません: {driver_path}")
+            except Exception as e:
+                logging.error(f"ChromeDriverManagerでのドライバーダウンロードに失敗: {str(e)}")
+                raise
+        
+        logging.info(f"使用するドライバーパス: {driver_path}")
+        service = ChromeService(driver_path)
         driver = webdriver.Chrome(service=service, options=options)
         
         # ページの読み込みタイムアウトを設定
