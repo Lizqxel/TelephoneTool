@@ -192,7 +192,8 @@ class MainWindowFunctions:
             'list_address': self.list_address_input,  # リスト住所を追加
             'order_person': self.order_person_input,
             'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
-            'fee': self.fee_input  # 料金認識を追加
+            'fee': self.fee_input,  # 料金認識を追加
+            'relationship': self.relationship_input  # リストとの関係性を必須項目として追加
         }
         
         # すべてのフィールドの背景色をリセット
@@ -232,7 +233,8 @@ class MainWindowFunctions:
                 'list_address': 'リスト住所',  # 追加
                 'order_person': '受注者名',
                 'available_time': '出やすい時間帯',
-                'fee': '料金認識'  # 追加
+                'fee': '料金認識',  # 追加
+                'relationship': 'リストとの関係性'  # リストとの関係性を追加
             }
             
             # 未入力項目の日本語名のリスト
@@ -283,6 +285,7 @@ class MainWindowFunctions:
             'operator': self.operator_input.text(),
             'mobile': "なし" if self.mobile_type_combo.currentText() == "なし" else self.mobile_input.text(),
             'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
+            'stakeholder': self.stakeholder_input.text(),  # ステークホルダを追加
             'contractor': self.contractor_input.text(),
             'furigana': self.furigana_input.text(),
             'birth_date': birth_date,
@@ -300,7 +303,8 @@ class MainWindowFunctions:
             'fee': self.fee_input.text(),
             'net_usage': self.net_usage_combo.currentText(),
             'family_approval': self.family_approval_combo.currentText(),
-            'remarks': self.remarks_input.toPlainText()
+            'remarks': self.remarks_input.toPlainText(),
+            'relationship': self.relationship_input.text()  # リストとの関係性を追加
         }
         
         # フォーマットテンプレートに値を埋め込む

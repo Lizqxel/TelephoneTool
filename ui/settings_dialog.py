@@ -233,9 +233,9 @@ ND：
         # 説明ラベル
         description = QLabel("CTIフォーマットのテンプレートを編集できます。\n"
                             "以下のプレースホルダーが使用可能です：\n"
-                            "{operator}, {available_time}, {mobile}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
+                            "{operator}, {available_time}, {mobile}, {stakeholder}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
                             "{list_name}, {list_furigana}, {list_phone}, {list_postal_code}, {list_address}, "
-                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}")
+                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}, {relationship}")
         description.setWordWrap(True)
         cti_format_layout.addWidget(description)
         

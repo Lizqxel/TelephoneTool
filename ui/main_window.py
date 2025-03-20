@@ -237,6 +237,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.available_time_input.setPlaceholderText("例: 午前中、13時以降など")
         basic_layout.addWidget(self.available_time_input)
         
+        # ステークホルダを追加
+        basic_layout.addWidget(QLabel("ステークホルダ"))
+        self.stakeholder_input = QLineEdit()
+        self.stakeholder_input.setPlaceholderText("例: 本人、奥様、息子など")
+        basic_layout.addWidget(self.stakeholder_input)
+        
         # 契約者名
         basic_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
@@ -453,6 +459,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.family_approval_combo.addItems(["あり", "なし"])
         other_layout.addWidget(self.family_approval_combo)
         
+        # リストとの関係性
+        other_layout.addWidget(QLabel("リストとの関係性"))
+        self.relationship_input = QLineEdit()
+        self.relationship_input.setPlaceholderText("例: 本人、家族、別居家族など")
+        other_layout.addWidget(self.relationship_input)
+        
         # 備考
         other_layout.addWidget(QLabel("備考"))
         self.remarks_input = QTextEdit()
@@ -511,6 +523,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.operator_input.textChanged.connect(self.reset_background_color)
         self.mobile_input.textChanged.connect(self.reset_background_color)
         self.available_time_input.textChanged.connect(self.reset_background_color)
+        self.stakeholder_input.textChanged.connect(self.reset_background_color)
         self.contractor_input.textChanged.connect(self.reset_background_color)
         self.furigana_input.textChanged.connect(self.reset_background_color)
         self.postal_code_input.textChanged.connect(self.reset_background_color)
@@ -522,6 +535,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_address_input.textChanged.connect(self.reset_background_color)
         self.order_person_input.textChanged.connect(self.reset_background_color)
         self.fee_input.textChanged.connect(self.reset_background_color)
+        self.relationship_input.textChanged.connect(self.reset_background_color)
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
@@ -762,6 +776,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.operator_input.clear()
         self.mobile_input.clear()
         self.available_time_input.clear()  # 出やすい時間帯をクリア
+        self.stakeholder_input.clear()
         self.contractor_input.clear()
         self.furigana_input.clear()
         self.postal_code_input.clear()
@@ -774,6 +789,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input.clear()
         self.fee_input.clear()
         self.remarks_input.clear()
+        self.relationship_input.clear()
         # コンボボックスをデフォルト値に
         self.mobile_type_combo.setCurrentIndex(0)
         self.era_combo.setCurrentIndex(0)
