@@ -324,6 +324,11 @@ class MainWindowFunctions:
         try:
             formatted_text = self.format_template.format(**format_data)
 
+            # GoogleマップのURLを追加
+            maps_url = self.get_google_maps_url()
+            if maps_url:
+                formatted_text += f"\n\n地図URL: {maps_url}"
+            
             # プレビューに表示
             self.preview_text.setText(formatted_text)
 
@@ -342,7 +347,7 @@ class MainWindowFunctions:
             # フォーマットしたテキストを返す
             return formatted_text
         except KeyError as e:
-            QMessageBox.warning(self, "エラー", f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
+            logging.error(f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"フォーマットの生成に失敗しました: {str(e)}")
         
@@ -670,6 +675,26 @@ class MainWindowFunctions:
                 f"Googleマップの表示中にエラーが発生しました: {str(e)}"
             )
             
+    def get_google_maps_url(self):
+        """住所からGoogleマップのURLを取得する"""
+        try:
+            # 住所を取得
+            address = self.address_input.text()
+            if not address:
+                return ""
+                
+            # URLエンコード
+            from urllib.parse import quote
+            encoded_address = quote(address)
+            
+            # Google Mapの検索URL
+            url = f"https://www.google.com/maps/search/{encoded_address}"
+            return url
+            
+        except Exception as e:
+            logging.error(f"Googleマップ URL取得エラー: {str(e)}")
+            return ""
+            
     def apply_font_size(self):
         """フォントサイズを適用する"""
         try:
@@ -817,6 +842,11 @@ class MainWindowFunctions:
             for placeholder, value in placeholders.items():
                 if placeholder in formatted_text:
                     formatted_text = formatted_text.replace(placeholder, value)
+            
+            # GoogleマップのURLを追加
+            maps_url = self.get_google_maps_url()
+            if maps_url:
+                formatted_text += f"\n\n地図URL: {maps_url}"
             
             return formatted_text
             
