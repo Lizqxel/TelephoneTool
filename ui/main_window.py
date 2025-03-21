@@ -211,42 +211,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def create_input_form(self, parent_layout):
         """入力フォームを作成"""
-        # 基本情報セクション
-        basic_info_group = QGroupBox("基本情報")
-        basic_layout = QVBoxLayout()
+        # 受注者入力項目セクション（新しく追加）
+        input_group = QGroupBox("受注者入力項目")
+        input_layout = QVBoxLayout()
         
         # 対応者名
-        basic_layout.addWidget(QLabel("対応者名"))
+        input_layout.addWidget(QLabel("対応者名"))
         self.operator_input = QLineEdit()
-        basic_layout.addWidget(self.operator_input)
+        input_layout.addWidget(self.operator_input)
         
-        # 携帯電話番号
-        basic_layout.addWidget(QLabel("携帯電話番号"))
-        mobile_layout = QHBoxLayout()
-        self.mobile_type_combo = QComboBox()
-        self.mobile_type_combo.addItems(["入力", "なし"])
-        self.mobile_type_combo.currentTextChanged.connect(self.toggle_mobile_input)
-        mobile_layout.addWidget(self.mobile_type_combo)
-        self.mobile_input = QLineEdit()
-        mobile_layout.addWidget(self.mobile_input)
-        basic_layout.addLayout(mobile_layout)
-        
-        # 出やすい時間帯を追加
-        basic_layout.addWidget(QLabel("出やすい時間帯"))
+        # 出やすい時間帯
+        input_layout.addWidget(QLabel("出やすい時間帯"))
         self.available_time_input = QLineEdit()
-        self.available_time_input.setPlaceholderText("例: 午前中、13時以降など")
-        basic_layout.addWidget(self.available_time_input)
-        
-        # ステークホルダを追加
-        basic_layout.addWidget(QLabel("ステークホルダ"))
-        self.stakeholder_input = QLineEdit()
-        self.stakeholder_input.setPlaceholderText("例: 本人、奥様、息子など")
-        basic_layout.addWidget(self.stakeholder_input)
+        self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　--")
+        input_layout.addWidget(self.available_time_input)
         
         # 契約者名
-        basic_layout.addWidget(QLabel("契約者名"))
+        input_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
-        basic_layout.addWidget(self.contractor_input)
+        input_layout.addWidget(self.contractor_input)
         
         # フリガナ
         furigana_layout = QHBoxLayout()
@@ -254,9 +237,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.furigana_mode_combo = QComboBox()
         self.furigana_mode_combo.addItems(["自動", "手動"])
         furigana_layout.addWidget(self.furigana_mode_combo)
-        basic_layout.addLayout(furigana_layout)
+        input_layout.addLayout(furigana_layout)
         self.furigana_input = QLineEdit()
-        basic_layout.addWidget(self.furigana_input)
+        input_layout.addWidget(self.furigana_input)
         
         # 生年月日
         birth_layout = QHBoxLayout()
@@ -294,9 +277,63 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         birth_layout.addWidget(self.day_combo)
         birth_layout.addWidget(QLabel("日"))
         
-        basic_layout.addLayout(birth_layout)
-        basic_info_group.setLayout(basic_layout)
-        parent_layout.addWidget(basic_info_group)
+        input_layout.addLayout(birth_layout)
+        
+        # 受注者名
+        input_layout.addWidget(QLabel("受注者名"))
+        self.order_person_input = QLineEdit()
+        input_layout.addWidget(self.order_person_input)
+        
+        # 社番を追加
+        input_layout.addWidget(QLabel("社番"))
+        self.employee_number_input = QLineEdit()
+        input_layout.addWidget(self.employee_number_input)
+        
+        # ネット利用
+        input_layout.addWidget(QLabel("ネット利用"))
+        self.net_usage_combo = QComboBox()
+        self.net_usage_combo.addItems(["なし", "あり"])
+        input_layout.addWidget(self.net_usage_combo)
+        
+        # 家族了承
+        input_layout.addWidget(QLabel("家族了承"))
+        self.family_approval_combo = QComboBox()
+        self.family_approval_combo.addItems(["ok", "なし"])
+        input_layout.addWidget(self.family_approval_combo)
+        
+        # 他番号
+        input_layout.addWidget(QLabel("他番号"))
+        self.other_number_input = QLineEdit()
+        self.other_number_input.setText("なし")
+        input_layout.addWidget(self.other_number_input)
+        
+        # 電話機
+        input_layout.addWidget(QLabel("電話機"))
+        self.phone_device_input = QLineEdit()
+        self.phone_device_input.setText("プッシュホン")
+        input_layout.addWidget(self.phone_device_input)
+        
+        # 禁止回線
+        input_layout.addWidget(QLabel("禁止回線"))
+        self.forbidden_line_input = QLineEdit()
+        self.forbidden_line_input.setText("なし")
+        input_layout.addWidget(self.forbidden_line_input)
+        
+        # ND
+        input_layout.addWidget(QLabel("ND"))
+        self.nd_input = QLineEdit()
+        input_layout.addWidget(self.nd_input)
+        
+        # リストとの関係性（表示を「名義人の○○」の形式に変更）
+        relationship_layout = QHBoxLayout()
+        relationship_layout.addWidget(QLabel("備考："))
+        self.relationship_input = QLineEdit()
+        self.relationship_input.setPlaceholderText("名義人の...")
+        relationship_layout.addWidget(self.relationship_input)
+        input_layout.addLayout(relationship_layout)
+        
+        input_group.setLayout(input_layout)
+        parent_layout.addWidget(input_group)
         
         # 住所情報セクション
         address_group = QGroupBox("住所情報")
@@ -436,56 +473,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_date_input.setReadOnly(True)
         order_layout.addWidget(self.order_date_input)
         
-        # 受注者名
-        order_layout.addWidget(QLabel("受注者名"))
-        self.order_person_input = QLineEdit()
-        order_layout.addWidget(self.order_person_input)
-        
         # 提供判定
         order_layout.addWidget(QLabel("提供判定"))
         self.judgment_combo = QComboBox()
         self.judgment_combo.addItems(["OK", "NG"])
         order_layout.addWidget(self.judgment_combo)
         
+        # 料金認識
+        order_layout.addWidget(QLabel("料金認識"))
+        self.fee_input = QLineEdit()
+        self.fee_input.setText("2500円～3000円")
+        order_layout.addWidget(self.fee_input)
+        
         order_group.setLayout(order_layout)
         parent_layout.addWidget(order_group)
-        
-        # その他情報セクション
-        other_group = QGroupBox("その他情報")
-        other_layout = QVBoxLayout()
-        
-        # 料金認識
-        other_layout.addWidget(QLabel("料金認識"))
-        self.fee_input = QLineEdit()
-        self.fee_input.setText("3000円～3500円")
-        other_layout.addWidget(self.fee_input)
-        
-        # ネット利用
-        other_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = QComboBox()
-        self.net_usage_combo.addItems(["あり", "なし"])
-        other_layout.addWidget(self.net_usage_combo)
-        
-        # 家族了承
-        other_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = QComboBox()
-        self.family_approval_combo.addItems(["あり", "なし"])
-        other_layout.addWidget(self.family_approval_combo)
-        
-        # リストとの関係性
-        other_layout.addWidget(QLabel("リストとの関係性"))
-        self.relationship_input = QLineEdit()
-        self.relationship_input.setPlaceholderText("例: 本人、家族、別居家族など")
-        other_layout.addWidget(self.relationship_input)
-        
-        # 備考
-        other_layout.addWidget(QLabel("備考"))
-        self.remarks_input = QTextEdit()
-        self.remarks_input.setMaximumHeight(100)
-        other_layout.addWidget(self.remarks_input)
-        
-        other_group.setLayout(other_layout)
-        parent_layout.addWidget(other_group)
     
     def create_preview_area(self, parent_layout):
         """プレビューエリアを作成"""
@@ -512,7 +513,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def setup_signals(self):
         """シグナルの設定"""
         # 自動フォーマット用のシグナル
-        self.mobile_input.textChanged.connect(self.format_phone_number)
+        # self.mobile_input.textChanged.connect(self.format_phone_number)  # 削除
         self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
         self.postal_code_input.textChanged.connect(self.format_postal_code)
         self.postal_code_input.textChanged.connect(self.convert_to_half_width)
@@ -534,9 +535,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 入力時に背景色をリセットするシグナル
         self.operator_input.textChanged.connect(self.reset_background_color)
-        self.mobile_input.textChanged.connect(self.reset_background_color)
+        # self.mobile_input.textChanged.connect(self.reset_background_color)  # 削除
         self.available_time_input.textChanged.connect(self.reset_background_color)
-        self.stakeholder_input.textChanged.connect(self.reset_background_color)
         self.contractor_input.textChanged.connect(self.reset_background_color)
         self.furigana_input.textChanged.connect(self.reset_background_color)
         self.postal_code_input.textChanged.connect(self.reset_background_color)
@@ -549,6 +549,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input.textChanged.connect(self.reset_background_color)
         self.fee_input.textChanged.connect(self.reset_background_color)
         self.relationship_input.textChanged.connect(self.reset_background_color)
+        self.employee_number_input.textChanged.connect(self.reset_background_color)  # 社番の背景色リセット
+        self.nd_input.textChanged.connect(self.reset_background_color)  # NDの背景色リセット
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
@@ -760,13 +762,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     def reset_background_color(self):
         """
-        テキストが入力されたフィールドの背景色をリセットする
+        フィールドの背景色をリセットする
         
-        入力があった場合にのみ背景色をリセットします。
-        空の場合はリセットしません。
+        入力の有無に関わらず、対応する未入力警告の背景色をリセットします。
         """
         sender = self.sender()
-        if sender and sender.text().strip():
+        if sender:
             sender.setStyleSheet("")
 
     def closeEvent(self, event):
@@ -787,9 +788,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""
         self.operator_input.clear()
-        self.mobile_input.clear()
         self.available_time_input.clear()  # 出やすい時間帯をクリア
-        self.stakeholder_input.clear()
         self.contractor_input.clear()
         self.furigana_input.clear()
         self.postal_code_input.clear()
@@ -801,10 +800,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_address_input.clear()
         self.order_person_input.clear()
         self.fee_input.clear()
-        self.remarks_input.clear()
+        
+        # 他番号、電話機、禁止回線には初期値を設定
+        self.other_number_input.setText("なし")
+        self.phone_device_input.setText("プッシュホン")
+        self.forbidden_line_input.setText("なし")
+        
         self.relationship_input.clear()
         # コンボボックスをデフォルト値に
-        self.mobile_type_combo.setCurrentIndex(0)
         self.era_combo.setCurrentIndex(0)
         self.year_combo.setCurrentIndex(0)
         self.month_combo.setCurrentIndex(0)
@@ -812,7 +815,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
         self.net_usage_combo.setCurrentIndex(0)
-        self.family_approval_combo.setCurrentIndex(0)
+        self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         # 結果ラベルをクリア
         self.area_result_label.setText("提供エリア: 未検索")
         self.area_result_label.setStyleSheet("""
