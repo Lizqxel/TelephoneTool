@@ -269,27 +269,30 @@ class MainWindowFunctions:
             if message_box.clickedButton() == no_button:
                 return None
         
-        # 生年月日の計算
+        # 日付の書式設定
+        order_date = self.order_date_input.text()
+        
+        # 生年月日の取得
+        birth_date = ""
         era = self.era_combo.currentText()
-        year = int(self.year_combo.currentText())
-        month = int(self.month_combo.currentText())
-        day = int(self.day_combo.currentText())
+        year = self.year_combo.currentText()
+        month = self.month_combo.currentText()
+        day = self.day_combo.currentText()
         
-        # 元号から西暦に変換
-        if era == "昭和":
-            year = year + 1925  # 昭和元年は1926年
-        elif era == "平成":
-            year = year + 1988  # 平成元年は1989年
-        # 西暦の場合はそのまま
-        
-        birth_date = f"{year}/{month}/{day}"
-        
-        # 現在の日付を取得（先頭の0を除去）
-        now = datetime.datetime.now()
-        month_str = str(now.month)
-        day_str = str(now.day)
-        order_date = f"{month_str}/{day_str}"
-
+        if era and year and month and day:
+            # 和暦から西暦への変換
+            era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867, "西暦": 0}
+            if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
+                try:
+                    jp_year = int(year)
+                    if era == "西暦":
+                        western_year = jp_year
+                    else:
+                        western_year = era_year_map[era] + jp_year
+                    birth_date = f"{western_year}年{month}月{day}日"
+                except (ValueError, TypeError):
+                    logging.warning("生年月日の変換に失敗しました")
+                    
         # フォーマットデータの準備
         format_data = {
             'operator': self.operator_input.text(),
@@ -805,50 +808,49 @@ class MainWindowFunctions:
                     except ValueError:
                         pass
             
-            # ユーザーデータと設定情報を組み合わせて書式を作成
-            format_template = self.settings.get("format_template", "")
-            
-            # 書式テンプレートのプレースホルダーを実際の値に置換
-            formatted_text = format_template
-            
-            # プレースホルダー置換
-            placeholders = {
-                "{オペレーター}": operator,
-                "{契約者}": contractor,
-                "{住所}": address,
-                "{郵便番号}": postal_code,
-                "{生年月日}": birth_date,
-                "{担当者携帯}": "",  # 携帯電話番号を空に
-                "{出やすい時間帯}": self.available_time_input.text(),
-                "{フリガナ}": self.furigana_input.text(),
-                "{リスト名}": self.list_name_input.text(),
-                "{リストフリガナ}": self.list_furigana_input.text(),
-                "{リスト電話}": self.list_phone_input.text(),
-                "{リスト郵便番号}": self.list_postal_code_input.text(),
-                "{リスト住所}": self.list_address_input.text(),
-                "{判断}": self.judgment_combo.currentText(),
-                "{現在の回線}": self.current_line_combo.currentText(),
-                "{発注者}": self.order_person_input.text(),
-                "{料金}": self.fee_input.text(),
-                "{携帯種別}": "",  # モバイル種別も空に
-                "{社番}": self.employee_number_input.text(),     # 社番を追加
-                "{他番号}": self.other_number_input.text(),      # 他番号を追加
-                "{電話機}": self.phone_device_input.text(),      # 電話機を追加
-                "{禁止回線}": self.forbidden_line_input.text(),  # 禁止回線を追加
-                "{ND}": self.nd_input.text(),                   # NDを追加
-                "{続柄}": self.relationship_input.text()
+            # フォーマットデータの準備（generate_cti_formatと同じ処理）
+            format_data = {
+                'operator': self.operator_input.text(),
+                'mobile': "",  # 携帯電話番号を空に
+                'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
+                'contractor': self.contractor_input.text(),
+                'furigana': self.furigana_input.text(),
+                'birth_date': birth_date,
+                'postal_code': self.postal_code_input.text(),
+                'address': self.address_input.text(),
+                'list_name': self.list_name_input.text(),
+                'list_furigana': self.list_furigana_input.text(),
+                'list_phone': self.list_phone_input.text(),
+                'list_postal_code': self.list_postal_code_input.text(),
+                'list_address': self.list_address_input.text(),
+                'current_line': self.current_line_combo.currentText(),
+                'order_date': self.order_date_input.text(),
+                'order_person': self.order_person_input.text(),
+                'judgment': self.judgment_combo.currentText(),
+                'fee': self.fee_input.text(),
+                'net_usage': self.net_usage_combo.currentText(),
+                'family_approval': self.family_approval_combo.currentText(),
+                'employee_number': self.employee_number_input.text(),  # 社番を追加
+                'other_number': self.other_number_input.text(),  # 他番号を追加
+                'phone_device': self.phone_device_input.text(),  # 電話機を追加
+                'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
+                'nd': self.nd_input.text(),  # NDを追加
+                'relationship': self.relationship_input.text()  # 名義人との関係性
             }
             
-            for placeholder, value in placeholders.items():
-                if placeholder in formatted_text:
-                    formatted_text = formatted_text.replace(placeholder, value)
-            
-            # GoogleマップのURLを追加
-            maps_url = self.get_google_maps_url()
-            if maps_url:
-                formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
-            
-            return formatted_text
+            # フォーマットテンプレートに値を埋め込む
+            try:
+                formatted_text = self.format_template.format(**format_data)
+                
+                # GoogleマップのURLを追加
+                maps_url = self.get_google_maps_url()
+                if maps_url:
+                    formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+                
+                return formatted_text
+            except KeyError as e:
+                logging.error(f"テンプレート書式エラー: {str(e)}")
+                return None
             
         except Exception as e:
             logging.error(f"プレビュー生成中にエラー: {e}")
