@@ -195,7 +195,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # ボタンの接続
         self.clear_btn.clicked.connect(self.clear_all_inputs)
-        self.cti_copy_btn.clicked.connect(self.generate_cti_format)
+        self.cti_copy_btn.clicked.connect(self.copy_cti_to_clipboard)
         self.screenshot_btn.clicked.connect(self.show_screenshot)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
         self.settings_btn.clicked.connect(self.show_settings)
@@ -316,7 +316,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # マップアイコンボタン
         self.map_btn = QPushButton()
         self.map_btn.setFixedSize(24, 24)
-        self.map_btn.setIcon(QIcon("map.png"))
+        
+        # アプリケーションの実行ディレクトリからの絶対パスを設定
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir = os.path.dirname(app_dir)  # uiフォルダの親ディレクトリ
+        map_icon_path = os.path.join(root_dir, "map.png")
+        
+        # アイコンが存在する場合のみ設定
+        if os.path.exists(map_icon_path):
+            self.map_btn.setIcon(QIcon(map_icon_path))
+        else:
+            # アイコンが見つからない場合は代替テキストを設定
+            self.map_btn.setText("🗺️")
+            logging.warning(f"マップアイコン画像が見つかりません: {map_icon_path}")
+            
         self.map_btn.setToolTip("Googleマップで住所を検索")
         self.map_btn.setStyleSheet("""
             QPushButton {
@@ -650,7 +663,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         elif event.type() == QEvent.User + 1:
             # メインスレッドでプレビューを更新
             try:
-                preview_text = self.generate_cti_format()
+                preview_text = self.generate_preview_text()
                 if preview_text:
                     self.preview_text.setText(preview_text)
             except Exception as e:

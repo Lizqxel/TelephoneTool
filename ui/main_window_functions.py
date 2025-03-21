@@ -176,8 +176,24 @@ class MainWindowFunctions:
         else:  # 西暦
             self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
     
+    def copy_cti_to_clipboard(self):
+        """
+        営業コメントを生成してクリップボードにコピーする
+        """
+        # 既存のgenerate_cti_formatメソッドを使用して営業コメントを生成
+        formatted_text = self.generate_cti_format()
+        
+        # 生成に成功した場合のみクリップボードにコピーして通知
+        if formatted_text:
+            # クリップボードにコピー
+            clipboard = QApplication.clipboard()
+            clipboard.setText(formatted_text)
+            
+            # 成功メッセージをステータスバーに表示
+            self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
+    
     def generate_cti_format(self):
-        """CTIフォーマットを生成してクリップボードにコピー"""
+        """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
         # 必須項目の検証
         required_fields = {
             'operator': self.operator_input,
@@ -326,11 +342,7 @@ class MainWindowFunctions:
                 }
             """)
             
-            # クリップボードにコピー
-            clipboard = QApplication.clipboard()
-            clipboard.setText(formatted_text)
-            
-            # 完了ポップアップを削除
+            # フォーマットしたテキストを返す
             return formatted_text
         except KeyError as e:
             QMessageBox.warning(self, "エラー", f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
@@ -733,4 +745,78 @@ class MainWindowFunctions:
                 self.list_furigana_input.setText(furigana)
                 logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
-            logging.error(f"リストフリガナ自動生成エラー: {str(e)}") 
+            logging.error(f"リストフリガナ自動生成エラー: {str(e)}")
+    
+    def generate_preview_text(self):
+        """
+        プレビュー表示用のテキストを生成します。
+        入力値を使用して書式設定された営業コメントのプレビューを生成します。
+        
+        Returns:
+            str: 書式設定されたテキスト、または失敗した場合はNone
+        """
+        try:
+            # 入力値の取得（空でも許可）
+            operator = self.operator_input.text()
+            contractor = self.contractor_input.text() 
+            address = self.address_input.text()
+            postal_code = self.postal_code_input.text()
+            
+            # 日付の計算
+            birth_date = ""
+            era = self.era_combo.currentText()
+            year = self.year_combo.currentText()
+            month = self.month_combo.currentText()
+            day = self.day_combo.currentText()
+            
+            if era and year and year != "年" and month and month != "月" and day and day != "日":
+                # 和暦から西暦への変換
+                era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
+                if era in era_year_map:
+                    try:
+                        jp_year = int(year)
+                        western_year = era_year_map[era] + jp_year
+                        birth_date = f"{western_year}年{month}{day}日"
+                    except ValueError:
+                        pass
+            
+            # ユーザーデータと設定情報を組み合わせて書式を作成
+            format_template = self.settings.get("format_template", "")
+            
+            # 書式テンプレートのプレースホルダーを実際の値に置換
+            formatted_text = format_template
+            
+            # プレースホルダー置換
+            placeholders = {
+                "{オペレーター}": operator,
+                "{契約者}": contractor,
+                "{住所}": address,
+                "{郵便番号}": postal_code,
+                "{生年月日}": birth_date,
+                "{担当者携帯}": self.mobile_input.text(),
+                "{出やすい時間帯}": self.available_time_input.text(),
+                "{利害関係者}": self.stakeholder_input.text(),
+                "{フリガナ}": self.furigana_input.text(),
+                "{リスト名}": self.list_name_input.text(),
+                "{リストフリガナ}": self.list_furigana_input.text(),
+                "{リスト電話}": self.list_phone_input.text(),
+                "{リスト郵便番号}": self.list_postal_code_input.text(),
+                "{リスト住所}": self.list_address_input.text(),
+                "{判断}": self.judgment_combo.currentText(),
+                "{現在の回線}": self.current_line_combo.currentText(),
+                "{発注者}": self.order_person_input.text(),
+                "{料金}": self.fee_input.text(),
+                "{携帯種別}": self.mobile_type_combo.currentText(),
+                "{備考}": self.remarks_input.text(),
+                "{続柄}": self.relationship_input.text()
+            }
+            
+            for placeholder, value in placeholders.items():
+                if placeholder in formatted_text:
+                    formatted_text = formatted_text.replace(placeholder, value)
+            
+            return formatted_text
+            
+        except Exception as e:
+            logging.error(f"プレビュー生成中にエラー: {e}")
+            return None 

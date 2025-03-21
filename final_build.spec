@@ -35,16 +35,24 @@ all_hiddenimports += ui_modules + services_modules + utils_modules
 # データファイルも明示的に収集
 datas = [
     ('settings.json', '.'),
-    ('map.png', '.'),
+    ('map.png', '.'),  # マップアイコン画像
     ('ui/*.py', 'ui'),
     ('services/*.py', 'services'),
     ('utils/*.py', 'utils'),
     ('chrome_data/', 'chrome_data'),
+    ('drivers/', 'drivers'),
     ('*.json', '.'),
     ('debug_*.png', '.'),
     ('pyside6_fix.py', '.'),
     ('browser_options.py', '.'),
 ]
+
+# 画像が確実に含まれるよう追加
+map_path = os.path.join(current_dir, 'map.png')
+if os.path.exists(map_path):
+    print(f"マップ画像が見つかりました: {map_path}")
+else:
+    print(f"警告: マップ画像が見つかりません: {map_path}")
 
 # PySide6のデータファイルも収集
 datas += collect_data_files('PySide6')
@@ -84,7 +92,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,  # UPXは無効化
-    console=True,  # デバッグ表示のためにコンソールは有効に
+    console=False,  # GUI専用モード（コンソールウィンドウを表示しない）
     icon='map.png',
 )
 

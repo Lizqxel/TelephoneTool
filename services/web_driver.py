@@ -9,6 +9,7 @@ import logging
 import json
 import os
 import time
+import sys
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
@@ -39,7 +40,14 @@ def create_driver(headless=False):
     browser_settings = load_browser_settings()
     
     # ヘッドレスモードの設定
-    is_headless = headless or browser_settings.get("headless", False)
+    # 引数でFalseが指定された場合は、必ずヘッドレスモードを無効化
+    if headless == False:
+        is_headless = False
+        logging.info("引数指定によりヘッドレスモードを無効化します")
+    else:
+        # 引数がTrueまたはデフォルト値の場合は設定ファイルの値を使用
+        is_headless = headless or browser_settings.get("headless", False)
+    
     if is_headless:
         options.add_argument("--headless=new")  # 新しいヘッドレスモード
         logging.info("ヘッドレスモードで起動します")
@@ -90,8 +98,18 @@ def create_driver(headless=False):
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
     
     try:
-        # 相対パスで直接ドライバーを指定する
-        driver_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "drivers", "chromedriver-win32", "chromedriver.exe")
+        # PyInstallerでビルドされた場合のベースディレクトリを取得
+        if getattr(sys, 'frozen', False):
+            # PyInstallerでビルドされた場合
+            base_dir = sys._MEIPASS
+            driver_path = os.path.join(base_dir, "drivers", "chromedriver-win32", "chromedriver.exe")
+        else:
+            # 通常の実行の場合
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            driver_path = os.path.join(base_dir, "drivers", "chromedriver-win32", "chromedriver.exe")
+        
+        logging.info(f"ベースディレクトリ: {base_dir}")
+        logging.info(f"ドライバーパス: {driver_path}")
         
         # ドライバーパスが存在しない場合、ChromeDriverManagerにフォールバック
         if not os.path.exists(driver_path):
