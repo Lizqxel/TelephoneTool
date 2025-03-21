@@ -191,6 +191,9 @@ class MainWindowFunctions:
             
             # 成功メッセージをステータスバーに表示
             self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
+            
+            # 成功メッセージをポップアップ表示
+            QMessageBox.information(self, "CTI形式コピー", "営業コメントをクリップボードにコピーしました。")
     
     def generate_cti_format(self):
         """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
@@ -209,18 +212,14 @@ class MainWindowFunctions:
             'order_person': self.order_person_input,
             'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
             'fee': self.fee_input,  # 料金認識を追加
-            'relationship': self.relationship_input  # リストとの関係性を必須項目として追加
+            'relationship': self.relationship_input,  # 名義人との関係性
+            'employee_number': self.employee_number_input,  # 社番を追加
+            'nd': self.nd_input  # NDを追加
         }
         
         # すべてのフィールドの背景色をリセット
         for field in required_fields.values():
             field.setStyleSheet("")
-        
-        # 携帯電話番号の入力チェック（「入力」モードの場合）
-        if self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip():
-            self.mobile_input.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
-        else:
-            self.mobile_input.setStyleSheet("")
         
         # 未入力のフィールドをチェック
         missing_fields = []
@@ -230,8 +229,8 @@ class MainWindowFunctions:
                 field.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
                 missing_fields.append(name)
         
-        # 未入力フィールドがある場合、または携帯が「入力」モードで空の場合
-        has_empty_fields = len(missing_fields) > 0 or (self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip())
+        # 未入力フィールドがある場合
+        has_empty_fields = len(missing_fields) > 0
         
         # 未入力項目があることを警告し、続行するか確認
         if has_empty_fields:
@@ -250,15 +249,13 @@ class MainWindowFunctions:
                 'order_person': '受注者名',
                 'available_time': '出やすい時間帯',
                 'fee': '料金認識',  # 追加
-                'relationship': 'リストとの関係性'  # リストとの関係性を追加
+                'relationship': '備考：名義人の...',  # 名義人との関係性に変更
+                'employee_number': '社番',  # 社番を追加
+                'nd': 'ND'  # NDを追加
             }
             
             # 未入力項目の日本語名のリスト
             missing_fields_ja = [field_names_ja[field] for field in missing_fields]
-            
-            # 携帯電話番号が未入力の場合、リストに追加
-            if self.mobile_type_combo.currentText() == "入力" and not self.mobile_input.text().strip():
-                missing_fields_ja.append('携帯電話番号')
             
             # 確認ダイアログを表示（日本語ボタン）
             message_box = QMessageBox()
@@ -295,13 +292,12 @@ class MainWindowFunctions:
         month_str = str(now.month)
         day_str = str(now.day)
         order_date = f"{month_str}/{day_str}"
-        
+
         # フォーマットデータの準備
         format_data = {
             'operator': self.operator_input.text(),
-            'mobile': "なし" if self.mobile_type_combo.currentText() == "なし" else self.mobile_input.text(),
+            'mobile': "",  # 携帯電話番号を空に
             'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
-            'stakeholder': self.stakeholder_input.text(),  # ステークホルダを追加
             'contractor': self.contractor_input.text(),
             'furigana': self.furigana_input.text(),
             'birth_date': birth_date,
@@ -319,17 +315,21 @@ class MainWindowFunctions:
             'fee': self.fee_input.text(),
             'net_usage': self.net_usage_combo.currentText(),
             'family_approval': self.family_approval_combo.currentText(),
-            'remarks': self.remarks_input.toPlainText(),
-            'relationship': self.relationship_input.text()  # リストとの関係性を追加
+            'employee_number': self.employee_number_input.text(),  # 社番を追加
+            'other_number': self.other_number_input.text(),  # 他番号を追加
+            'phone_device': self.phone_device_input.text(),  # 電話機を追加
+            'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
+            'nd': self.nd_input.text(),  # NDを追加
+            'relationship': self.relationship_input.text()  # 名義人との関係性
         }
         
         # フォーマットテンプレートに値を埋め込む
         try:
             formatted_text = self.format_template.format(**format_data)
-            
+
             # プレビューに表示
             self.preview_text.setText(formatted_text)
-            
+
             # プレビューテキストの色を確保
             self.preview_text.setStyleSheet("""
                 QTextEdit {
@@ -355,9 +355,8 @@ class MainWindowFunctions:
         """全ての入力フィールドをクリア"""
         # テキスト入力フィールドのクリア
         self.operator_input.clear()
-        self.mobile_type_combo.setCurrentIndex(0)  # 携帯電話番号の選択を「入力」に戻す
-        self.mobile_input.setEnabled(True)  # 入力フィールドを有効化
-        self.mobile_input.clear()
+        # 携帯電話番号入力エリアの参照を削除
+        self.available_time_input.clear()  # 出やすい時間帯をクリア
         self.contractor_input.clear()
         self.furigana_input.clear()
         self.postal_code_input.clear()
@@ -368,6 +367,17 @@ class MainWindowFunctions:
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
         self.order_person_input.clear()
+        
+        # 新しいフィールドをクリア
+        self.employee_number_input.clear()  # 社番
+        
+        # 他番号、電話機、禁止回線には初期値を設定
+        self.other_number_input.setText("なし")
+        self.phone_device_input.setText("プッシュホン")
+        self.forbidden_line_input.setText("なし")
+        
+        self.nd_input.clear()               # ND
+        self.relationship_input.clear()     # 名義人との関係性
         
         # 提供エリア検索結果をリセット
         self.area_result_label.setText("提供エリア: 未検索")
@@ -388,17 +398,14 @@ class MainWindowFunctions:
         self.day_combo.setCurrentIndex(0)
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
-        self.net_usage_combo.setCurrentIndex(0)
-        self.family_approval_combo.setCurrentIndex(0)
+        self.net_usage_combo.setCurrentIndex(0)  # "なし"が選択される
+        self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         
         # 受注日を今日の日付に更新
         self.order_date_input.setText(datetime.datetime.now().strftime("%Y/%m/%d"))
         
         # 料金認識を初期値に戻す
-        self.fee_input.setText("3000円～3500円")
-        
-        # 備考欄をクリア
-        self.remarks_input.clear()
+        self.fee_input.setText("2500円～3000円")
         
         # プレビューエリアをクリア
         self.preview_text.clear()
@@ -429,10 +436,9 @@ class MainWindowFunctions:
             logging.info("設定を更新しました")
     
     def toggle_mobile_input(self, text):
-        """携帯電話番号入力フィールドの有効/無効を切り替え"""
-        self.mobile_input.setEnabled(text == "入力")
-        if text == "なし":
-            self.mobile_input.clear()
+        """携帯電話番号入力フィールドの有効/無効を切り替え - 現在は使用しない"""
+        # 携帯電話番号入力エリアの削除に伴い、このメソッドは使用しません
+        pass
     
     def toggle_clipboard_monitor(self):
         """クリップボード監視の開始/停止を切り替え"""
@@ -463,12 +469,8 @@ class MainWindowFunctions:
         # 電話番号の処理
         for match in phone_matches:
             phone_number = match.group(1)
-            # 携帯電話番号の判定（070, 080, 090で始まる番号）
-            if phone_number.replace('-', '').replace(' ', '').startswith(('070', '080', '090')):
-                self.mobile_input.setText(phone_number)
-                self.mobile_type_combo.setCurrentText("入力")
-            else:
-                self.list_phone_input.setText(phone_number)
+            # 一般電話番号として扱う
+            self.list_phone_input.setText(phone_number)
         
         # 郵便番号の処理
         if postal_match:
@@ -793,9 +795,8 @@ class MainWindowFunctions:
                 "{住所}": address,
                 "{郵便番号}": postal_code,
                 "{生年月日}": birth_date,
-                "{担当者携帯}": self.mobile_input.text(),
+                "{担当者携帯}": "",  # 携帯電話番号を空に
                 "{出やすい時間帯}": self.available_time_input.text(),
-                "{利害関係者}": self.stakeholder_input.text(),
                 "{フリガナ}": self.furigana_input.text(),
                 "{リスト名}": self.list_name_input.text(),
                 "{リストフリガナ}": self.list_furigana_input.text(),
@@ -806,8 +807,12 @@ class MainWindowFunctions:
                 "{現在の回線}": self.current_line_combo.currentText(),
                 "{発注者}": self.order_person_input.text(),
                 "{料金}": self.fee_input.text(),
-                "{携帯種別}": self.mobile_type_combo.currentText(),
-                "{備考}": self.remarks_input.text(),
+                "{携帯種別}": "",  # モバイル種別も空に
+                "{社番}": self.employee_number_input.text(),     # 社番を追加
+                "{他番号}": self.other_number_input.text(),      # 他番号を追加
+                "{電話機}": self.phone_device_input.text(),      # 電話機を追加
+                "{禁止回線}": self.forbidden_line_input.text(),  # 禁止回線を追加
+                "{ND}": self.nd_input.text(),                   # NDを追加
                 "{続柄}": self.relationship_input.text()
             }
             
