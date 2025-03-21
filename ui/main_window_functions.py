@@ -289,7 +289,7 @@ class MainWindowFunctions:
                         western_year = jp_year
                     else:
                         western_year = era_year_map[era] + jp_year
-                    birth_date = f"{western_year}年{month}月{day}日"
+                    birth_date = f"{western_year}/{month}/{day}"
                 except (ValueError, TypeError):
                     logging.warning("生年月日の変換に失敗しました")
                     
@@ -407,8 +407,11 @@ class MainWindowFunctions:
         self.net_usage_combo.setCurrentIndex(0)  # "なし"が選択される
         self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         
-        # 受注日を今日の日付に更新
-        self.order_date_input.setText(datetime.datetime.now().strftime("%Y/%m/%d"))
+        # 受注日を今日の日付に更新（0埋めなし）
+        now = datetime.datetime.now()
+        month = str(now.month)  # 0埋めなしの月
+        day = str(now.day)      # 0埋めなしの日
+        self.order_date_input.setText(f"{month}/{day}")
         
         # 料金認識は初期値に戻さない（保持する）
         # self.fee_input.setText("2500円～3000円")
@@ -804,7 +807,7 @@ class MainWindowFunctions:
                     try:
                         jp_year = int(year)
                         western_year = era_year_map[era] + jp_year
-                        birth_date = f"{western_year}年{month}{day}日"
+                        birth_date = f"{western_year}/{month}/{day}"
                     except ValueError:
                         pass
             
