@@ -289,6 +289,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.employee_number_input = QLineEdit()
         input_layout.addWidget(self.employee_number_input)
         
+        # 料金認識を追加（移動）
+        input_layout.addWidget(QLabel("料金認識"))
+        self.fee_input = QLineEdit()
+        self.fee_input.setText("2500円～3000円")
+        input_layout.addWidget(self.fee_input)
+        
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
         self.net_usage_combo = QComboBox()
@@ -478,12 +484,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.judgment_combo = QComboBox()
         self.judgment_combo.addItems(["OK", "NG"])
         order_layout.addWidget(self.judgment_combo)
-        
-        # 料金認識
-        order_layout.addWidget(QLabel("料金認識"))
-        self.fee_input = QLineEdit()
-        self.fee_input.setText("2500円～3000円")
-        order_layout.addWidget(self.fee_input)
         
         order_group.setLayout(order_layout)
         parent_layout.addWidget(order_group)
@@ -798,8 +798,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_phone_input.clear()
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
-        self.order_person_input.clear()
-        self.fee_input.clear()
+        # 受注者名はクリアしない（保持する）
+        # self.order_person_input.clear()
+        # 料金認識はクリアしない（保持する）
+        # self.fee_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
         self.other_number_input.setText("なし")
@@ -807,6 +809,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.forbidden_line_input.setText("なし")
         
         self.relationship_input.clear()
+        # 社番はクリアしない（保持する）
         # コンボボックスをデフォルト値に
         self.era_combo.setCurrentIndex(0)
         self.year_combo.setCurrentIndex(0)
