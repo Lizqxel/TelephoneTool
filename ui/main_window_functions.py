@@ -191,9 +191,6 @@ class MainWindowFunctions:
             
             # 成功メッセージをステータスバーに表示
             self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
-            
-            # 成功メッセージをポップアップ表示
-            QMessageBox.information(self, "CTI形式コピー", "営業コメントをクリップボードにコピーしました。")
     
     def generate_cti_format(self):
         """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
