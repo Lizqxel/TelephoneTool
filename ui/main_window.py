@@ -223,7 +223,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 出やすい時間帯
         input_layout.addWidget(QLabel("出やすい時間帯"))
         self.available_time_input = QLineEdit()
-        self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　--")
+        self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
         input_layout.addWidget(self.available_time_input)
         
         # 契約者名
