@@ -626,8 +626,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 self.postal_code_input.setText(converted_postal_code)
                 self.list_postal_code_input.setText(converted_postal_code)
                 
-            # プレビューを更新
-            self.update_preview()
+            # プレビューを更新しない（営業コメントを自動作成しない）
+            # self.update_preview()
             
             # 成功メッセージ
             self.statusBar().showMessage("データを取得しました", 5000)
