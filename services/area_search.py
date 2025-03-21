@@ -265,7 +265,13 @@ def search_service_area(postal_code, address):
     driver = None
     try:
         # 1. ドライバーを作成してサイトを開く
-        driver = create_driver(headless=headless_mode)
+        # headless=Falseを強制して常にブラウザウィンドウを表示する
+        if show_popup:
+            driver = create_driver(headless=False)
+            logging.info("表示モードでブラウザを強制的に起動します")
+        else:
+            driver = create_driver(headless=headless_mode)
+            
         # グローバル変数に保存
         global_driver = driver
         
