@@ -366,10 +366,11 @@ class MainWindowFunctions:
         self.list_phone_input.clear()
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
-        self.order_person_input.clear()
+        # 受注者名はクリアしない（保持する）
+        # self.order_person_input.clear()
         
-        # 新しいフィールドをクリア
-        self.employee_number_input.clear()  # 社番
+        # 社番はクリアしない（保持する）
+        # self.employee_number_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
         self.other_number_input.setText("なし")
@@ -404,8 +405,8 @@ class MainWindowFunctions:
         # 受注日を今日の日付に更新
         self.order_date_input.setText(datetime.datetime.now().strftime("%Y/%m/%d"))
         
-        # 料金認識を初期値に戻す
-        self.fee_input.setText("2500円～3000円")
+        # 料金認識は初期値に戻さない（保持する）
+        # self.fee_input.setText("2500円～3000円")
         
         # プレビューエリアをクリア
         self.preview_text.clear()
