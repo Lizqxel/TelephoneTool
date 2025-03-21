@@ -475,7 +475,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 受注日（本日自動入力）
         order_layout.addWidget(QLabel("受注日"))
         self.order_date_input = QLineEdit()
-        self.order_date_input.setText(datetime.datetime.now().strftime("%Y/%m/%d"))
+        # 0埋めなしの月/日フォーマットを生成
+        now = datetime.datetime.now()
+        month = str(now.month)  # 0埋めなしの月
+        day = str(now.day)      # 0埋めなしの日
+        self.order_date_input.setText(f"{month}/{day}")
         self.order_date_input.setReadOnly(True)
         order_layout.addWidget(self.order_date_input)
         
