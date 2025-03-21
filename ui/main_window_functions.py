@@ -327,7 +327,7 @@ class MainWindowFunctions:
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
             if maps_url:
-                formatted_text += f"\n\n地図URL: {maps_url}"
+                formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
             
             # プレビューに表示
             self.preview_text.setText(formatted_text)
@@ -846,7 +846,7 @@ class MainWindowFunctions:
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
             if maps_url:
-                formatted_text += f"\n\n地図URL: {maps_url}"
+                formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
             
             return formatted_text
             
