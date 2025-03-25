@@ -15,7 +15,7 @@ from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip)
+                              QApplication, QToolTip, QSplitter)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
@@ -30,6 +30,13 @@ from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
 
 
+class CustomComboBox(QComboBox):
+    """スクロールでの値変更を防止するカスタムコンボボックス"""
+    def wheelEvent(self, event):
+        """ホイールイベントを無視"""
+        event.ignore()
+
+
 class MainWindow(QMainWindow, MainWindowFunctions):
     """メインウィンドウクラス"""
     
@@ -37,7 +44,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """メインウィンドウの初期化"""
         super().__init__()
         self.setWindowTitle("コールセンター業務効率化ツール")
-        self.setMinimumSize(1000, 800)
+        self.setMinimumSize(800, 600)
         
         # メインウィジェットの設定
         main_widget = QWidget()
@@ -55,10 +62,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # トップバーの作成
         self.create_top_bar(main_layout)
         
-        # メイン部分のレイアウト
-        content_layout = QHBoxLayout()
+        # スプリッターの作成
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #cccccc;
+                width: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #999999;
+            }
+            QSplitter::handle:pressed {
+                background-color: #666666;
+            }
+        """)
+        splitter.setHandleWidth(2)  # スプリッターハンドルの幅を設定
         
-        # 入力フォームエリア（左側70%）をスクロール可能に
+        # 入力フォームエリア（左側）をスクロール可能に
         form_widget = QWidget()
         form_layout = QVBoxLayout(form_widget)
         self.create_input_form(form_layout)
@@ -66,7 +86,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # スクロールエリアの作成
         scroll_area = QScrollArea()
         scroll_area.setWidget(form_widget)
-        scroll_area.setWidgetResizable(True)  # ウィジェットのリサイズを許可
+        scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
@@ -92,17 +112,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """)
         
-        # レイアウトにスクロールエリアを追加
-        content_layout.addWidget(scroll_area, 70)
-        
-        # プレビューエリア（右側30%）
+        # プレビューエリア（右側）
         preview_group = QGroupBox("プレビュー")
         preview_layout = QVBoxLayout(preview_group)
         self.create_preview_area(preview_layout)
-        content_layout.addWidget(preview_group, 30)
         
-        # メインレイアウトに追加
-        main_layout.addLayout(content_layout)
+        # スプリッターにウィジェットを追加
+        splitter.addWidget(scroll_area)
+        splitter.addWidget(preview_group)
+        
+        # 初期のサイズ比率を設定（7:3）
+        splitter.setSizes([700, 300])
+        
+        # スプリッターをメインレイアウトに追加
+        main_layout.addWidget(splitter)
         
         # シグナルの設定
         self.setup_signals()
@@ -143,8 +166,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
         top_bar = QWidget()
-        top_bar.setStyleSheet("background-color: #2C3E50; color: white;")
+        top_bar.setFixedHeight(32)  # トップバーの高さを32pxに設定
+        top_bar.setStyleSheet("""
+            QWidget {
+                background-color: #2C3E50;
+                color: white;
+            }
+        """)
         top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(5, 2, 5, 2)  # 上下のマージンを2pxに設定
+        top_bar_layout.setSpacing(4)  # ボタン間のスペースを4pxに設定
         
         # ワンクリック取得ボタン（名称変更：顧客情報取得）
         self.oneclick_btn = QPushButton("顧客情報取得")
@@ -152,9 +183,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QPushButton {
                 color: white;
                 border: 1px solid white;
-                padding: 5px;
-                border-radius: 3px;
+                padding: 2px 6px;
+                border-radius: 2px;
                 background-color: #27AE60;
+                min-height: 18px;
+                max-height: 22px;
             }
             QPushButton:hover {
                 background-color: #2ECC71;
@@ -178,8 +211,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QPushButton {
                 color: white;
                 border: 1px solid white;
-                padding: 5px;
-                border-radius: 3px;
+                padding: 2px 6px;
+                border-radius: 2px;
+                min-height: 18px;
+                max-height: 22px;
+                font-size: 9pt;
             }
             QPushButton:hover {
                 background-color: #34495E;
@@ -234,7 +270,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # フリガナ
         furigana_layout = QHBoxLayout()
         furigana_layout.addWidget(QLabel("フリガナ"))
-        self.furigana_mode_combo = QComboBox()
+        self.furigana_mode_combo = CustomComboBox()
         self.furigana_mode_combo.addItems(["自動", "手動"])
         furigana_layout.addWidget(self.furigana_mode_combo)
         input_layout.addLayout(furigana_layout)
@@ -245,11 +281,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         birth_layout = QHBoxLayout()
         birth_layout.addWidget(QLabel("生年月日"))
         
-        self.era_combo = QComboBox()
+        self.era_combo = CustomComboBox()
         self.era_combo.addItems(["昭和", "平成", "西暦"])
         birth_layout.addWidget(self.era_combo)
         
-        self.year_combo = QComboBox()
+        self.year_combo = CustomComboBox()
         # 初期値として昭和の年を設定
         self.year_combo.addItems([str(i) for i in range(1, 65)])
         self.year_combo.setEditable(True)
@@ -259,7 +295,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         birth_layout.addWidget(self.year_combo)
         birth_layout.addWidget(QLabel("年"))
         
-        self.month_combo = QComboBox()
+        self.month_combo = CustomComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
         self.month_combo.setEditable(True)
         self.month_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -268,7 +304,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         birth_layout.addWidget(self.month_combo)
         birth_layout.addWidget(QLabel("月"))
         
-        self.day_combo = QComboBox()
+        self.day_combo = CustomComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
         self.day_combo.setEditable(True)
         self.day_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -297,13 +333,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = QComboBox()
+        self.net_usage_combo = CustomComboBox()
         self.net_usage_combo.addItems(["なし", "あり"])
         input_layout.addWidget(self.net_usage_combo)
         
         # 家族了承
         input_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = QComboBox()
+        self.family_approval_combo = CustomComboBox()
         self.family_approval_combo.addItems(["ok", "なし"])
         input_layout.addWidget(self.family_approval_combo)
         
@@ -437,7 +473,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # リストフリガナ
         list_furigana_layout = QHBoxLayout()
         list_furigana_layout.addWidget(QLabel("リストフリガナ"))
-        self.list_furigana_mode_combo = QComboBox()
+        self.list_furigana_mode_combo = CustomComboBox()
         self.list_furigana_mode_combo.addItems(["自動", "手動"])
         list_furigana_layout.addWidget(self.list_furigana_mode_combo)
         list_layout.addLayout(list_furigana_layout)
@@ -468,7 +504,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 現状回線
         order_layout.addWidget(QLabel("現状回線"))
-        self.current_line_combo = QComboBox()
+        self.current_line_combo = CustomComboBox()
         self.current_line_combo.addItems(["アナログ"])
         order_layout.addWidget(self.current_line_combo)
         
@@ -485,7 +521,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 提供判定
         order_layout.addWidget(QLabel("提供判定"))
-        self.judgment_combo = QComboBox()
+        self.judgment_combo = CustomComboBox()
         self.judgment_combo.addItems(["OK", "NG"])
         order_layout.addWidget(self.judgment_combo)
         
