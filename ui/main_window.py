@@ -15,7 +15,7 @@ from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip, QSplitter)
+                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
@@ -28,6 +28,7 @@ from utils.string_utils import validate_name, validate_furigana, convert_to_half
 from utils.furigana_utils import convert_to_furigana
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
+from .update_dialog import UpdateDialog
 
 
 class CustomComboBox(QComboBox):
@@ -162,6 +163,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # カウントダウン更新用のタイマー
         self.countdown_timer = QTimer()
         self.countdown_timer.timeout.connect(self.update_countdown)
+        
+        self.init_menu()
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -875,4 +878,40 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.update_screenshot_button()
         # プレビューもクリア
         self.preview_text.clear()
+
+    def init_menu(self):
+        """メニューの初期化"""
+        menubar = self.menuBar()
+        
+        # ファイルメニュー
+        file_menu = menubar.addMenu("ファイル")
+        
+        exit_action = file_menu.addAction("終了")
+        exit_action.triggered.connect(self.close)
+        
+        # ヘルプメニュー
+        help_menu = menubar.addMenu("ヘルプ")
+        
+        update_action = help_menu.addAction("アップデート設定")
+        update_action.triggered.connect(self.show_update_dialog)
+        
+        about_action = help_menu.addAction("バージョン情報")
+        about_action.triggered.connect(self.show_about_dialog)
+        
+    def show_update_dialog(self):
+        """アップデート設定ダイアログを表示する"""
+        dialog = UpdateDialog(self)
+        dialog.exec()
+        
+    def show_about_dialog(self):
+        """バージョン情報ダイアログを表示する"""
+        from version import VERSION, APP_NAME
+        
+        QMessageBox.about(
+            self,
+            "バージョン情報",
+            f"{APP_NAME} v{VERSION}\n\n"
+            "© 2024 Your Company Name\n"
+            "All rights reserved."
+        )
 

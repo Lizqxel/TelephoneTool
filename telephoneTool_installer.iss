@@ -2,20 +2,19 @@
 ; Inno Setup用スクリプトファイル
 
 #define MyAppName "TelephoneTool"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "TelephoneTool"
-#define MyAppURL "https://example.com/"
-#define MyAppExeName "TelephoneTool.exe"
+#define MyAppVersion "1.0.1"
+#define MyAppPublisher "Lizqxel"
+#define MyAppExeName "TelephoneTool-1.0.1.exe"
 
 [Setup]
 ; アプリケーション基本情報
-AppId={{E1FD7AE3-B14D-4F54-A673-F29D90E68C9C}}
+AppId={{A1B2C3D4-E5F6-4747-8899-AABBCCDDEEFF}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}
+AppPublisherURL="https://example.com/"
+AppSupportURL="https://example.com/"
+AppUpdatesURL="https://example.com/"
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 ; インストーラーがレジストリに作成する内容
@@ -25,7 +24,7 @@ Compression=lzma
 SolidCompression=yes
 ; 出力ファイル名設定
 OutputDir=installer
-OutputBaseFilename=TelephoneTool_Setup
+OutputBaseFilename={#MyAppName}-{#MyAppVersion}-setup
 ; Windows 8〜11のユーザーインターフェイスガイドラインに準拠
 WizardStyle=modern
 ; アイコン設定
@@ -39,11 +38,20 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; ビルドされたアプリケーション全体をコピー
-Source: "dist\TelephoneTool\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "settings.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "map.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "qt.conf"; DestDir: "{app}"; Flags: ignoreversion
+Source: "version.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "utils\*"; DestDir: "{app}\utils"; Flags: ignoreversion recursesubdirs
+Source: "ui\*"; DestDir: "{app}\ui"; Flags: ignoreversion recursesubdirs
+Source: "services\*"; DestDir: "{app}\services"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 ; スタートメニューとデスクトップにショートカットを作成
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
