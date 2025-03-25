@@ -44,7 +44,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """メインウィンドウの初期化"""
         super().__init__()
         self.setWindowTitle("コールセンター業務効率化ツール")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(600, 400)  # 最小サイズを600x400に変更
         
         # メインウィジェットの設定
         main_widget = QWidget()
