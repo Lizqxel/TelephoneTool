@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Dict
 import ctypes
+import re
 
 # ログレベルをINFOに設定
 logging.getLogger().setLevel(logging.DEBUG)
@@ -106,7 +107,7 @@ class OneClickService:
                 control_center_y = (control_rect[1] + control_rect[3]) // 2
                 
                 # 距離を計算
-                horizontal_distance = control_center_x - label_center_x
+                horizontal_distance = control_center_x - label_center_x  # コントロールの中心 - ラベルの中心
                 vertical_distance = abs(control_center_y - label_center_y)
                 euclidean_distance = ((horizontal_distance**2 + vertical_distance**2)**0.5)
                 
@@ -117,18 +118,17 @@ class OneClickService:
                                f"distances=(h={horizontal_distance}, v={vertical_distance}, e={euclidean_distance})")
                     
                     # 郵便番号フィールドの条件
-                    # 特に「〒」ラベルの左側にあるフィールドを検出
-                    if control_text == "639-1052":  # 画像から確認した郵便番号
-                        logging.info(f"郵便番号フィールドを直接検出: handle={control['hwnd']}, text='{control_text}'")
-                        return control['hwnd'], 0
-                    
-                    # 郵便番号の形式チェック（数字とハイフンのみ）
-                    if control_text and all(c in '0123456789-' for c in control_text):
-                        # 垂直距離が近いものを優先
-                        if vertical_distance < 40:
-                            postal_candidates.append((control['hwnd'], vertical_distance, control_text))
-                            logging.info(f"郵便番号フィールド候補を追加: handle={control['hwnd']}, "
-                                       f"text='{control_text}', distance={vertical_distance}")
+                    # 特に「〒」ラベルの右側にあるフィールドを検出
+                    if (horizontal_distance > 0 and  # ラベルの右側
+                        horizontal_distance < 100 and  # 水平距離が100px以内
+                        vertical_distance < 20 and  # 垂直距離が20px以内
+                        control_text and  # テキストが存在する
+                        all(c in '0123456789-' for c in control_text) and  # 数字とハイフンのみ
+                        7 <= len(control_text) <= 8):  # 適切な長さ
+                        
+                        postal_candidates.append((control['hwnd'], vertical_distance, control_text))
+                        logging.info(f"郵便番号フィールド候補を追加: handle={control['hwnd']}, "
+                                   f"text='{control_text}', distance={vertical_distance}")
                     continue
                 
                 # 優先電話番号フィールドの特別処理
@@ -640,104 +640,271 @@ class OneClickService:
 
     def detect_fields_by_position(self, controls):
         """
-        CTIメインウィンドウ内の固定位置に基づいてフィールドを検出
+        画面上の位置情報を使用してフィールドを検出する
         
         Args:
-            controls: 編集可能なコントロールのリスト
+            controls (list): 検出対象のコントロールリスト
             
         Returns:
-            CTIData: 検出されたフィールド値を格納したデータ
+            CTIData: 検出されたデータ
         """
         data = CTIData()
-        
-        # すべてのコントロールの位置情報をログに出力
-        logging.info(f"=== すべてのコントロールの位置情報 ({len(controls)}個) ===")
-        for i, control in enumerate(controls):
-            logging.info(f"コントロール {i+1}: text='{control['text']}', class='{control['class']}', "
-                       f"client_rect={control['client_rect']}, size={control['size']}")
-        
-        # リスト名の候補を格納する配列
-        list_candidates = []
-        
-        # 特定のテキストを持つコントロールを探す
+
+        # リスト名の検出（最優先）
         for control in controls:
-            # 顧客名（日本語文字を含むテキスト）
-            if control['text'] and any(ord(ch) > 127 for ch in control['text']):
-                # 住所や管理番号でないことを確認
-                if not any(keyword in control['text'] for keyword in ["県", "市", "町", "村", "_"]):
-                    # 名前らしきテキストを検出（日本語の文字を含む）
-                    # 全角スペースの条件を緩和
-                    if len(control['text']) >= 2:
-                        # 顧客名フィールドの位置や特徴を考慮
-                        # 通常、顧客名フィールドは特定の位置にある
-                        client_rect = control['client_rect']
-                        # 顧客名フィールドの一般的な位置（クライアント座標）
-                        if (50 <= client_rect[0] <= 200 and 100 <= client_rect[1] <= 150):
-                            data.customer_name = control['text']
-                            logging.info(f"顧客名を検出: '{control['text']}', handle={control['hwnd']}, "
-                                       f"client_rect={control['client_rect']}")
+            text = control['text']
+            if not text:
+                continue
             
-            # 住所
-            if control['text'] and any(keyword in control['text'] for keyword in ["県", "市", "町", "村"]):
-                data.address = control['text']
-                logging.info(f"住所を検出: '{control['text']}', handle={control['hwnd']}, "
-                           f"client_rect={control['client_rect']}")
+            # リストフィールドの条件：
+            # 1. 上部に位置する（Y座標が100px以下）
+            # 2. 適切な幅（150px以上）
+            # 3. COMBOBOXまたはテキストボックスである
+            client_rect = control['client_rect']
+            width = client_rect[2] - client_rect[0]
+            class_name = control['class'].lower()  # 小文字に変換して比較
             
-            # 電話番号
-            if control['text'] and all(ch in '0123456789-' for ch in control['text']):
-                if len(control['text']) >= 10 and len(control['text']) <= 13 and control['text'] != data.postal_code:
-                    # 既に検出した郵便番号と異なる場合のみ
-                    data.phone = control['text']
-                    logging.info(f"電話番号を検出: '{control['text']}', handle={control['hwnd']}, "
-                               f"client_rect={control['client_rect']}")
-            
-            # 郵便番号
-            if control['text'] and all(ch in '0123456789-' for ch in control['text']) and 7 <= len(control['text']) <= 8:
-                data.postal_code = control['text']
-                logging.info(f"郵便番号を検出: '{control['text']}', handle={control['hwnd']}, "
-                           f"client_rect={control['client_rect']}")
-            
-            # 管理番号
-            if control['text'] and "_" in control['text'] and len(control['text']) > 10:
-                data.management_id = control['text']
-                logging.info(f"管理番号を検出: '{control['text']}', handle={control['hwnd']}, "
-                           f"client_rect={control['client_rect']}")
-            
-            # リスト名の候補を収集（すでにリスト名が設定されていない場合のみ）
-            if not data.list_name:
-                # リスト名の特徴的なキーワードを含むテキスト
-                if control['text'] and any(keyword in control['text'] for keyword in ["リスト", "NP光", "在宅", "アナログ"]):
-                    # 上部のリストフィールドを優先（Y座標が小さい＝上部にある）
-                    client_rect = control['client_rect']
-                    if client_rect[1] < 100:  # 上部のリストフィールドは通常Y座標が100以下
-                        data.list_name = control['text']
-                        logging.info(f"上部のリスト名を検出: '{control['text']}', handle={control['hwnd']}, "
-                                   f"class='{control['class']}', client_rect={client_rect}")
-                        break
-                    else:
-                        list_candidates.append((control['text'], client_rect[1]))  # テキストとY座標を保存
-                        logging.info(f"リスト名候補を検出: '{control['text']}', handle={control['hwnd']}, "
-                                   f"class='{control['class']}', client_rect={client_rect}")
-        
-        # リスト名の候補から最適なものを選択（すでにリスト名が設定されていない場合のみ）
-        if not data.list_name and list_candidates:
-            # Y座標が小さい（上部にある）ものを優先
-            list_candidates.sort(key=lambda x: x[1])
-            data.list_name = list_candidates[0][0]
-            logging.info(f"最適なリスト名を選択: '{data.list_name}' (Y座標: {list_candidates[0][1]})")
-        elif not data.list_name:
-            # リストラベルの近くにあるコンボボックスやテキストフィールドを探す
+            if (client_rect[1] < 100 and  # Y座標が100px以下
+                width >= 150 and  # 幅が150px以上
+                ("combobox" in class_name or "edit" in class_name or "textbox" in class_name)):  # コンボボックスまたはテキストボックス
+                
+                data.list_name = text
+                logging.info(f"リストフィールドを検出: '{text}'")
+                break
+
+        # リストフィールドが見つからない場合、ラベルからの検出を試みる
+        if not data.list_name:
             list_label_hwnd = self.find_label_by_text("リスト")
             if list_label_hwnd:
-                list_field = self.find_field_near_label(list_label_hwnd, all_controls=True)
-                if list_field and list_field['text']:
-                    data.list_name = list_field['text']
-                    logging.info(f"リストラベルの近くでテキストを検出: '{list_field['text']}', "
-                               f"handle={list_field['hwnd']}, class='{list_field['class']}', "
-                               f"client_rect={list_field['client_rect']}")
+                # ラベルの位置を取得
+                label_rect = win32gui.GetWindowRect(list_label_hwnd)
+                label_client_rect = list(label_rect)
+                label_client_rect[0], label_client_rect[1] = win32gui.ScreenToClient(self.window_handle, (label_rect[0], label_rect[1]))
+                label_client_rect[2], label_client_rect[3] = win32gui.ScreenToClient(self.window_handle, (label_rect[2], label_rect[3]))
+                
+                # ラベルの中心座標を計算
+                label_center_x = (label_client_rect[0] + label_client_rect[2]) // 2
+                label_center_y = (label_client_rect[1] + label_client_rect[3]) // 2
+                
+                for control in controls:
+                    text = control['text']
+                    if not text:
+                        continue
+                    
+                    control_rect = control['client_rect']
+                    control_center_x = (control_rect[0] + control_rect[2]) // 2
+                    control_center_y = (control_rect[1] + control_rect[3]) // 2
+                    
+                    # 距離を計算
+                    horizontal_distance = control_center_x - label_center_x
+                    vertical_distance = abs(control_center_y - label_center_y)
+                    class_name = control['class'].lower()  # 小文字に変換して比較
+                    
+                    if (horizontal_distance > 0 and  # ラベルの右側
+                        horizontal_distance < 100 and  # 水平距離が100px以内
+                        vertical_distance < 20 and  # 垂直距離が20px以内
+                        ("combobox" in class_name or "edit" in class_name or "textbox" in class_name)):  # コンボボックスまたはテキストボックス
+                        
+                        data.list_name = text
+                        logging.info(f"リストフィールドをラベルから検出: '{text}'")
+                        break
+
+        # 住所ラベルを探す（最優先）
+        address_label_hwnd = self.find_label_by_text("住所")
+        if address_label_hwnd:
+            # ラベルの位置を取得
+            label_rect = win32gui.GetWindowRect(address_label_hwnd)
+            label_client_rect = list(label_rect)
+            label_client_rect[0], label_client_rect[1] = win32gui.ScreenToClient(self.window_handle, (label_rect[0], label_rect[1]))
+            label_client_rect[2], label_client_rect[3] = win32gui.ScreenToClient(self.window_handle, (label_rect[2], label_rect[3]))
+            
+            # 住所フィールドの検索条件
+            best_field = None
+            min_vertical_distance = float('inf')
+            
+            for control in controls:
+                control_rect = control['client_rect']
+                
+                # 住所フィールドの条件：
+                # 1. ラベルの右側にある
+                # 2. 垂直方向の位置が近い
+                # 3. 適切な幅を持つ
+                horizontal_distance = control_rect[0] - label_client_rect[2]
+                vertical_distance = abs((control_rect[1] + control_rect[3]) // 2 - 
+                                     (label_client_rect[1] + label_client_rect[3]) // 2)
+                width = control_rect[2] - control_rect[0]
+                
+                if (horizontal_distance > 0 and  # ラベルの右側
+                    horizontal_distance < 100 and  # 水平距離が100px以内
+                    vertical_distance < 20 and  # 垂直距離が20px以内
+                    width >= 200 and  # 幅が200px以上
+                    vertical_distance < min_vertical_distance):  # より近いフィールドを優先
+                    
+                    min_vertical_distance = vertical_distance
+                    best_field = control
+            
+            # 最適な住所フィールドが見つかった場合
+            if best_field:
+                data.address = best_field['text']
+                logging.info(f"住所ラベルの近くで住所フィールドを検出: '{best_field['text']}', "
+                           f"handle={best_field['hwnd']}, client_rect={best_field['client_rect']}")
         
-        # 検出結果のサマリーを出力
-        logging.info("=== 検出結果 ===")
+        # 住所ラベルから検出できなかった場合のバックアップ処理
+        if not data.address:
+            # 住所フィールドの特徴を持つコントロールを探す
+            for control in controls:
+                text = control['text']
+                if not text:
+                    continue
+                
+                # 住所フィールドの条件：
+                # 1. 都道府県名を含む
+                # 2. 市区町村名を含む
+                # 3. 適切な長さ（極端に長い場合は営業メモの可能性）
+                # 4. 適切な位置（画面上部のメイン情報エリア内）
+                # 5. 適切な幅（住所フィールドは通常広い）
+                client_rect = control['client_rect']
+                width = client_rect[2] - client_rect[0]
+                
+                if (width >= 200 and  # 幅が200px以上
+                    50 <= client_rect[1] <= 300 and  # Y座標が適切な範囲内
+                    len(text) <= 100 and  # 長すぎないテキスト
+                    re.search(r'[都道府県]', text) and  # 都道府県名を含む
+                    re.search(r'[市区町村]', text) and  # 市区町村名を含む
+                    not re.search(r'対応者|工事希望日|料金', text)):  # 営業メモの特徴的な文字列を含まない
+                    
+                    data.address = text
+                    logging.info(f"住所フィールドの特徴から検出: '{text}', "
+                               f"handle={control['hwnd']}, client_rect={client_rect}")
+                    break
+
+        # 電話番号の検出
+        for control in controls:
+            text = control['text']
+            if not text:
+                continue
+            
+            # 電話番号の条件：
+            # 1. 数字とハイフンのみで構成
+            # 2. 適切な長さ（10-13文字）
+            # 3. 適切な位置（上部エリア内）
+            if (all(c in '0123456789-' for c in text) and
+                10 <= len(text) <= 13 and
+                50 <= control['client_rect'][1] <= 200):
+                
+                data.phone = text
+                logging.info(f"電話番号フィールドを検出: '{text}', "
+                           f"handle={control['hwnd']}, client_rect={control['client_rect']}")
+                break
+
+        # 郵便番号の検出
+        postal_label_hwnd = self.find_label_by_text("〒")
+        if postal_label_hwnd:
+            # ラベルの位置を取得
+            label_rect = win32gui.GetWindowRect(postal_label_hwnd)
+            label_client_rect = list(label_rect)
+            label_client_rect[0], label_client_rect[1] = win32gui.ScreenToClient(self.window_handle, (label_rect[0], label_rect[1]))
+            label_client_rect[2], label_client_rect[3] = win32gui.ScreenToClient(self.window_handle, (label_rect[2], label_rect[3]))
+            
+            # ラベルの中心座標を計算
+            label_center_x = (label_client_rect[0] + label_client_rect[2]) // 2
+            label_center_y = (label_client_rect[1] + label_client_rect[3]) // 2
+            
+            # すべてのコントロールの位置情報をログ出力（デバッグ用）
+            for control in controls:
+                text = control['text']
+                if text and all(c in '0123456789-' for c in text) and 7 <= len(text) <= 8:
+                    logging.info(f"郵便番号候補: text='{text}', rect={control['client_rect']}")
+            
+            # 郵便番号フィールドの検出（直接検出）
+            for control in controls:
+                text = control['text']
+                if not text:
+                    continue
+                
+                # 郵便番号の条件：
+                # 1. 数字とハイフンのみで構成
+                # 2. 7-8文字（ハイフンあり/なし）
+                # 3. 適切な位置（Y座標が150-180px）
+                # 4. 適切な幅（30-100px）
+                control_rect = control['client_rect']
+                width = control_rect[2] - control_rect[0]
+                
+                if (all(c in '0123456789-' for c in text) and
+                    7 <= len(text) <= 8 and
+                    150 <= control_rect[1] <= 180 and  # Y座標が150-180px
+                    30 <= width <= 100):  # 幅が30-100px
+                    
+                    data.postal_code = text
+                    logging.info(f"郵便番号フィールドを直接検出: '{text}', "
+                               f"handle={control['hwnd']}, client_rect={control_rect}")
+                    break
+
+            # 直接検出で見つからなかった場合、ラベルからの相対位置で検索
+            if not data.postal_code:
+                for control in controls:
+                    text = control['text']
+                    if not text:
+                        continue
+                    
+                    control_rect = control['client_rect']
+                    control_center_x = (control_rect[0] + control_rect[2]) // 2
+                    control_center_y = (control_rect[1] + control_rect[3]) // 2
+                    
+                    # 距離を計算（ラベルの中心からの距離）
+                    horizontal_distance = control_center_x - label_center_x
+                    vertical_distance = abs(control_center_y - label_center_y)
+                    euclidean_distance = ((horizontal_distance**2 + vertical_distance**2)**0.5)
+                    
+                    # 郵便番号フィールドの検証をログ出力
+                    if all(c in '0123456789-' for c in text):
+                        logging.info(f"郵便番号フィールド検証: text='{text}', "
+                                   f"rect={control_rect}, "
+                                   f"distances=(h={horizontal_distance}, v={vertical_distance}, e={euclidean_distance})")
+                    
+                    # 郵便番号フィールドの条件チェック
+                    if (all(c in '0123456789-' for c in text) and  # 数字とハイフンのみ
+                        7 <= len(text) <= 8 and  # 適切な長さ
+                        -100 <= horizontal_distance <= 100 and  # ラベルの左右100px以内
+                        vertical_distance < 30):  # 垂直距離が30px以内
+                        
+                        data.postal_code = text
+                        logging.info(f"郵便番号フィールドをラベルから検出: '{text}', "
+                                   f"handle={control['hwnd']}, client_rect={control_rect}")
+                        break
+
+        # 管理番号の検出
+        for control in controls:
+            text = control['text']
+            if not text:
+                continue
+            
+            # 管理番号の条件：
+            # 1. アンダースコアを含む
+            # 2. 適切な長さ（10文字以上）
+            # 3. 適切な位置（上部エリア内）
+            if ('_' in text and
+                len(text) > 10 and
+                50 <= control['client_rect'][1] <= 200):
+                
+                data.management_id = text
+                logging.info(f"管理番号フィールドを検出: '{text}', "
+                           f"handle={control['hwnd']}, client_rect={control['client_rect']}")
+                break
+
+        # 顧客名が検出されていない場合、ラベルベースの方法で検出
+        if not data.customer_name:
+            customer_label_hwnd = self.find_label_by_text("顧客・漢字")
+            if customer_label_hwnd:
+                customer_field = self.find_field_near_label(customer_label_hwnd)
+                if customer_field and customer_field['text']:
+                    data.customer_name = customer_field['text']
+                    logging.info(f"顧客名フィールドを直接検出: '{customer_field['text']}', "
+                               f"handle={customer_field['hwnd']}, class='{customer_field['class']}', "
+                               f"client_rect={customer_field['client_rect']}")
+
+        # 最終的な検出結果のサマリーを出力
+        logging.info("=== 最終検出結果 ===")
         logging.info(f"顧客名: {data.customer_name}")
         logging.info(f"住所: {data.address}")
         logging.info(f"電話番号: {data.phone}")

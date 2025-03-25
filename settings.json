@@ -6,7 +6,7 @@
     "headless": false,
     "disable_images": true,
     "show_popup": true,
-    "auto_close": false,
+    "auto_close": true,
     "page_load_timeout": 60,
     "script_timeout": 60
   }
