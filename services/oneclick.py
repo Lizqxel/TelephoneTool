@@ -825,14 +825,12 @@ class OneClickService:
                 # 郵便番号の条件：
                 # 1. 数字とハイフンのみで構成
                 # 2. 7-8文字（ハイフンあり/なし）
-                # 3. 適切な位置（Y座標が150-180px）
-                # 4. 適切な幅（30-100px）
+                # 3. 適切な幅（30-100px）
                 control_rect = control['client_rect']
                 width = control_rect[2] - control_rect[0]
                 
                 if (all(c in '0123456789-' for c in text) and
                     7 <= len(text) <= 8 and
-                    150 <= control_rect[1] <= 180 and  # Y座標が150-180px
                     30 <= width <= 100):  # 幅が30-100px
                     
                     data.postal_code = text
@@ -865,8 +863,9 @@ class OneClickService:
                     # 郵便番号フィールドの条件チェック
                     if (all(c in '0123456789-' for c in text) and  # 数字とハイフンのみ
                         7 <= len(text) <= 8 and  # 適切な長さ
-                        -100 <= horizontal_distance <= 100 and  # ラベルの左右100px以内
-                        vertical_distance < 30):  # 垂直距離が30px以内
+                        horizontal_distance > 0 and  # ラベルの右側にある
+                        horizontal_distance < 200 and  # ラベルの右側200px以内
+                        vertical_distance < 50):  # 垂直距離が50px以内
                         
                         data.postal_code = text
                         logging.info(f"郵便番号フィールドをラベルから検出: '{text}', "
