@@ -114,4 +114,40 @@ def validate_furigana(text):
     if re.search(r'[^\u3040-\u309F\u30A0-\u30FF\s]', text):
         return False
         
-    return True 
+    return True
+
+
+def convert_to_half_width_except_space(text):
+    """
+    全角文字を半角に変換するが、スペースだけは全角のままにする関数
+    
+    Args:
+        text (str): 変換する文字列
+        
+    Returns:
+        str: 変換された文字列（スペースは全角のまま）
+    """
+    if not text:
+        return ""
+        
+    # 全角数字を半角に変換
+    text = text.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    
+    # 全角英字を半角に変換
+    text = text.translate(str.maketrans('ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ',
+                                      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'))
+    
+    # 全角記号を半角に変換（一対一対応するよう注意）
+    text = text.translate(str.maketrans('（）［］｛｝「」『』【】〔〕！＂＃＄％＆＇＊＋，．／：；＜＝＞？＠＼＾＿｀｜～',
+                                      '()[]{}""\'\'<>[]!"#$%&\'*+,./:;<=>?@\\^_`|~'))
+    
+    # すべての種類のハイフン、ダッシュを半角ハイフンに変換
+    text = text.replace('−', '-').replace('ー', '-').replace('－', '-')
+    text = text.replace('―', '-').replace('‐', '-').replace('‑', '-')
+    text = text.replace('‒', '-').replace('–', '-').replace('—', '-')
+    text = text.replace('﹘', '-').replace('⁃', '-').replace('⎯', '-')
+    text = text.replace('⏤', '-').replace('─', '-').replace('━', '-')
+    
+    # スペースは変換しない（全角スペースはそのまま）
+    
+    return text 
