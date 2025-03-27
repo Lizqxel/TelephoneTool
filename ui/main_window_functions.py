@@ -48,24 +48,27 @@ class ServiceAreaSearchWorker(QThread):
         self.driver = None
     
     def run(self):
-        """スレッド実行時に呼び出される関数"""
+        """
+        検索を実行
+        """
         try:
-            # 提供エリア検索を実行
+            # 住所を分割して検索を実行
             result = area_search.search_service_area(self.postal_code, self.address)
-            # 結果を信号で送信
             self.finished.emit(result)
         except Exception as e:
-            # エラーが発生した場合はエラー情報を送信
-            error_result = {
-                "status": "error",
-                "message": str(e),
-                "details": {"エラー": str(e)}
-            }
-            self.finished.emit(error_result)
-    
-    def __del__(self):
-        """デストラクタ - スレッド終了時にブラウザを閉じないようにする"""
-        logging.info("ServiceAreaSearchWorkerが終了しました - ブラウザは手動で閉じる必要があります")
+            logging.error(f"提供エリア検索中にエラーが発生: {str(e)}")
+            self.finished.emit({
+                "status": "failure",
+                "details": {"error": str(e)},
+                "show_popup": True
+            })
+        finally:
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""

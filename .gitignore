@@ -26,8 +26,16 @@ logs/
 
 # デバッグ用スクリーンショット
 debug_*.png
-error_*.png
-*_screenshot.png
+debug_address_*.png
+debug_banchi_*.png
+debug_building_*.png
+debug_gou_*.png
+debug_modal_*.png
+debug_no_*.png
+debug_result_*.png
+debug_timeout_*.png
+debug_unavailable_*.png
+debug_general_*.png
 
 # 仮想環境
 venv/
@@ -45,4 +53,16 @@ ENV/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
-$RECYCLE.BIN/ 
+$RECYCLE.BIN/
+
+# Chrome関連
+chrome_data/
+chrome_data/**/*
+**/Default/
+**/BrowserMetrics/
+**/Cache/
+**/GPUCache/
+**/CrashpadMetrics*.pma
+**/BrowserMetrics*.pma
+**/*.db
+**/*.db-journal 
