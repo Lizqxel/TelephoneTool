@@ -395,6 +395,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.address_input = QLineEdit()
         address_container.addWidget(self.address_input)
         
+        # 住所フリガナモード
+        address_furigana_layout = QHBoxLayout()
+        address_furigana_layout.addWidget(QLabel("住所フリガナ"))
+        self.address_furigana_mode_combo = CustomComboBox()
+        self.address_furigana_mode_combo.addItems(["自動", "手動"])
+        address_furigana_layout.addWidget(self.address_furigana_mode_combo)
+        address_layout.addLayout(address_furigana_layout)
+        self.address_furigana_input = QLineEdit()
+        address_layout.addWidget(self.address_furigana_input)
+        
         # マップアイコンボタン
         self.map_btn = QPushButton()
         self.map_btn.setFixedSize(24, 24)
@@ -495,8 +505,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # リスト住所
         list_layout.addWidget(QLabel("リスト住所"))
+        list_address_container = QHBoxLayout()
         self.list_address_input = QLineEdit()
-        list_layout.addWidget(self.list_address_input)
+        list_address_container.addWidget(self.list_address_input)
+        list_layout.addLayout(list_address_container)
+        
+        # リスト住所フリガナモード
+        list_address_furigana_layout = QHBoxLayout()
+        list_address_furigana_layout.addWidget(QLabel("リスト住所フリガナ"))
+        self.list_address_furigana_mode_combo = CustomComboBox()
+        self.list_address_furigana_mode_combo.addItems(["自動", "手動"])
+        list_address_furigana_layout.addWidget(self.list_address_furigana_mode_combo)
+        list_layout.addLayout(list_address_furigana_layout)
+        self.list_address_furigana_input = QLineEdit()
+        list_layout.addWidget(self.list_address_furigana_input)
         
         list_group.setLayout(list_layout)
         parent_layout.addWidget(list_group)
@@ -575,6 +597,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # フリガナ自動変換のシグナル
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+        self.address_input.textChanged.connect(self.auto_generate_address_furigana)
+        self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
         
         # 入力時に背景色をリセットするシグナル
         self.operator_input.textChanged.connect(self.reset_background_color)
