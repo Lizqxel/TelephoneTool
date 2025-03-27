@@ -9,7 +9,7 @@
 APP_NAME = "TelephoneTool"
 
 # バージョン情報
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 # GitHub関連の情報
 GITHUB_OWNER = "Lizqxel"  # GitHubのユーザー名

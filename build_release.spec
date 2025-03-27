@@ -15,8 +15,9 @@ import os
 import sys
 from pathlib import Path
 
-# バージョン情報の取得
-VERSION = "1.0.1"
+# 現在のディレクトリをPythonパスに追加
+sys.path.append(os.path.abspath(SPECPATH))
+from version import VERSION  # バージョン情報を動的に読み込む
 
 # 作業ディレクトリの取得
 work_dir = os.path.abspath(SPECPATH)
