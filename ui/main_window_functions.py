@@ -78,8 +78,27 @@ class MainWindowFunctions:
         try:
             # 初期設定を設定
             self.settings = {
-                'format_template': "",
-                'font_size': 10  # デフォルトのフォントサイズ
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'font_size': 11,
+                'delay_seconds': 0,
+                'browser_settings': {
+                    'headless': True,
+                    'disable_images': True,
+                    'show_popup': True,
+                    'auto_close': True,
+                    'page_load_timeout': 60,
+                    'script_timeout': 60
+                },
+                'update_settings': {
+                    'auto_check': True,
+                    'check_interval': 86400,
+                    'last_update_check': None,
+                    'skip_version': None,
+                    'update_channel': 'stable',
+                    'auto_download': False,
+                    'backup_before_update': True,
+                    'update_history': []
+                }
             }
             
             if os.path.exists(self.settings_file):
@@ -89,38 +108,14 @@ class MainWindowFunctions:
                     # settingsオブジェクトを更新
                     self.settings = settings
             else:
-                # デフォルトのフォーマットテンプレート
-                self.format_template = """対応者（お客様の名前）：{operator}
-工事希望日
-★出やすい時間帯：{available_time} 携帯：{mobile}
-★電話取次：アナログ→光電話
-★電話OP：
-★無線
-契約者(書類名義)：{contractor}
-フリガナ：{furigana}
-生年月日：{birth_date}
-郵便番号：{postal_code}
-住所：{address}
-リスト名：{list_name}
-リスト名フリガナ：{list_furigana}
-電話番号：{list_phone}
-リスト郵便番号：{list_postal_code}
-リスト住所：{list_address}
-現状回線：{current_line}
-受注日：{order_date}
-受注者：{order_person}
-提供判定：{judgment}
-
-料金認識：{fee}
-ネット利用：{net_usage}"""
                 # デフォルト設定をsettingsに保存
-                self.settings['format_template'] = self.format_template
+                self.format_template = self.settings['format_template']
                 
                 # デフォルト設定をファイルに保存
                 with open(self.settings_file, 'w', encoding='utf-8') as f:
                     json.dump(self.settings, f, ensure_ascii=False, indent=2)
                     
-            logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 10)}")
+            logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 11)}")
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -128,8 +123,27 @@ class MainWindowFunctions:
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
-                'format_template': "",
-                'font_size': 10
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'font_size': 11,
+                'delay_seconds': 0,
+                'browser_settings': {
+                    'headless': True,
+                    'disable_images': True,
+                    'show_popup': True,
+                    'auto_close': True,
+                    'page_load_timeout': 60,
+                    'script_timeout': 60
+                },
+                'update_settings': {
+                    'auto_check': True,
+                    'check_interval': 86400,
+                    'last_update_check': None,
+                    'skip_version': None,
+                    'update_channel': 'stable',
+                    'auto_download': False,
+                    'backup_before_update': True,
+                    'update_history': []
+                }
             }
             logging.info("エラーが発生したため、デフォルト設定を使用します")
     

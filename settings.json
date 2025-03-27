@@ -1,5 +1,5 @@
 {
-    "format_template": "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n\n\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+    "format_template": "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
     "font_size": 11,
     "delay_seconds": 0,
     "browser_settings": {
@@ -20,4 +20,4 @@
         "backup_before_update": true,
         "update_history": []
     }
-}
+} 
