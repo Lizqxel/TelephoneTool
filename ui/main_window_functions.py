@@ -780,6 +780,46 @@ class MainWindowFunctions:
                 logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
             logging.error(f"リストフリガナ自動生成エラー: {str(e)}")
+            
+    def auto_generate_address_furigana(self):
+        """住所からフリガナを自動生成する"""
+        # 自動モードの場合のみ処理
+        if self.address_furigana_mode_combo.currentText() != "自動":
+            return
+            
+        # 住所が空の場合は何もしない
+        address = self.address_input.text()
+        if not address:
+            return
+            
+        try:
+            # フリガナ変換APIを使用
+            furigana = convert_to_furigana(address)
+            if furigana:
+                self.address_furigana_input.setText(furigana)
+                logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
+        except Exception as e:
+            logging.error(f"住所フリガナ自動生成エラー: {str(e)}")
+            
+    def auto_generate_list_address_furigana(self):
+        """リスト住所からフリガナを自動生成する"""
+        # 自動モードの場合のみ処理
+        if self.list_address_furigana_mode_combo.currentText() != "自動":
+            return
+            
+        # リスト住所が空の場合は何もしない
+        address = self.list_address_input.text()
+        if not address:
+            return
+            
+        try:
+            # フリガナ変換APIを使用
+            furigana = convert_to_furigana(address)
+            if furigana:
+                self.list_address_furigana_input.setText(furigana)
+                logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
+        except Exception as e:
+            logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
     
     def generate_preview_text(self):
         """
