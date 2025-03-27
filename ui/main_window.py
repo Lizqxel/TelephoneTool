@@ -10,6 +10,7 @@ import logging
 import json
 import os
 import re
+import time
 import requests
 from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -391,17 +392,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 住所
         address_layout.addWidget(QLabel("住所"))
-        address_container = QHBoxLayout()
         self.address_input = QLineEdit()
-        address_container.addWidget(self.address_input)
+        address_layout.addWidget(self.address_input)
         
-        # 住所フリガナモード
-        address_furigana_layout = QHBoxLayout()
-        address_furigana_layout.addWidget(QLabel("住所フリガナ"))
-        self.address_furigana_mode_combo = CustomComboBox()
-        self.address_furigana_mode_combo.addItems(["自動", "手動"])
-        address_furigana_layout.addWidget(self.address_furigana_mode_combo)
-        address_layout.addLayout(address_furigana_layout)
+        # 住所フリガナ
+        address_layout.addWidget(QLabel("住所フリガナ"))
         self.address_furigana_input = QLineEdit()
         address_layout.addWidget(self.address_furigana_input)
         
@@ -433,8 +428,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 border-radius: 12px;
             }
         """)
-        address_container.addWidget(self.map_btn)
-        address_layout.addLayout(address_container)
+        address_layout.addWidget(self.map_btn)
         
         # 提供エリア検索ボタンを追加
         self.area_search_btn = QPushButton("提供エリア検索")
@@ -578,14 +572,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def setup_signals(self):
         """シグナルの設定"""
         # 自動フォーマット用のシグナル
-        # self.mobile_input.textChanged.connect(self.format_phone_number)  # 削除
         self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
         self.postal_code_input.textChanged.connect(self.format_postal_code)
         self.postal_code_input.textChanged.connect(self.convert_to_half_width)
         self.list_postal_code_input.textChanged.connect(self.format_postal_code)
         self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
         self.address_input.textChanged.connect(self.convert_to_half_width)
+        self.address_input.textChanged.connect(self.auto_generate_address_furigana)
         self.list_address_input.textChanged.connect(self.convert_to_half_width)
+        self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
         self.era_combo.currentTextChanged.connect(self.update_year_combo)
         
         # 名前とフリガナのバリデーション用のシグナル
@@ -597,12 +592,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # フリガナ自動変換のシグナル
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
-        self.address_input.textChanged.connect(self.auto_generate_address_furigana)
-        self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
         
         # 入力時に背景色をリセットするシグナル
         self.operator_input.textChanged.connect(self.reset_background_color)
-        # self.mobile_input.textChanged.connect(self.reset_background_color)  # 削除
         self.available_time_input.textChanged.connect(self.reset_background_color)
         self.contractor_input.textChanged.connect(self.reset_background_color)
         self.furigana_input.textChanged.connect(self.reset_background_color)
