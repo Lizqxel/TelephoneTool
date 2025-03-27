@@ -14,6 +14,7 @@
 import os
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # 現在のディレクトリをPythonパスに追加
 sys.path.append(os.path.abspath(SPECPATH))
@@ -32,6 +33,7 @@ added_files = [
     ('version.py', '.'),
     ('requirements.txt', '.'),
     ('icon.ico', '.'),
+    ('pyside6_fix.py', '.'),
     ('utils', 'utils'),
     ('ui', 'ui'),
     ('services', 'services'),
@@ -40,17 +42,25 @@ added_files = [
 
 # データファイルの収集
 datas = []
+datas += collect_data_files('selenium')
+datas += collect_data_files('webdriver_manager')
 for src, dst in added_files:
     if os.path.exists(os.path.join(work_dir, src)):
         datas.append((os.path.join(work_dir, src), dst))
+
+# 必要なサブモジュールを収集
+hiddenimports = []
+hiddenimports += collect_submodules('selenium')
+hiddenimports += collect_submodules('webdriver_manager')
+hiddenimports += ['pyside6_fix']  # 明示的に追加
 
 # 実行ファイルの設定
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=added_files,
-    hiddenimports=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -84,5 +94,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico'  # アイコンを設定
+    icon='icon.ico'  # アイコンパスを修正
 ) 
