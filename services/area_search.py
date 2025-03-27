@@ -401,12 +401,26 @@ def create_driver(headless=False):
         
         if headless:
             options.add_argument('--headless=new')
+            # ヘッドレスモード用の追加設定
+            options.add_argument('--disable-gpu')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-software-rasterizer')
             
-        # ウィンドウサイズを800x600に設定
+        # 共通の最適化設定
         options.add_argument('--window-size=800,600')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-infobars')
+        options.add_argument('--disable-notifications')
+        options.add_argument('--disable-popup-blocking')
+        
+        # メモリ使用量の最適化
+        options.add_argument('--disable-application-cache')
+        options.add_argument('--aggressive-cache-discard')
+        options.add_argument('--disable-default-apps')
         
         driver = webdriver.Chrome(options=options)
-        logging.info("Chromeドライバーを作成しました")
+        logging.info(f"Chromeドライバーを作成しました（ヘッドレスモード: {headless}）")
         
         return driver
     except Exception as e:
@@ -422,7 +436,6 @@ def search_service_area(postal_code, address):
         address (str): 住所
         
     Returns:
-        dict: 検索結果を含む辞書。エラー時は以下のいずれかのメッセージを含む：
         dict: 検索結果を含む辞書
     """
     global global_driver
@@ -461,8 +474,16 @@ def search_service_area(postal_code, address):
             with open("settings.json", "r", encoding="utf-8") as f:
                 settings = json.load(f)
                 browser_settings = settings.get("browser_settings", {})
+                logging.info(f"ブラウザ設定を読み込みました: {browser_settings}")
     except Exception as e:
         logging.warning(f"ブラウザ設定の読み込みに失敗しました: {str(e)}")
+        browser_settings = {
+            "headless": False,
+            "show_popup": True,
+            "auto_close": True,
+            "page_load_timeout": 60,
+            "script_timeout": 60
+        }
     
     # ヘッドレスモードの設定を取得
     headless_mode = browser_settings.get("headless", False)
@@ -470,23 +491,23 @@ def search_service_area(postal_code, address):
     show_popup = browser_settings.get("show_popup", True)
     # ブラウザ自動終了設定を取得
     auto_close = browser_settings.get("auto_close", True)
+    # タイムアウト設定を取得
+    page_load_timeout = browser_settings.get("page_load_timeout", 60)
+    script_timeout = browser_settings.get("script_timeout", 60)
     
-    # ポップアップを表示する場合は強制的にヘッドレスモードを無効化
-    if show_popup:
-        headless_mode = False
-        logging.info("ポップアップ表示が有効なため、ヘッドレスモードを無効化します")
+    logging.info(f"ブラウザ設定 - ヘッドレス: {headless_mode}, ポップアップ表示: {show_popup}, 自動終了: {auto_close}")
     
     driver = None
     try:
-        # 1. ドライバーを作成してサイトを開く
-        if show_popup:
-            driver = create_driver(headless=False)
-            logging.info("表示モードでブラウザを強制的に起動します")
-        else:
-            driver = create_driver(headless=headless_mode)
-            
+        # ドライバーを作成してサイトを開く
+        driver = create_driver(headless=headless_mode)
+        
         # グローバル変数に保存
         global_driver = driver
+        
+        # タイムアウト設定を適用
+        driver.set_page_load_timeout(page_load_timeout)
+        driver.set_script_timeout(script_timeout)
         
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
