@@ -282,12 +282,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         input_layout.addWidget(self.furigana_input)
         
         # 生年月日
-        birth_layout = QHBoxLayout()
+        birth_layout = QVBoxLayout()
         birth_layout.addWidget(QLabel("生年月日"))
+        
+        # 生年月日の入力部分を横並びにする
+        birth_input_layout = QHBoxLayout()
+        birth_input_layout.setContentsMargins(0, 0, 0, 0)  # マージンを0に設定
+        birth_input_layout.setSpacing(2)  # 間隔を2pxに設定
+        
+        # コンテナウィジェットを作成して固定幅を設定
+        birth_container = QWidget()
+        birth_container.setFixedWidth(200)  # 固定幅を設定
+        birth_container_layout = QHBoxLayout(birth_container)
+        birth_container_layout.setContentsMargins(0, 0, 0, 0)
+        birth_container_layout.setSpacing(2)
         
         self.era_combo = CustomComboBox()
         self.era_combo.addItems(["昭和", "平成", "西暦"])
-        birth_layout.addWidget(self.era_combo)
+        self.era_combo.setFixedWidth(60)  # 幅を60pxに設定
+        birth_container_layout.addWidget(self.era_combo)
         
         self.year_combo = CustomComboBox()
         # 初期値として昭和の年を設定
@@ -296,8 +309,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.year_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.year_combo.lineEdit().setMaxLength(4)  # 最大4桁
         self.year_combo.lineEdit().setValidator(QIntValidator(1, 9999))  # 1-9999の範囲で制限
-        birth_layout.addWidget(self.year_combo)
-        birth_layout.addWidget(QLabel("年"))
+        self.year_combo.setFixedWidth(45)  # 幅を45pxに設定
+        birth_container_layout.addWidget(self.year_combo)
+        birth_container_layout.addWidget(QLabel("年"))
         
         self.month_combo = CustomComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
@@ -305,8 +319,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.month_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.month_combo.lineEdit().setMaxLength(2)  # 最大2桁
         self.month_combo.lineEdit().setValidator(QIntValidator(1, 12))  # 1-12の範囲で制限
-        birth_layout.addWidget(self.month_combo)
-        birth_layout.addWidget(QLabel("月"))
+        self.month_combo.setFixedWidth(35)  # 幅を35pxに設定
+        birth_container_layout.addWidget(self.month_combo)
+        birth_container_layout.addWidget(QLabel("月"))
         
         self.day_combo = CustomComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
@@ -314,9 +329,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.day_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.day_combo.lineEdit().setMaxLength(2)  # 最大2桁
         self.day_combo.lineEdit().setValidator(QIntValidator(1, 31))  # 1-31の範囲で制限
-        birth_layout.addWidget(self.day_combo)
-        birth_layout.addWidget(QLabel("日"))
+        self.day_combo.setFixedWidth(35)  # 幅を35pxに設定
+        birth_container_layout.addWidget(self.day_combo)
+        birth_container_layout.addWidget(QLabel("日"))
         
+        # コンテナをレイアウトに追加
+        birth_input_layout.addWidget(birth_container)
+        birth_input_layout.addStretch()  # 右側に余白を追加
+        
+        birth_layout.addLayout(birth_input_layout)
         input_layout.addLayout(birth_layout)
         
         # 受注者名
@@ -664,7 +685,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         try:
             # 顧客名
             if data.customer_name:
-                converted_customer_name = convert_to_half_width_except_space(data.customer_name)
+                # 半角スペースを全角スペースに変換
+                converted_customer_name = data.customer_name.replace(' ', '　')
+                converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
                 self.list_name_input.setText(converted_customer_name)
                 self.contractor_input.setText(converted_customer_name)
             
