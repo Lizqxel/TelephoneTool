@@ -656,7 +656,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         try:
             # 顧客名
             if data.customer_name:
-                converted_customer_name = convert_to_half_width_except_space(data.customer_name)
+                # 半角スペースを全角スペースに変換
+                converted_customer_name = data.customer_name.replace(' ', '　')
+                converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
                 self.list_name_input.setText(converted_customer_name)
                 self.contractor_input.setText(converted_customer_name)
             
