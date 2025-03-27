@@ -783,10 +783,6 @@ class MainWindowFunctions:
             
     def auto_generate_address_furigana(self):
         """住所からフリガナを自動生成する"""
-        # 自動モードの場合のみ処理
-        if self.address_furigana_mode_combo.currentText() != "自動":
-            return
-            
         # 住所が空の場合は何もしない
         address = self.address_input.text()
         if not address:
