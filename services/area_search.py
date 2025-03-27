@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
+from selenium import webdriver
 
 from services.web_driver import create_driver
 from utils.string_utils import normalize_string, calculate_similarity
@@ -47,54 +48,89 @@ def normalize_address(address):
 
 def split_address(address):
     """
-    住所を分割する関数
-    入力形式：[漢字による住所][数字]-[数字](-[数字])
-    例：奈良県奈良市五条西2丁目2-1
-
+    住所を分割して各要素を抽出する
+    
     Args:
-        address (str): 分割する住所文字列
+        address (str): 分割する住所
         
     Returns:
-        tuple: (基本住所, 番地, 号)
-        例：('奈良県奈良市五条西2丁目', '2', '1')
+        dict: 分割された住所の要素
+            - prefecture: 都道府県
+            - city: 市区町村
+            - town: 町名（大字・字を除く）
+            - block: 丁目
+            - number: 番地
+            - building_id: 建物ID
     """
-    if not address:
-        return ("", None, None)
-
-    # 住所を正規化
-    address = normalize_address(address)
-    
-    # 丁目を含む場合の処理
-    chome_match = re.search(r'^(.+?[0-9]+丁目)([0-9]+)(?:-([0-9]+))?', address)
-    if chome_match:
-        base = chome_match.group(1)
-        num1 = chome_match.group(2)
-        num2 = chome_match.group(3)
-        return (base, num1, num2)
-
-    # 基本パターン：[漢字と数字の住所]-[数字]-[数字]
-    pattern = r'^(.+?)([0-9]+)-([0-9]+)(?:-([0-9]+))?$'
-    match = re.search(pattern, address)
-    
-    if match:
-        base = match.group(1)
-        num1 = match.group(2)
-        num2 = match.group(3)
-        num3 = match.group(4)  # オプショナル
+    try:
+        # 都道府県を抽出
+        prefecture_match = re.match(r'^(.+?[都道府県])', address)
+        prefecture = prefecture_match.group(1) if prefecture_match else None
         
-        # 3つの数字がある場合（例：1-3-4）
-        if num3:
-            return (base, num2, num3)
-        # 2つの数字がある場合（例：19-10）
-        else:
-            return (base, num1, num2)
-    
-    # 単純な番地のパターン
-    simple_match = re.search(r'^(.+?)([0-9]+)(?:番地?)?$', address)
-    if simple_match:
-        return (simple_match.group(1), simple_match.group(2), None)
-    
-    return (address, None, None)
+        if prefecture:
+            remaining_address = address[len(prefecture):].strip()
+            # 市区町村を抽出（郡がある場合も考慮）
+            city_match = re.match(r'^(.+?郡.+?[町村]|.+?[市区町村])', remaining_address)
+            city = city_match.group(1) if city_match else None
+            
+            if city:
+                # 残りの住所から基本住所と番地を分離
+                remaining = remaining_address[len(city):].strip()
+                
+                # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
+                special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
+                
+                if special_location_match:
+                    # 番地のみを抽出（甲乙丙丁は除外）
+                    number_part = special_location_match.group(3)
+                    # 基本住所は市区町村までとする
+                    town = ""
+                else:
+                    # 丁目を含む場合は、丁目の後ろの番地を抽出
+                    chome_match = re.search(r'(\d+)丁目', remaining)
+                    if chome_match:
+                        # 丁目より後ろの部分から番地を探す
+                        after_chome = remaining[remaining.find('丁目') + 2:].strip()
+                        # ハイフンを含む番地のパターンを優先的に検索
+                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
+                        if number_match:
+                            number_part = number_match.group(1)
+                            town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
+                        else:
+                            number_part = None
+                            town = remaining[:remaining.find('丁目')].strip()
+                        block = chome_match.group(1)
+                    else:
+                        # 通常の番地パターンを検索
+                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                        if number_match:
+                            number_part = number_match.group(1)
+                            town = remaining[:number_match.start()].strip()
+                        else:
+                            number_part = None
+                            town = remaining
+                
+                return {
+                    'prefecture': prefecture,
+                    'city': city,
+                    'town': town if town else "",  # Noneの代わりに空文字列を返す
+                    'block': block,
+                    'number': number_part,
+                    'building_id': None
+                }
+        
+        return {
+            'prefecture': prefecture,
+            'city': remaining_address if prefecture else None,
+            'town': "",  # Noneの代わりに空文字列を返す
+            'block': None,
+            'number': None,
+            'building_id': None
+        }
+        
+    except Exception as e:
+        logging.error(f"住所分割中にエラー: {str(e)}")
+        return None
 
 def normalize_string(text):
     """
@@ -114,24 +150,22 @@ def normalize_string(text):
     zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
     normalized = normalized.translate(zen_to_han)
     
+    # 漢数字を半角数字に変換
+    kanji_numbers = {
+        '一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
+        '六': '6', '七': '7', '八': '8', '九': '9', '十': '10'
+    }
+    for kanji, number in kanji_numbers.items():
+        normalized = normalized.replace(kanji, number)
+    
     # 全角ハイフンを半角に変換
     normalized = normalized.replace('−', '-').replace('ー', '-').replace('－', '-')
     
-    # すべてのスペース（全角・半角）を一旦半角スペースに統一
-    normalized = normalized.replace('　', ' ')
+    # すべてのスペース（全角・半角）を削除
+    normalized = normalized.replace('　', '').replace(' ', '')
     
-    # 数字の前後のスペースを削除
-    normalized = re.sub(r'\s+(\d+)', r'\1', normalized)  # 数字の前のスペースを削除
-    normalized = re.sub(r'(\d+)\s+', r'\1', normalized)  # 数字の後のスペースを削除
-    
-    # 都道府県、市区町村の区切りを統一（スペースを削除）
-    normalized = normalized.replace('県 ', '県').replace('市 ', '市').replace('区 ', '区').replace('町 ', '町')
-    
-    # 「大字」を削除
-    normalized = normalized.replace('大字', '')
-    
-    # 連続するスペースを1つに統一
-    normalized = ' '.join(normalized.split())
+    # 「大字」「字」を削除
+    normalized = normalized.replace('大字', '').replace('字', '')
     
     # 余分な空白を削除
     normalized = normalized.strip()
@@ -160,16 +194,55 @@ def extract_base_address(address):
     
     return address
 
+def calculate_address_similarity(input_address, candidate_address):
+    """
+    住所の類似度を計算する
+    
+    Args:
+        input_address (str): 入力された住所
+        candidate_address (str): 候補の住所
+        
+    Returns:
+        float: 類似度（0.0 ~ 1.0）
+    """
+    # 住所を正規化
+    input_normalized = normalize_string(input_address)
+    candidate_normalized = normalize_string(candidate_address)
+    
+    # 都道府県、市区町村、町名に分割
+    input_parts = input_normalized.split('市')
+    candidate_parts = candidate_normalized.split('市')
+    
+    if len(input_parts) != 2 or len(candidate_parts) != 2:
+        # 市で分割できない場合は単純な類似度を返す
+        return calculate_similarity(input_normalized, candidate_normalized)
+    
+    # 都道府県＋市の部分
+    input_city = input_parts[0] + '市'
+    candidate_city = candidate_parts[0] + '市'
+    
+    # 町名部分
+    input_town = input_parts[1]
+    candidate_town = candidate_parts[1]
+    
+    # 都道府県＋市の一致度（重み: 0.6）
+    city_similarity = 0.6 if input_city == candidate_city else 0.0
+    
+    # 町名の類似度（重み: 0.4）
+    town_similarity = calculate_similarity(input_town, candidate_town) * 0.4
+    
+    return city_similarity + town_similarity
+
 def is_address_match(input_address, candidate_address):
     """
     入力された住所と候補の住所が一致するかを判定する
     
     Args:
-        input_address (str): 入力された住所（例：奈良県奈良市五条西2丁目）
+        input_address (str): 入力された住所
         candidate_address (str): 候補の住所
         
     Returns:
-        bool: 住所が一致する場合はTrue、それ以外はFalse
+        tuple: (bool, float) 一致判定と類似度
     """
     # 両方の住所を正規化
     normalized_input = normalize_string(input_address)
@@ -180,41 +253,153 @@ def is_address_match(input_address, candidate_address):
     # 完全一致の場合
     if normalized_input == normalized_candidate:
         logging.info("完全一致しました")
-        return True
+        return True, 1.0
     
-    # 丁目を含む場合の処理
-    input_match = re.match(r'^(.+?)(\d+)丁目', normalized_input)
-    candidate_match = re.match(r'^(.+?)(\d+)丁目', normalized_candidate)
+    # 類似度を計算
+    similarity = calculate_address_similarity(normalized_input, normalized_candidate)
+    logging.info(f"類似度: {similarity}")
     
-    if input_match and candidate_match:
-        input_base = input_match.group(1)  # 丁目の前までの部分
-        input_chome = input_match.group(2)  # 丁目の数字
-        candidate_base = candidate_match.group(1)
-        candidate_chome = candidate_match.group(2)
+    # 類似度が0.8以上なら一致とみなす
+    if similarity >= 0.8:
+        logging.info(f"十分な類似度（{similarity}）で一致と判定")
+        return True, similarity
+    
+    # 基本的な住所部分の比較
+    input_parts = set(normalized_input.split())
+    candidate_parts = set(normalized_candidate.split())
+    
+    # 共通部分の割合を計算
+    common_parts = input_parts & candidate_parts
+    if len(input_parts) > 0:
+        part_similarity = len(common_parts) / len(input_parts)
+        logging.info(f"共通部分の割合: {part_similarity}")
         
-        logging.info(f"丁目比較 - 入力: {input_base}{input_chome}丁目 vs 候補: {candidate_base}{candidate_chome}丁目")
+        if part_similarity >= 0.8:
+            logging.info(f"共通部分の割合（{part_similarity}）で一致と判定")
+            return True, part_similarity
+    
+    logging.info(f"不一致と判定（類似度: {similarity}）")
+    return False, similarity
+
+def find_best_address_match(input_address, candidates):
+    """
+    最も一致度の高い住所を見つける
+    
+    Args:
+        input_address (str): 入力された住所
+        candidates (list): 候補の住所リスト
         
-        # 基本部分と丁目の数字が完全一致
-        if input_base == candidate_base and input_chome == candidate_chome:
-            logging.info("丁目まで完全一致しました")
-            return True
+    Returns:
+        tuple: (最も一致する候補, 類似度)
+    """
+    best_candidate = None
+    best_similarity = -1
     
-    # 基本的な住所部分の比較（地名の追加部分を無視）
-    normalized_input_parts = normalized_input.split()
-    normalized_candidate_parts = normalized_candidate.split()
+    for candidate in candidates:
+        try:
+            candidate_text = candidate.text.strip().split('\n')[0]
+            _, similarity = is_address_match(input_address, candidate_text)
+            
+            logging.info(f"候補 '{candidate_text}' の類似度: {similarity}")
+            
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_candidate = candidate
+        except Exception as e:
+            logging.warning(f"候補の処理中にエラー: {str(e)}")
+            continue
     
-    # 入力住所の各部分が候補住所に含まれているかチェック
-    if len(normalized_input_parts) <= len(normalized_candidate_parts):
-        all_parts_match = all(
-            any(input_part == candidate_part for candidate_part in normalized_candidate_parts)
-            for input_part in normalized_input_parts
+    if best_candidate and best_similarity >= 0.5:  # 最低限の類似度しきい値
+        logging.info(f"最適な候補が見つかりました（類似度: {best_similarity}）: {best_candidate.text.strip()}")
+        return best_candidate, best_similarity
+    
+    return None, best_similarity
+
+def handle_building_selection(driver):
+    """
+    建物選択モーダルの検出とハンドリング
+    モーダルが表示されない場合は正常に処理を続行
+    """
+    try:
+        # 建物選択モーダルが表示されているか確認（短い待機時間で）
+        modal = WebDriverWait(driver, 3).until(
+            EC.visibility_of_element_located((By.ID, "buildingNameSelectModal"))
         )
-        if all_parts_match:
-            logging.info("基本住所部分が一致しました")
-            return True
+        
+        if not modal.is_displayed():
+            logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+            return
+            
+        logging.info("建物選択モーダルが表示されました")
+        
+        # 「該当する建物名がない」リンクを探して選択
+        try:
+            no_building_link = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "li.not_adress a"))
+            )
+            logging.info("「該当する建物名がない」リンクを検出しました")
+            
+            # クリックを試行
+            try:
+                no_building_link.click()
+                logging.info("通常のクリックで「該当する建物名がない」を選択しました")
+            except Exception as click_error:
+                logging.warning(f"通常のクリックに失敗: {str(click_error)}")
+                try:
+                    driver.execute_script("arguments[0].click();", no_building_link)
+                    logging.info("JavaScriptでクリックしました")
+                except Exception as js_error:
+                    logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
+                    ActionChains(driver).move_to_element(no_building_link).click().perform()
+                    logging.info("ActionChainsでクリックしました")
+            
+            # クリック後の待機
+            time.sleep(2)
+            
+            # モーダルが閉じられるのを待機
+            WebDriverWait(driver, 10).until(
+                EC.invisibility_of_element_located((By.ID, "buildingNameSelectModal"))
+            )
+            logging.info("建物選択モーダルが閉じられました")
+            
+        except Exception as e:
+            logging.error(f"「該当する建物名がない」の選択に失敗: {str(e)}")
+            driver.save_screenshot("debug_no_building_error.png")
+            raise
+            
+    except TimeoutException:
+        logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+    except Exception as e:
+        logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
+        driver.save_screenshot("debug_building_modal_error.png")
+        raise
+
+def create_driver(headless=False):
+    """
+    Chromeドライバーを作成する関数
     
-    logging.info("マッチしませんでした")
-    return False
+    Args:
+        headless (bool): ヘッドレスモードで起動するかどうか
+        
+    Returns:
+        WebDriver: 作成されたドライバーインスタンス
+    """
+    try:
+        options = webdriver.ChromeOptions()
+        
+        if headless:
+            options.add_argument('--headless=new')
+            
+        # ウィンドウサイズを800x600に設定
+        options.add_argument('--window-size=800,600')
+        
+        driver = webdriver.Chrome(options=options)
+        logging.info("Chromeドライバーを作成しました")
+        
+        return driver
+    except Exception as e:
+        logging.error(f"ドライバーの作成に失敗: {str(e)}")
+        raise
 
 def search_service_area(postal_code, address):
     """
@@ -232,8 +417,24 @@ def search_service_area(postal_code, address):
     logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
     
     # 住所を分割
-    base_address, street_number, building_number = split_address(address)
-    logging.info(f"住所分割結果 - 基本住所: {base_address}, 番地: {street_number}, 号: {building_number}")
+    address_parts = split_address(address)
+    if not address_parts:
+        return {"status": "error", "message": "住所の分割に失敗しました。"}
+        
+    # 基本住所を構築（番地と号を除く）
+    base_address = f"{address_parts['prefecture']}{address_parts['city']}{address_parts['town']}"
+    if address_parts['block']:
+        base_address += f"{address_parts['block']}丁目"
+    
+    logging.info(f"住所分割結果 - 基本住所: {base_address}, 番地: {address_parts['number']}")
+    
+    # 番地と号を分離
+    street_number = None
+    building_number = None
+    if address_parts['number']:
+        parts = address_parts['number'].split('-')
+        street_number = parts[0]
+        building_number = parts[1] if len(parts) > 1 else None
     
     # 郵便番号のフォーマットチェック
     postal_code_clean = postal_code.replace("-", "")
@@ -433,70 +634,36 @@ def search_service_area(postal_code, address):
             except Exception as e:
                 logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
             
-            # 4. 住所を選択（完全一致のみ）
-            best_candidate = None
-            exact_match = None
-            
-            normalized_input_address = normalize_string(base_address)
-            logging.info(f"正規化された入力住所: {normalized_input_address}")
-            
-            # 各候補を個別に処理
-            for candidate in valid_candidates:
+            # 4. 住所を選択
+            best_candidate, similarity = find_best_address_match(base_address, valid_candidates)
+
+            if best_candidate:
+                selected_address = best_candidate.text.strip().split('\n')[0]
+                logging.info(f"選択された住所: '{selected_address}' (類似度: {similarity})")
+                
+                # 選択された住所でクリックを実行
                 try:
-                    # 候補のテキストを取得（改行で分割された場合は最初の行のみ使用）
-                    candidate_text = candidate.text.strip().split('\n')[0]
-                    normalized_candidate = normalize_string(candidate_text)
-                    logging.info(f"候補住所の比較: {normalized_candidate}")
+                    WebDriverWait(driver, 15).until(EC.element_to_be_clickable(best_candidate))
                     
-                    # 完全一致を確認
-                    if normalized_input_address == normalized_candidate:
-                        exact_match = candidate
-                        logging.info(f"完全一致する住所が見つかりました: {candidate_text}")
-                        break
-                except Exception as e:
-                    logging.warning(f"候補の処理中にエラー: {str(e)}")
-                    continue
-            
-            # 完全一致する候補のみを選択
-            if exact_match:
-                best_candidate = exact_match
-                logging.info("完全一致する住所を選択します")
-            else:
-                logging.error(f"完全一致する住所が見つかりませんでした。入力住所: {base_address}")
-                raise ValueError("完全一致する住所が見つかりませんでした")
-            
-            # 選択された住所の確認
-            selected_address = best_candidate.text.strip().split('\n')[0]
-            logging.info(f"最終的に選択された住所: '{selected_address}'")
-            
-            # 選択された住所が期待する住所と完全一致することを確認
-            if normalize_string(selected_address) != normalized_input_address:
-                logging.error(f"選択された住所が期待する住所と一致しません。期待: {base_address}, 実際: {selected_address}")
-                raise ValueError("正しい住所を選択できませんでした")
-            
-            # クリック可能になるまで待機
-            WebDriverWait(driver, 15).until(EC.element_to_be_clickable(best_candidate))
-            
-            # 複数の方法でクリックを試みる
-            try:
-                # 方法1: 通常のクリック
-                best_candidate.click()
-                logging.info("通常のクリックで住所を選択しました")
-            except Exception as e:
-                logging.warning(f"通常のクリックに失敗: {str(e)}")
-                try:
-                    # 方法2: JavaScriptでクリック
-                    driver.execute_script("arguments[0].click();", best_candidate)
-                    logging.info("JavaScriptのクリックで住所を選択しました")
-                except Exception as e2:
-                    logging.warning(f"JavaScriptのクリックにも失敗: {str(e2)}")
+                    # クリックを試行（複数の方法）
                     try:
-                        # 方法3: ActionChainsでクリック
-                        ActionChains(driver).move_to_element(best_candidate).click().perform()
-                        logging.info("ActionChainsのクリックで住所を選択しました")
-                    except Exception as e3:
-                        logging.error(f"すべてのクリック方法が失敗: {str(e3)}")
-                        raise
+                        best_candidate.click()
+                        logging.info("通常のクリックで住所を選択しました")
+                    except Exception as click_error:
+                        logging.warning(f"通常のクリックに失敗: {str(click_error)}")
+                        try:
+                            driver.execute_script("arguments[0].click();", best_candidate)
+                            logging.info("JavaScriptでクリックしました")
+                        except Exception as js_error:
+                            logging.warning(f"JavaScriptのクリックに失敗: {str(js_error)}")
+                            ActionChains(driver).move_to_element(best_candidate).click().perform()
+                            logging.info("ActionChainsでクリックしました")
+                except Exception as e:
+                    logging.error(f"住所選択のクリックに失敗: {str(e)}")
+                    raise
+            else:
+                logging.error(f"適切な住所候補が見つかりませんでした。入力住所: {base_address}")
+                raise ValueError("適切な住所候補が見つかりませんでした")
             
             # 住所選択後の読み込みを待つ
             WebDriverWait(driver, 10).until(
@@ -564,49 +731,56 @@ def search_service_area(postal_code, address):
                         all_buttons = driver.find_elements(By.XPATH, "//dialog[@id='DIALOG_ID01']//a")
                         logging.info(f"全ての番地ボタン数: {len(all_buttons)}")
                         
+                        # 「該当する住所がない」ボタンと目的の番地ボタンを探す
                         banchi_button = None
+                        no_address_button = None
+                        
                         for button in all_buttons:
                             try:
                                 button_text = button.text.strip()
                                 logging.info(f"番地ボタンのテキスト: {button_text}")
                                 
+                                if button_text == "該当する住所がない":
+                                    no_address_button = button
+                                    logging.info("「該当する住所がない」ボタンが見つかりました")
                                 # 全角・半角どちらでも一致するか確認
-                                if button_text == input_street_number or button_text == zen_street_number:
+                                elif button_text == input_street_number or button_text == zen_street_number:
                                     banchi_button = button
                                     logging.info(f"番地ボタンが見つかりました: {button_text}")
-                                    break
                             except Exception as e:
                                 logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                                 continue
                         
-                        if banchi_button:
-                            # ボタンが見つかった場合、クリックを試みる
+                        # 目的の番地が見つからない場合は「該当する住所がない」を選択
+                        target_button = banchi_button if banchi_button else no_address_button
+                        
+                        if target_button:
                             try:
                                 # スクロールしてボタンを表示
-                                driver.execute_script("arguments[0].scrollIntoView(true);", banchi_button)
+                                driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
                                 time.sleep(1)
                                 
                                 # クリックを試行（複数の方法）
                                 try:
-                                    banchi_button.click()
-                                    logging.info("通常のクリックで番地を選択しました")
+                                    target_button.click()
+                                    logging.info("通常のクリックで選択しました")
                                 except Exception as click_error:
                                     logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                                     try:
-                                        driver.execute_script("arguments[0].click();", banchi_button)
+                                        driver.execute_script("arguments[0].click();", target_button)
                                         logging.info("JavaScriptでクリックしました")
                                     except Exception as js_error:
                                         logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
-                                        ActionChains(driver).move_to_element(banchi_button).click().perform()
+                                        ActionChains(driver).move_to_element(target_button).click().perform()
                                         logging.info("ActionChainsでクリックしました")
                             
                             except Exception as e:
-                                logging.error(f"番地ボタンのクリックに失敗: {str(e)}")
+                                logging.error(f"ボタンのクリックに失敗: {str(e)}")
                                 raise
                         else:
-                            logging.error("番地ボタンが見つかりませんでした")
+                            logging.error("適切なボタンが見つかりませんでした")
                             driver.save_screenshot("debug_banchi_not_found.png")
-                            raise ValueError("番地ボタンが見つかりませんでした")
+                            raise ValueError("適切なボタンが見つかりませんでした")
                             
                     except Exception as e:
                         logging.error(f"番地選択処理中にエラー: {str(e)}")
@@ -652,108 +826,59 @@ def search_service_area(postal_code, address):
                     all_buttons = driver.find_elements(By.XPATH, "//dialog[@id='DIALOG_ID02']//a")
                     logging.info(f"全ての号ボタン数: {len(all_buttons)}")
                     
+                    # 「該当する住所がない」ボタンと目的の号ボタンを探す
                     gou_button = None
+                    no_address_button = None
+                    
                     for button in all_buttons:
                         try:
                             button_text = button.text.strip()
                             logging.info(f"号ボタンのテキスト: {button_text}")
                             
+                            if button_text == "該当する住所がない":
+                                no_address_button = button
+                                logging.info("「該当する住所がない」ボタンが見つかりました")
                             # 全角・半角どちらでも一致するか確認
-                            if button_text == input_building_number or button_text == zen_building_number:
+                            elif button_text == input_building_number or button_text == zen_building_number:
                                 gou_button = button
                                 logging.info(f"号ボタンが見つかりました: {button_text}")
-                                break
                         except Exception as e:
                             logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                             continue
                     
-                    if gou_button:
-                        # ボタンが見つかった場合、クリックを試みる
+                    # 目的の号が見つからない場合は「該当する住所がない」を選択
+                    target_button = gou_button if gou_button else no_address_button
+                    
+                    if target_button:
                         try:
                             # スクロールしてボタンを表示
-                            driver.execute_script("arguments[0].scrollIntoView(true);", gou_button)
+                            driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
                             time.sleep(1)
                             
                             # クリックを試行（複数の方法）
                             try:
-                                gou_button.click()
-                                logging.info("通常のクリックで号を選択しました")
+                                target_button.click()
+                                logging.info("通常のクリックで選択しました")
                             except Exception as click_error:
                                 logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                                 try:
-                                    driver.execute_script("arguments[0].click();", gou_button)
+                                    driver.execute_script("arguments[0].click();", target_button)
                                     logging.info("JavaScriptでクリックしました")
                                 except Exception as js_error:
                                     logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
-                                    ActionChains(driver).move_to_element(gou_button).click().perform()
+                                    ActionChains(driver).move_to_element(target_button).click().perform()
                                     logging.info("ActionChainsでクリックしました")
                         
                             # クリック後の待機
                             time.sleep(2)
                             
                         except Exception as e:
-                            logging.error(f"号ボタンのクリックに失敗: {str(e)}")
+                            logging.error(f"ボタンのクリックに失敗: {str(e)}")
                             raise
                     else:
-                        # ボタンが見つからない場合は検索フィールドを使用
-                        try:
-                            gou_field = WebDriverWait(driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, "//*[@id='DIALOG_ID02']//input"))
-                            )
-                            
-                            # 号を入力
-                            gou_field.clear()
-                            gou_field.send_keys(input_building_number)
-                            logging.info(f"号「{input_building_number}」を入力しました")
-                            time.sleep(1)
-                            
-                            # Enterキーを送信
-                            gou_field.send_keys(Keys.RETURN)
-                            logging.info("Enterキーを送信しました")
-                            
-                            # 入力後の表示更新を待機
-                            time.sleep(2)
-                            
-                            # 入力した号に一致するボタンを探す
-                            matching_buttons = driver.find_elements(By.XPATH, f"//dialog[@id='DIALOG_ID02']//a[contains(text(), '{input_building_number}')]")
-                            if matching_buttons:
-                                # 最初に見つかった一致するボタンをクリック
-                                matching_button = matching_buttons[0]
-                                driver.execute_script("arguments[0].scrollIntoView(true);", matching_button)
-                                time.sleep(1)
-                                matching_button.click()
-                                logging.info(f"検索結果から号「{input_building_number}」を選択しました")
-                            else:
-                                logging.warning("検索後も一致する号ボタンが見つかりませんでした")
-                                # 最も近い号を選択
-                                all_buttons = driver.find_elements(By.XPATH, "//dialog[@id='DIALOG_ID02']//a")
-                                closest_button = None
-                                min_diff = float('inf')
-                                target_num = int(input_building_number)
-                                
-                                for button in all_buttons:
-                                    try:
-                                        button_text = button.text.strip()
-                                        if button_text.isdigit():
-                                            button_num = int(button_text)
-                                            diff = abs(button_num - target_num)
-                                            if diff < min_diff:
-                                                min_diff = diff
-                                                closest_button = button
-                                    except ValueError:
-                                        continue
-                                
-                                if closest_button:
-                                    driver.execute_script("arguments[0].scrollIntoView(true);", closest_button)
-                                    time.sleep(1)
-                                    closest_button.click()
-                                    logging.info(f"最も近い号「{closest_button.text.strip()}」を選択しました")
-                                else:
-                                    raise ValueError("適切な号が見つかりませんでした")
-                            
-                        except TimeoutException:
-                            logging.warning("検索フィールドが見つかりませんでした")
-                            raise
+                        logging.error("適切なボタンが見つかりませんでした")
+                        driver.save_screenshot("debug_gou_not_found.png")
+                        raise ValueError("適切なボタンが見つかりませんでした")
                         
                 except Exception as e:
                     logging.error(f"号選択処理中にエラー: {str(e)}")
@@ -773,6 +898,9 @@ def search_service_area(postal_code, address):
                 
             except TimeoutException:
                 logging.info("号入力画面はスキップされました")
+            
+            # 建物選択モーダルの処理
+            handle_building_selection(driver)
             
             # 7. 結果の判定
             try:

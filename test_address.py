@@ -1,33 +1,30 @@
 """
-住所分割のテストモジュール
+住所分割機能のテスト
 """
 
-import sys
 from services.area_search import split_address
 
 def test_address(address):
-    """
-    住所分割をテストする関数
-    
-    Args:
-        address (str): テスト対象の住所
-    """
+    """住所分割のテスト関数"""
     print(f"\nテスト対象住所: {address}")
     print(f"処理開始: {address}")
     
-    base_address, street_number, building_number = split_address(address)
-    
+    # 住所を分割
+    result = split_address(address)
     print("分割結果:")
-    print(f"  基本住所: {base_address}")
-    print(f"  番地: {street_number}")
-    print(f"  号: {building_number}")
+    print(f"  都道府県: {result['prefecture']}")
+    print(f"  市区町村: {result['city']}")
+    print(f"  町名: {result['town']}")
+    if result['block']:
+        print(f"  丁目: {result['block']}")
+    print(f"  番地: {result['number']}")
+    if result['building_id']:
+        print(f"  建物ID: {result['building_id']}")
     print("-" * 20)
 
 def main():
-    """
-    メイン処理
-    """
-    print("テスト開始\n")
+    """テストを実行する関数"""
+    print("\nテスト開始\n")
     
     # テストケース
     test_addresses = [
@@ -44,7 +41,14 @@ def main():
         "大阪府大阪市北区梅田1丁目2番3号",
         "京都府京都市中京区寺町通御池上る上本能寺前町488",
         "北海道札幌市中央区北1条西2-3",
-        "沖縄県那覇市おもろまち1-2-3"
+        "沖縄県那覇市おもろまち1-2-3",
+        "奈良県吉野郡下市町大字新住甲123",
+        "奈良県吉野郡下市町字新住乙456",
+        "奈良県吉野郡下市町大字新住字新田甲789",
+        "奈良県吉野郡下市町字新住字新田乙101",
+        "奈良県吉野郡下市町大字新住甲123番地",
+        "奈良県吉野郡下市町字新住乙456番地",
+        "三重県伊勢市宇治浦田3丁目14-36"  # 新しいテストケースを追加
     ]
     
     for address in test_addresses:
