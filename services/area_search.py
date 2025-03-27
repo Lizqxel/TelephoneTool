@@ -49,7 +49,7 @@ def normalize_address(address):
 def split_address(address):
     """
     住所を分割して各要素を抽出する
-    
+
     Args:
         address (str): 分割する住所
         
@@ -66,6 +66,9 @@ def split_address(address):
         # 都道府県を抽出
         prefecture_match = re.match(r'^(.+?[都道府県])', address)
         prefecture = prefecture_match.group(1) if prefecture_match else None
+        block = None
+        number_part = None
+        town = ""
         
         if prefecture:
             remaining_address = address[len(prefecture):].strip()
@@ -118,11 +121,20 @@ def split_address(address):
                     'number': number_part,
                     'building_id': None
                 }
+            
+            return {
+                'prefecture': prefecture,
+                'city': remaining_address if prefecture else None,
+                'town': "",  # Noneの代わりに空文字列を返す
+                'block': None,
+                'number': None,
+                'building_id': None
+            }
         
         return {
-            'prefecture': prefecture,
-            'city': remaining_address if prefecture else None,
-            'town': "",  # Noneの代わりに空文字列を返す
+            'prefecture': None,
+            'city': None,
+            'town': "",
             'block': None,
             'number': None,
             'building_id': None
@@ -410,6 +422,7 @@ def search_service_area(postal_code, address):
         address (str): 住所
         
     Returns:
+        dict: 検索結果を含む辞書。エラー時は以下のいずれかのメッセージを含む：
         dict: 検索結果を含む辞書
     """
     global global_driver
@@ -466,7 +479,6 @@ def search_service_area(postal_code, address):
     driver = None
     try:
         # 1. ドライバーを作成してサイトを開く
-        # headless=Falseを強制して常にブラウザウィンドウを表示する
         if show_popup:
             driver = create_driver(headless=False)
             logging.info("表示モードでブラウザを強制的に起動します")
@@ -478,42 +490,44 @@ def search_service_area(postal_code, address):
         
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
-        # 非ヘッドレスモードの場合、ウィンドウが確実に表示されるよう少し待機
-        if not headless_mode:
-            time.sleep(2)  # ウィンドウが初期化されるまで2秒待機
-            logging.info("表示モードでブラウザを起動しました - ウィンドウが表示されていることを確認してください")
-        
+        # サイトにアクセス
         driver.get("https://flets-w.com/cart/")
         logging.info("NTT西日本のサイトにアクセスしています...")
         
-        # ページが完全に読み込まれるまで待機（10秒まで）
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        logging.info("ページが読み込まれました")
-        
         # 2. 郵便番号を入力
         try:
-            zip_field = WebDriverWait(driver, 15).until(
-                EC.element_to_be_clickable((By.XPATH, "//*[@id='id_tak_tx_ybk_yb']"))
+            # 郵便番号入力フィールドが操作可能になるまで待機
+            zip_field = WebDriverWait(driver, 10).until(
+                lambda d: d.find_element(By.XPATH, "//*[@id='id_tak_tx_ybk_yb']") if d.execute_script("return document.readyState") == "complete" else None
             )
-            zip_field.clear()
-            zip_field.send_keys(postal_code_clean)
-            logging.info(f"郵便番号 {postal_code_clean} を入力しました")
+            
+            if not zip_field:
+                raise TimeoutException("郵便番号入力フィールドが見つかりませんでした")
+            
+            # フィールドが表示され、操作可能になるまで短い間隔で確認
+            for _ in range(10):  # 最大1秒間試行
+                try:
+                    zip_field.clear()
+                    zip_field.send_keys(postal_code_clean)
+                    logging.info(f"郵便番号 {postal_code_clean} を入力しました")
+                    break
+                except:
+                    time.sleep(0.1)
+                    continue
+            
         except Exception as e:
-            logging.error(f"郵便番号入力フィールドが見つかりませんでした: {str(e)}")
-            logging.info(f"ページのHTML: {driver.page_source[:500]}...")
+            logging.error(f"郵便番号入力フィールドの操作に失敗: {str(e)}")
             raise
         
         # 3. 検索ボタンを押す
         try:
-            search_button = WebDriverWait(driver, 15).until(
+            search_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//*[@id='id_tak_bt_ybk_jks']"))
             )
             search_button.click()
             logging.info("検索ボタンをクリックしました")
         except Exception as e:
-            logging.error(f"検索ボタンが見つかりませんでした: {str(e)}")
+            logging.error(f"検索ボタンの操作に失敗: {str(e)}")
             raise
         
         # 住所候補が表示されるのを待つ（最大10秒）
@@ -524,70 +538,18 @@ def search_service_area(postal_code, address):
             )
             logging.info("住所選択モーダルが表示されました")
             
-            # 少し待機してモーダルが完全に表示されるのを待つ
-            time.sleep(1)
+            # モーダル内のリストが表示されるまで待機
+            WebDriverWait(driver, 5).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#addressSelectModal ul li a"))
+            )
             
-            # スクリーンショットを撮影してデバッグ
-            driver.save_screenshot("debug_screenshot.png")
-            logging.info("デバッグ用スクリーンショットを保存しました")
+            # 候補リストを取得（最適化された方法）
+            candidates = driver.find_elements(By.CSS_SELECTOR, "#addressSelectModal ul li a")
+            logging.info(f"{len(candidates)} 件の候補が見つかりました")
             
-            # 候補リストを取得（複数の方法を試す）
-            candidates = []
-            
-            # 方法1: aタグで候補を取得
-            try:
-                candidates = WebDriverWait(driver, 5).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#addressSelectModal ul li a"))
-                )
-                logging.info(f"方法1: {len(candidates)} 件の候補が見つかりました")
-                
-                # 候補の内容をログ出力
-                for i, candidate in enumerate(candidates):
-                    logging.info(f"候補 {i+1}: {candidate.text.strip()}")
-            except Exception as e:
-                logging.warning(f"方法1での候補取得に失敗: {str(e)}")
-            
-            # 方法2: liタグで候補を取得
-            if not candidates:
-                try:
-                    candidates = WebDriverWait(driver, 5).until(
-                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#addressSelectModal ul li"))
-                    )
-                    logging.info(f"方法2: {len(candidates)} 件の候補が見つかりました")
-                    
-                    # 候補の内容をログ出力
-                    for i, candidate in enumerate(candidates):
-                        logging.info(f"候補 {i+1}: {candidate.text.strip()}")
-                except Exception as e:
-                    logging.warning(f"方法2での候補取得に失敗: {str(e)}")
-            
-            # 方法3: JavaScriptで取得
-            if not candidates:
-                try:
-                    js_candidates = driver.execute_script("""
-                        return Array.from(document.querySelectorAll('#addressSelectModal ul li a')).filter(el => {
-                            const text = el.textContent.trim();
-                            return text && text.length > 0;
-                        });
-                    """)
-                    if js_candidates:
-                        candidates = js_candidates
-                        logging.info(f"方法3: {len(candidates)} 件の候補が見つかりました")
-                        
-                        # 候補の内容をログ出力
-                        for i, candidate in enumerate(candidates):
-                            logging.info(f"候補 {i+1}: {candidate.get_attribute('textContent').strip()}")
-                except Exception as e:
-                    logging.warning(f"方法3での候補取得に失敗: {str(e)}")
-            
-            # デバッグ情報の出力
-            logging.info("=== モーダルの構造 ===")
-            modal_html = driver.find_element(By.ID, "addressSelectModal").get_attribute('outerHTML')
-            logging.info(f"モーダルのHTML: {modal_html[:500]}...")
-            
-            # スクリーンショットを保存（デバッグ用）
-            driver.save_screenshot("debug_modal.png")
-            logging.info("モーダルのスクリーンショットを保存しました")
+            # 候補の内容をログ出力
+            for i, candidate in enumerate(candidates[:5]):  # 最初の5件のみログ出力
+                logging.info(f"候補 {i+1}: {candidate.text.strip()}")
             
             # 有効な候補（テキストが空でない）をフィルタリング
             valid_candidates = [c for c in candidates if c.text.strip()]
@@ -596,17 +558,15 @@ def search_service_area(postal_code, address):
                 raise NoSuchElementException("有効な住所候補が見つかりませんでした")
             
             logging.info(f"有効な候補数: {len(valid_candidates)}")
-            for i, candidate in enumerate(valid_candidates):
-                logging.info(f"有効な候補 {i+1}: {candidate.text.strip()}")
             
-            # 住所候補が多い場合（スクロール可能な場合）は、検索フィールドで絞り込み
+            # 住所候補が多い場合は、検索フィールドで絞り込み
             try:
-                search_field = WebDriverWait(driver, 5).until(
+                search_field = WebDriverWait(driver, 3).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='絞り込みワードを入力']"))
                 )
                 logging.info("住所検索フィールドが見つかりました")
                 
-                # 検索用の住所フォーマットを作成（都道府県、市区町村、町名の間に半角スペースを挿入）
+                # 検索用の住所フォーマットを作成
                 search_address = base_address.replace("県", "県 ").replace("市", "市 ").replace("町", "町 ").replace("区", "区 ").strip()
                 logging.info(f"検索用にフォーマットされた住所: {search_address}")
                 
@@ -615,8 +575,10 @@ def search_service_area(postal_code, address):
                 search_field.send_keys(search_address)
                 logging.info(f"検索フィールドに '{search_address}' を入力しました")
                 
-                # 入力後の表示更新を待機（少し長めに）
-                time.sleep(2)
+                # 入力後の表示更新を待機（短縮）
+                WebDriverWait(driver, 3).until(
+                    EC.presence_of_all_elements_located((By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]"))
+                )
                 
                 # 絞り込み後の候補を取得
                 filtered_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
@@ -624,43 +586,36 @@ def search_service_area(postal_code, address):
                     valid_candidates = filtered_candidates
                     logging.info(f"絞り込み後の候補数: {len(valid_candidates)}")
                     
-                    # 絞り込み後の候補をログ出力
+                    # 絞り込み後の候補をログ出力（最初の5件のみ）
                     for i, candidate in enumerate(valid_candidates[:5]):
                         logging.info(f"絞り込み後の候補 {i+1}: '{candidate.text.strip()}'")
                 else:
                     logging.warning("絞り込み後の候補が見つかりませんでした")
-                    # 絞り込みに失敗した場合、元の候補リストを使用
                     logging.info("元の候補リストを使用します")
             except Exception as e:
                 logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
             
-            # 4. 住所を選択
+            # 住所を選択
             best_candidate, similarity = find_best_address_match(base_address, valid_candidates)
-
+            
             if best_candidate:
                 selected_address = best_candidate.text.strip().split('\n')[0]
                 logging.info(f"選択された住所: '{selected_address}' (類似度: {similarity})")
                 
                 # 選択された住所でクリックを実行
                 try:
-                    WebDriverWait(driver, 15).until(EC.element_to_be_clickable(best_candidate))
-                    
-                    # クリックを試行（複数の方法）
+                    WebDriverWait(driver, 3).until(EC.element_to_be_clickable(best_candidate))
+                    best_candidate.click()
+                    logging.info("住所を選択しました")
+                except Exception as click_error:
+                    logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                     try:
-                        best_candidate.click()
-                        logging.info("通常のクリックで住所を選択しました")
-                    except Exception as click_error:
-                        logging.warning(f"通常のクリックに失敗: {str(click_error)}")
-                        try:
-                            driver.execute_script("arguments[0].click();", best_candidate)
-                            logging.info("JavaScriptでクリックしました")
-                        except Exception as js_error:
-                            logging.warning(f"JavaScriptのクリックに失敗: {str(js_error)}")
-                            ActionChains(driver).move_to_element(best_candidate).click().perform()
-                            logging.info("ActionChainsでクリックしました")
-                except Exception as e:
-                    logging.error(f"住所選択のクリックに失敗: {str(e)}")
-                    raise
+                        driver.execute_script("arguments[0].click();", best_candidate)
+                        logging.info("JavaScriptでクリックしました")
+                    except Exception as js_error:
+                        logging.warning(f"JavaScriptのクリックに失敗: {str(js_error)}")
+                        ActionChains(driver).move_to_element(best_candidate).click().perform()
+                        logging.info("ActionChainsでクリックしました")
             else:
                 logging.error(f"適切な住所候補が見つかりませんでした。入力住所: {base_address}")
                 raise ValueError("適切な住所候補が見つかりませんでした")
