@@ -427,13 +427,14 @@ def create_driver(headless=False):
         logging.error(f"ドライバーの作成に失敗: {str(e)}")
         raise
 
-def search_service_area(postal_code, address):
+def search_service_area(postal_code, address, progress_callback=None):
     """
     NTT西日本の提供エリア検索を実行する関数
     
     Args:
         postal_code (str): 郵便番号
         address (str): 住所
+        progress_callback (callable): 進捗状況を通知するコールバック関数
         
     Returns:
         dict: 検索結果を含む辞書
@@ -443,6 +444,9 @@ def search_service_area(postal_code, address):
     logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
     
     # 住所を分割
+    if progress_callback:
+        progress_callback("住所情報を解析中...")
+    
     address_parts = split_address(address)
     if not address_parts:
         return {"status": "error", "message": "住所の分割に失敗しました。"}
@@ -553,6 +557,9 @@ def search_service_area(postal_code, address):
         
         # 住所候補が表示されるのを待つ（最大10秒）
         try:
+            if progress_callback:
+                progress_callback("基本住所の候補を検索中...")
+            
             # 住所選択モーダルが表示されるまで待機
             WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.ID, "addressSelectModal"))
@@ -649,6 +656,9 @@ def search_service_area(postal_code, address):
             
             # 5. 番地入力画面が表示された場合は、番地を入力
             try:
+                if progress_callback:
+                    progress_callback("番地を入力中...")
+                
                 # 番地入力ダイアログが表示されるまで待機
                 banchi_dialog = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.ID, "DIALOG_ID01"))
@@ -779,6 +789,9 @@ def search_service_area(postal_code, address):
             
             # 6. 号入力画面が表示された場合は、号を入力
             try:
+                if progress_callback:
+                    progress_callback("号を入力中...")
+                
                 # 号入力ダイアログが表示されるまで待機
                 gou_dialog = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.ID, "DIALOG_ID02"))
@@ -880,6 +893,9 @@ def search_service_area(postal_code, address):
             
             # 7. 結果の判定
             try:
+                if progress_callback:
+                    progress_callback("検索結果を確認中...")
+                
                 # 検索結果確認ボタンをクリック
                 logging.info("検索結果確認ボタンの検出を開始します")
                 
@@ -986,12 +1002,16 @@ def search_service_area(postal_code, address):
                         result = found_pattern.copy()
                         result["screenshot"] = os.path.abspath(screenshot_path)
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
+                        if progress_callback:
+                            progress_callback(f"{result['message']}が確認されました")
                         return result
                     else:
                         # 提供不可時のスクリーンショットを保存
                         screenshot_path = "debug_unavailable_confirmation.png"
                         driver.save_screenshot(screenshot_path)
                         logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
+                        if progress_callback:
+                            progress_callback("判定できませんでした")
                         return {
                             "status": "failure",
                             "message": "判定失敗",
@@ -1009,6 +1029,8 @@ def search_service_area(postal_code, address):
                     screenshot_path = "debug_timeout_confirmation.png"
                     driver.save_screenshot(screenshot_path)
                     logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
+                    if progress_callback:
+                        progress_callback("タイムアウトが発生しました")
                     return {
                         "status": "failure",
                         "message": "判定失敗",
@@ -1025,6 +1047,8 @@ def search_service_area(postal_code, address):
                     screenshot_path = "debug_error_confirmation.png"
                     driver.save_screenshot(screenshot_path)
                     logging.error(f"提供判定の確認中にエラー: {str(e)}")
+                    if progress_callback:
+                        progress_callback("エラーが発生しました")
                     return {
                         "status": "failure",
                         "message": "判定失敗",
@@ -1041,6 +1065,8 @@ def search_service_area(postal_code, address):
                 logging.error(f"結果の判定中にエラー: {str(e)}")
                 screenshot_path = "debug_result_error.png"
                 driver.save_screenshot(screenshot_path)
+                if progress_callback:
+                    progress_callback("エラーが発生しました")
                 return {
                     "status": "failure", 
                     "message": "判定失敗",
@@ -1057,6 +1083,8 @@ def search_service_area(postal_code, address):
             logging.error(f"住所候補の表示待ちでタイムアウトしました: {str(e)}")
             screenshot_path = "debug_address_timeout.png"
             driver.save_screenshot(screenshot_path)
+            if progress_callback:
+                progress_callback("タイムアウトが発生しました")
             return {
                 "status": "failure",
                 "message": "判定失敗",
@@ -1072,6 +1100,8 @@ def search_service_area(postal_code, address):
             logging.error(f"住所選択処理中にエラーが発生しました: {str(e)}")
             screenshot_path = "debug_address_error.png"
             driver.save_screenshot(screenshot_path)
+            if progress_callback:
+                progress_callback("エラーが発生しました")
             return {
                 "status": "failure",
                 "message": "判定失敗",
@@ -1089,6 +1119,8 @@ def search_service_area(postal_code, address):
         screenshot_path = "debug_general_error.png"
         if driver:
             driver.save_screenshot(screenshot_path)
+        if progress_callback:
+            progress_callback("エラーが発生しました")
         return {
             "status": "failure",
             "message": "判定失敗",
