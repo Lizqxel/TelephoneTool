@@ -20,8 +20,10 @@ import requests
 from pathlib import Path
 from packaging import version
 from datetime import datetime, timedelta
+from PySide6.QtWidgets import QApplication
 
 from version import VERSION, APP_NAME, GITHUB_OWNER, GITHUB_REPO, UPDATE_CHECK_INTERVAL
+from ui.update_progress_dialog import UpdateProgressDialog
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +165,7 @@ class Updater:
         self.temp_dir = Path(tempfile.gettempdir()) / APP_NAME
         self.temp_dir.mkdir(exist_ok=True)
         self.settings_file = Path("settings.json")
+        self.progress_dialog = None
 
     def download_update(self, url, callback=None):
         """アップデートファイルをダウンロードする"""
@@ -210,24 +213,10 @@ class Updater:
             backup_dir = Path("backups") / datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_dir.mkdir(parents=True, exist_ok=True)
             
-            # 必要なファイルをコピー
-            files_to_backup = [
-                "main.py",
-                "settings.json",
-                "version.py",
-                "requirements.txt",
-                "utils",
-                "ui",
-                "services"
-            ]
-            
-            for item in files_to_backup:
-                src = Path(item)
-                if src.exists():
-                    if src.is_file():
-                        shutil.copy2(src, backup_dir / src.name)
-                    else:
-                        shutil.copytree(src, backup_dir / src.name)
+            # 現在のexeファイルをバックアップ
+            current_exe = Path(sys.executable)
+            backup_exe = backup_dir / current_exe.name
+            shutil.copy2(current_exe, backup_exe)
             
             # バックアップ情報を記録
             update_settings["last_backup"] = backup_dir.name
@@ -243,27 +232,49 @@ class Updater:
     def apply_update(self, file_path):
         """アップデートを適用する"""
         try:
+            # プログレスダイアログの表示
+            self.progress_dialog = UpdateProgressDialog()
+            self.progress_dialog.show()
+            
             # バックアップの作成
+            self.progress_dialog.update_progress(10, "バックアップを作成中...")
             if not self.backup_current_version():
-                logger.error("バックアップの作成に失敗しました")
-                return False
+                raise Exception("バックアップの作成に失敗しました")
             
-            # アップデートスクリプトの作成
-            update_script = self.create_update_script(file_path)
+            # 現在のexeファイルのパスを取得
+            current_exe = Path(sys.executable)
+            new_exe = Path(file_path)
             
-            # アップデートスクリプトを実行
+            # 一時ファイルとして新しいexeを配置
+            self.progress_dialog.update_progress(30, "新しいバージョンを準備中...")
+            temp_dir = Path(tempfile.gettempdir()) / APP_NAME
+            temp_dir.mkdir(exist_ok=True)
+            temp_exe = temp_dir / "TelephoneTool_new.exe"
+            
+            # 新しいexeを一時ディレクトリにコピー
+            shutil.copy2(new_exe, temp_exe)
+            
+            # 更新スクリプトの作成
+            self.progress_dialog.update_progress(50, "アップデートスクリプトを作成中...")
+            update_script = self.create_update_script(current_exe, temp_exe)
+            
+            # 更新準備完了
+            self.progress_dialog.update_progress(100, "アップデートの準備が完了しました")
+            
+            # 現在のプロセスを終了し、更新スクリプトを実行
             if sys.platform == "win32":
                 os.startfile(update_script)
             else:
                 os.system(f"python {update_script} &")
             
-            # 現在のプロセスを終了
             sys.exit(0)
         except Exception as e:
             logger.error(f"アップデートの適用に失敗しました: {e}")
+            if self.progress_dialog:
+                self.progress_dialog.show_error(str(e))
             return False
 
-    def create_update_script(self, file_path):
+    def create_update_script(self, current_exe, new_exe):
         """アップデート用のスクリプトを作成する"""
         script_path = self.temp_dir / "update.py"
         
@@ -277,23 +288,30 @@ from pathlib import Path
 # 元のプロセスが終了するのを待つ
 time.sleep(1)
 
-# アプリケーションの更新
 try:
-    # 更新ファイルの展開
-    update_file = Path("{file_path}")
-    app_dir = Path("{os.getcwd()}")
+    # 現在のexeファイルのパス
+    current_exe = Path("{current_exe}")
+    # 新しいexeファイルのパス
+    new_exe = Path("{new_exe}")
     
-    # ファイルの更新
-    shutil.unpack_archive(update_file, app_dir)
+    # 現在のexeファイルをバックアップ
+    backup_exe = current_exe.with_suffix(".exe.bak")
+    shutil.copy2(current_exe, backup_exe)
+    
+    # 新しいexeファイルで置き換え
+    shutil.copy2(new_exe, current_exe)
     
     # 一時ファイルの削除
-    update_file.unlink()
+    new_exe.unlink()
     
     # アプリケーションの再起動
-    os.startfile(app_dir / "main.exe")
+    os.startfile(current_exe)
 except Exception as e:
     with open("update_error.log", "w") as f:
         f.write(f"アップデートに失敗しました: {{e}}")
+    # エラー時はバックアップから復元
+    if backup_exe.exists():
+        shutil.copy2(backup_exe, current_exe)
 '''
         
         with open(script_path, "w", encoding="utf-8") as f:

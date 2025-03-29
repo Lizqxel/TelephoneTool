@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 from utils.updater import UpdateChecker, Updater
+from ui.update_progress_dialog import UpdateProgressDialog
 
 class UpdateDialog(QDialog):
     """アップデート設定ダイアログ"""
@@ -30,6 +31,7 @@ class UpdateDialog(QDialog):
         
         self.update_checker = UpdateChecker()
         self.updater = Updater()
+        self.progress_dialog = None
         
         self.init_ui()
         self.load_settings()
@@ -192,6 +194,10 @@ class UpdateDialog(QDialog):
     def download_and_apply_update(self, download_url):
         """アップデートをダウンロードして適用する"""
         try:
+            # プログレスダイアログの表示
+            self.progress_dialog = UpdateProgressDialog(self)
+            self.progress_dialog.show()
+            
             # ダウンロード
             file_path = self.updater.download_update(
                 download_url,
@@ -201,21 +207,25 @@ class UpdateDialog(QDialog):
             if file_path:
                 # アップデートの適用
                 if self.updater.apply_update(file_path):
-                    QMessageBox.information(
-                        self, "アップデート",
-                        "アップデートを適用するためにアプリケーションを再起動します。"
-                    )
+                    self.progress_dialog.update_progress(100, "アップデートの準備が完了しました")
                 else:
                     raise Exception("アップデートの適用に失敗しました。")
             else:
                 raise Exception("アップデートファイルのダウンロードに失敗しました。")
                 
         except Exception as e:
-            QMessageBox.warning(
-                self, "エラー",
-                f"アップデート中にエラーが発生しました：\n{str(e)}"
-            )
+            if self.progress_dialog:
+                self.progress_dialog.show_error(str(e))
+            else:
+                QMessageBox.warning(
+                    self, "エラー",
+                    f"アップデート中にエラーが発生しました：\n{str(e)}"
+                )
             
     def _update_progress(self, progress):
         """ダウンロード進捗を更新する"""
-        self.check_button.setText(f"ダウンロード中... {progress}%") 
+        if self.progress_dialog:
+            self.progress_dialog.update_progress(
+                progress,
+                f"アップデートファイルをダウンロード中... {progress}%"
+            ) 
