@@ -380,7 +380,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 background-color: #3e8e41;
             }
         """)
-        self.start_button.clicked.connect(self.start_input_flow)
+        self.start_button.clicked.connect(self.start_easy_mode)
         button_layout.addWidget(self.start_button)
         
         # 設定ボタン
@@ -424,110 +424,149 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         self.init_menu()
     
-    def start_input_flow(self):
-        """使いやすいモードの入力フローを開始"""
+    def start_easy_mode(self):
+        """
+        使いやすいモードを開始する
+        """
         try:
+            logging.info("使いやすいモードを開始")
+            
             # CTIデータの取得
             cti_data = self.cti_service.get_all_fields_data()
             if not cti_data:
                 QMessageBox.warning(self, "警告", "CTIデータの取得に失敗しました。")
                 return
+                
+            logging.info(f"CTIデータを取得: {cti_data}")
             
-            # 入力データの保持用辞書
-            input_data = {}
+            # 顧客名の処理（苗字と名前の間のスペースを全角に）
+            customer_name = cti_data.customer_name
+            if customer_name:
+                customer_name = customer_name.replace(' ', '　')  # 半角スペースを全角に
+                customer_name = convert_to_half_width_except_space(customer_name)
             
-            # 住所情報ダイアログの表示
-            address_dialog = AddressInfoDialog(self)
-            address_data = {
-                'postal_code': cti_data.postal_code if cti_data.postal_code else "",
-                'address': cti_data.address if cti_data.address else ""
+            # 住所の処理（ハイフンを半角に）
+            address = cti_data.address
+            if address:
+                address = address.replace('－', '-')  # 全角ハイフンを半角に
+                address = address.replace('ー', '-')  # 長音記号を半角ハイフンに
+                address = address.replace('−', '-')  # 別種の全角ハイフンを半角に
+                address = address.replace(' ', '　')  # 半角スペースを全角に
+                address = convert_to_half_width_except_space(address)
+            
+            # データの初期化と設定
+            self.address_data = {
+                'postal_code': convert_to_half_width(cti_data.postal_code) if cti_data.postal_code else "",
+                'address': address if address else ""
             }
-            address_dialog.set_address_data(address_data)
             
-            # 提供判定ボタンのシグナル接続
-            address_dialog.judgment_btn.clicked.connect(
-                lambda: self.handle_area_judgment(address_dialog)
-            )
-            
-            if address_dialog.exec() != QDialog.DialogCode.Accepted:
-                return
-            
-            # 住所情報の保存
-            self.address_data = address_dialog.get_address_data()
-            input_data['address'] = self.address_data
-            
-            # リスト情報ダイアログの表示
-            list_dialog = ListInfoDialog(self)
-            list_data = {
-                'list_name': cti_data.customer_name if cti_data.customer_name else "",
-                'list_phone': cti_data.phone if cti_data.phone else "",
-                'list_postal_code': cti_data.postal_code if cti_data.postal_code else "",
-                'list_address': cti_data.address if cti_data.address else ""
+            self.list_data = {
+                'list_name': customer_name if customer_name else "",
+                'list_furigana': convert_to_half_width(getattr(cti_data, 'customer_furigana', '')) if hasattr(cti_data, 'customer_furigana') else "",
+                'list_phone': convert_to_half_width(cti_data.phone) if cti_data.phone else "",
+                'list_postal_code': convert_to_half_width(cti_data.postal_code) if cti_data.postal_code else "",
+                'list_address': address if address else ""
             }
-            list_dialog.set_list_data(list_data)
             
-            if list_dialog.exec() != QDialog.DialogCode.Accepted:
-                return
-            
-            # リスト情報の保存
-            self.list_data = list_dialog.get_list_data()
-            input_data['list'] = self.list_data
-            
-            # 受注者入力項目ダイアログの表示
-            orderer_dialog = OrdererInputDialog(self)
-            orderer_data = {
-                'contractor': cti_data.customer_name if cti_data.customer_name else ""
+            self.orderer_data = {
+                'operator': '',  # 対応者名は空で初期化
+                'available_time': '',  # 出やすい時間帯は空で初期化
+                'contractor': customer_name if customer_name else "",  # 変換済みの顧客名を使用
+                'furigana': convert_to_half_width(getattr(cti_data, 'customer_furigana', '')) if hasattr(cti_data, 'customer_furigana') else "",
+                'order_person': '',  # 受注者名は空で初期化
+                'employee_number': '',  # 社番は空で初期化
+                'fee': '2500円～3000円',  # デフォルト値を設定
+                'net_usage': 'なし',  # デフォルト値を設定
+                'family_approval': 'ok',  # デフォルト値を設定
+                'other_number': 'なし',  # デフォルト値を設定
+                'phone_device': 'プッシュホン',  # デフォルト値を設定
+                'forbidden_line': 'なし',  # デフォルト値を設定
+                'nd': '',  # NDは空で初期化
+                'relationship': ''  # 関係性は空で初期化
             }
-            orderer_dialog.set_orderer_data(orderer_data)
             
-            if orderer_dialog.exec() != QDialog.DialogCode.Accepted:
-                return
+            self.order_data = {
+                'current_line': 'アナログ',  # デフォルト値を設定
+                'judgment': 'OK'  # デフォルト値を設定
+            }
             
-            # 受注者情報の保存
-            self.orderer_data = orderer_dialog.get_orderer_data()
-            input_data['orderer'] = self.orderer_data
+            logging.info("CTIデータを各フォームに設定")
             
-            # 受注情報ダイアログの表示
-            order_dialog = OrderInfoDialog(self)
-            self.current_dialog = order_dialog  # 現在のダイアログを保存
-            
-            if order_dialog.exec() != QDialog.DialogCode.Accepted:
-                return
-            
-            # 受注情報の保存
-            input_data['order'] = order_dialog.get_order_data()
-            
-            # 全データの保存処理
-            self.save_input_data(input_data)
+            # 住所情報ダイアログを表示
+            self.show_address_dialog()
             
         except Exception as e:
-            logging.error(f"入力フローの実行中にエラーが発生しました: {e}")
-            QMessageBox.critical(self, "エラー", f"入力フローの実行中にエラーが発生しました: {e}")
-    
-    def handle_area_judgment(self, dialog):
-        """提供判定を実行し、結果を表示"""
+            logging.error(f"使いやすいモードの開始中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"使いやすいモードの開始中にエラーが発生しました: {e}")
+
+    def show_address_dialog(self):
+        """住所情報ダイアログを表示"""
         try:
-            postal_code = dialog.postal_code_input.text()
-            address = dialog.address_input.text()
-            
-            if not postal_code or not address:
-                QMessageBox.warning(dialog, "警告", "郵便番号と住所を入力してください。")
-                return
-            
-            # 提供判定の実行
-            result = search_service_area(postal_code, address)
-            
-            # 結果の表示
-            dialog.show_judgment_result(result)
-            
+            dialog = AddressInfoDialog(self, self.address_data)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # 次のダイアログへ進む前にデータを保存
+                self.address_data = dialog.get_saved_data()
+                self.show_list_dialog()
+            else:
+                logging.info("住所情報入力がキャンセルされました")
         except Exception as e:
-            logging.error(f"提供判定の実行中にエラーが発生しました: {e}")
-            QMessageBox.critical(dialog, "エラー", f"提供判定の実行中にエラーが発生しました: {e}")
-    
-    def handle_orderer_input(self, dialog):
-        """受注者入力の検証と処理"""
-        if dialog.validate_inputs():
-            dialog.accept()
+            logging.error(f"住所情報ダイアログの表示中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"住所情報ダイアログの表示中にエラーが発生しました: {e}")
+
+    def show_list_dialog(self):
+        """リスト情報ダイアログを表示"""
+        try:
+            dialog = ListInfoDialog(self, self.list_data)
+            result = dialog.exec()
+            
+            # 現在のダイアログのデータを保存
+            self.list_data = dialog.get_saved_data()
+            
+            if result == QDialog.DialogCode.Accepted:
+                self.show_orderer_dialog()
+            else:
+                # 戻るボタンが押された場合、前のダイアログを表示
+                self.show_address_dialog()
+                
+        except Exception as e:
+            logging.error(f"リスト情報ダイアログの表示中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"リスト情報ダイアログの表示中にエラーが発生しました: {e}")
+
+    def show_orderer_dialog(self):
+        """受注者情報ダイアログを表示"""
+        try:
+            dialog = OrdererInputDialog(self, self.orderer_data)
+            result = dialog.exec()
+            
+            # 現在のダイアログのデータを保存
+            self.orderer_data = dialog.get_saved_data()
+            
+            if result == QDialog.DialogCode.Accepted:
+                self.show_order_dialog()
+            else:
+                # 戻るボタンが押された場合、前のダイアログを表示
+                self.show_list_dialog()
+                
+        except Exception as e:
+            logging.error(f"受注者情報ダイアログの表示中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"受注者情報ダイアログの表示中にエラーが発生しました: {e}")
+
+    def show_order_dialog(self):
+        """受注情報ダイアログを表示"""
+        try:
+            dialog = OrderInfoDialog(self, self.order_data)
+            result = dialog.exec()
+            
+            # 現在のダイアログのデータを保存
+            self.order_data = dialog.get_saved_data()
+            
+            if result == QDialog.DialogCode.Rejected:
+                # 戻るボタンが押された場合、前のダイアログを表示
+                self.show_orderer_dialog()
+                
+        except Exception as e:
+            logging.error(f"受注情報ダイアログの表示中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"受注情報ダイアログの表示中にエラーが発生しました: {e}")
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
