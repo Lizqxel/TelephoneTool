@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy)
+                              QSizePolicy, QProgressBar)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
@@ -514,6 +514,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         address_layout.addWidget(self.area_search_btn)
         
         # 提供エリア検索結果表示用のラベル
+        area_result_container = QWidget()
+        area_result_layout = QVBoxLayout(area_result_container)
+        area_result_layout.setContentsMargins(0, 0, 0, 0)
+        area_result_layout.setSpacing(2)
+
         self.area_result_label = QLabel("提供エリア: 未検索")
         self.area_result_label.setStyleSheet("""
             QLabel {
@@ -524,7 +529,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 background-color: #f8f8f8;
             }
         """)
-        address_layout.addWidget(self.area_result_label)
+        area_result_layout.addWidget(self.area_result_label)
+
+        # プログレスバー（初期状態では非表示）
+        self.search_progress_bar = QProgressBar()
+        self.search_progress_bar.setRange(0, 0)  # 不定のプログレスバー
+        self.search_progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
+        self.search_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                background-color: #E3F2FD;
+            }
+            QProgressBar::chunk {
+                background-color: #3498DB;
+            }
+        """)
+        self.search_progress_bar.hide()  # 初期状態では非表示
+        area_result_layout.addWidget(self.search_progress_bar)
+
+        address_layout.addWidget(area_result_container)
         
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
@@ -915,11 +938,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.furigana_input.clear()
         self.postal_code_input.clear()
         self.address_input.clear()
+        self.address_furigana_input.clear()  # 住所フリガナをクリア
         self.list_name_input.clear()
         self.list_furigana_input.clear()
         self.list_phone_input.clear()
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
+        self.list_address_furigana_input.clear()  # リスト住所フリガナをクリア
         # 受注者名はクリアしない（保持する）
         # self.order_person_input.clear()
         # 料金認識はクリアしない（保持する）

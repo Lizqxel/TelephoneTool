@@ -10,8 +10,8 @@ import logging
 import json
 import os
 import re
-from PySide6.QtWidgets import QMessageBox, QApplication, QWidget
-from PySide6.QtCore import QTimer, QThread, Signal
+from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar
+from PySide6.QtCore import QTimer, QThread, Signal, QObject
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QMessageBox, QApplication
 
@@ -23,51 +23,46 @@ from utils.format_utils import (format_phone_number, format_phone_number_without
 from utils.furigana_utils import convert_to_furigana
 
 
-class ServiceAreaSearchWorker(QThread):
+class ServiceAreaSearchWorker(QObject):
     """
-    提供エリア検索を非同期で実行するワーカースレッド
-    
-    Attributes:
-        finished (Signal): 検索完了時に発火する信号
-        postal_code (str): 検索対象の郵便番号
-        address (str): 検索対象の住所
+    提供エリア検索を非同期で実行するワーカークラス
     """
-    finished = Signal(dict)
-    
+    finished = Signal(dict)  # 検索完了時に結果を通知するシグナル
+    progress = Signal(str)   # 進捗状況を通知するシグナル
+
     def __init__(self, postal_code, address):
         """
-        コンストラクタ
-        
         Args:
-            postal_code (str): 検索対象の郵便番号
-            address (str): 検索対象の住所
+            postal_code (str): 郵便番号
+            address (str): 住所
         """
         super().__init__()
         self.postal_code = postal_code
         self.address = address
-        self.driver = None
-    
+
     def run(self):
         """
-        検索を実行
+        提供エリア検索を実行し、結果をシグナルで通知する
         """
         try:
-            # 住所を分割して検索を実行
-            result = area_search.search_service_area(self.postal_code, self.address)
+            # 進捗状況を通知するコールバック関数を定義
+            def progress_callback(message):
+                self.progress.emit(message)
+
+            # 検索を実行
+            result = area_search.search_service_area(
+                self.postal_code,
+                self.address,
+                progress_callback=progress_callback
+            )
             self.finished.emit(result)
         except Exception as e:
-            logging.error(f"提供エリア検索中にエラーが発生: {str(e)}")
+            logging.error(f"検索処理中にエラーが発生: {str(e)}")
+            self.progress.emit("エラーが発生しました")
             self.finished.emit({
-                "status": "failure",
-                "details": {"error": str(e)},
-                "show_popup": True
+                "status": "error",
+                "message": f"検索処理中にエラーが発生: {str(e)}"
             })
-        finally:
-            if self.driver:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
 
 
 class MainWindowFunctions:
@@ -518,46 +513,68 @@ class MainWindowFunctions:
             self.list_name_input.setText(text)
     
     def search_service_area(self):
-        """提供エリア検索を実行"""
-        # 郵便番号と住所を取得
-        postal_code = self.postal_code_input.text().strip()
-        address = self.address_input.text().strip()
-        
-        # 入力チェック
-        if not postal_code or not address:
-            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
-            return
-        
-        # 検索中の表示
-        self.area_result_label.setText("提供エリア: 検索中...")
-        self.area_result_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #3498DB;
-                border-radius: 4px;
-                background-color: #E3F2FD;
-                color: #3498DB;
-            }
-        """)
-        QApplication.processEvents()
-        
-        # 検索ボタンを無効化
-        if hasattr(self, 'area_search_btn'):
+        """
+        提供エリア検索を実行する
+        """
+        try:
+            # 入力値を取得
+            postal_code = self.postal_code_input.text()
+            address = self.address_input.text()
+
+            # 入力チェック
+            if not postal_code or not address:
+                QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
+                return
+
+            # 検索ボタンを無効化
             self.area_search_btn.setEnabled(False)
             self.area_search_btn.setText("検索中...")
-        
-        # ワーカースレッドを作成して開始
-        self.search_worker = ServiceAreaSearchWorker(postal_code, address)
-        self.search_worker.finished.connect(self.on_search_completed)
-        self.search_worker.start()
+
+            # 検索ステータスを更新
+            self.area_result_label.setText("提供エリア: 検索を開始します...")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #3498DB;
+                    border-radius: 4px;
+                    background-color: #E3F2FD;
+                    color: #2980B9;
+                }
+            """)
+
+            # ワーカーを作成
+            self.worker = ServiceAreaSearchWorker(postal_code, address)
+            self.worker.finished.connect(self.on_search_completed)
+            self.worker.progress.connect(self.update_search_progress)
+
+            # スレッドを作成して検索を開始
+            self.thread = QThread()
+            self.worker.moveToThread(self.thread)
+            self.thread.started.connect(self.worker.run)
+            self.thread.start()
+
+        except Exception as e:
+            logging.error(f"検索処理の開始時にエラー: {str(e)}")
+            self.area_result_label.setText("提供エリア: エラーが発生しました")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #E74C3C;
+                    border-radius: 4px;
+                    background-color: #FFEBEE;
+                    color: #E74C3C;
+                }
+            """)
+            self.area_search_btn.setEnabled(True)
+            self.area_search_btn.setText("検索")
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
         # 検索ボタンを有効化
-        if hasattr(self, 'area_search_btn'):
-            self.area_search_btn.setEnabled(True)
-            self.area_search_btn.setText("検索")
+        self.area_search_btn.setEnabled(True)
+        self.area_search_btn.setText("検索")
         
         # 結果表示を更新
         status = result.get("status", "failure")
@@ -911,3 +928,23 @@ class MainWindowFunctions:
         except Exception as e:
             logging.error(f"プレビュー生成中にエラー: {e}")
             return None 
+
+    def update_search_progress(self, message):
+        """
+        検索の進捗状況を更新する
+        
+        Args:
+            message (str): 進捗メッセージ
+        """
+        self.area_result_label.setText(f"提供エリア: {message}")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #3498DB;
+                border-radius: 4px;
+                background-color: #E3F2FD;
+                color: #2980B9;
+            }
+        """)
+        QApplication.processEvents() 
