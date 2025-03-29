@@ -15,11 +15,14 @@ from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu)
+                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
+                              QDialog)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from ui.settings_dialog import SettingsDialog
+from ui.mode_selection_dialog import ModeSelectionDialog
+from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
 from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
@@ -41,11 +44,185 @@ class CustomComboBox(QComboBox):
 class MainWindow(QMainWindow, MainWindowFunctions):
     """メインウィンドウクラス"""
     
+    def set_font_size(self, size):
+        """
+        フォントサイズを設定する
+        
+        Args:
+            size (int): 設定するフォントサイズ
+        """
+        try:
+            # フォントサイズを設定
+            font = QFont()
+            font.setPointSize(size)
+            
+            # 各ウィジェットにフォントを適用
+            self.setFont(font)
+            
+            # プレビューエリアのフォントサイズを設定
+            if hasattr(self, 'preview_text'):
+                self.preview_text.setFont(font)
+            
+            logging.info(f"フォントサイズを {size} に設定しました")
+            
+        except Exception as e:
+            logging.error(f"フォントサイズの設定中にエラーが発生しました: {e}")
+    
+    def setup_logging(self):
+        """
+        ログ設定を行う
+        """
+        try:
+            # ログディレクトリの作成
+            log_dir = "logs"
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            
+            # ログファイル名の生成（タイムスタンプ付き）
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = os.path.join(log_dir, f"app_{timestamp}.log")
+            
+            # ログ設定
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file, encoding='utf-8'),
+                    logging.StreamHandler()
+                ]
+            )
+            
+            logging.info("ログ設定を完了しました")
+            
+        except Exception as e:
+            print(f"ログ設定中にエラーが発生しました: {e}")
+    
     def __init__(self):
-        """メインウィンドウの初期化"""
+        """
+        メインウィンドウの初期化
+        """
         super().__init__()
+        
+        # ログ設定
+        self.setup_logging()
+        
+        # 設定ファイルのパスを設定
+        self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        logging.info(f"設定ファイルのパス: {self.settings_file}")
+        
+        # 設定を読み込む
+        self.settings = {}
+        self.load_settings()
+        
+        # モード設定
+        self.current_mode = self.settings.get('mode', 'simple')
+        logging.info(f"現在のモード: {self.current_mode}")
+        
+        # ウィンドウの基本設定
+        self.setWindowTitle("電話ツール")
+        self.setMinimumSize(800, 600)
+        
+        # メインウィジェットの設定
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        
+        # メインレイアウトの作成
+        self.main_layout = QVBoxLayout(main_widget)
+        
+        # モード選択ダイアログの表示（設定に関係なく常に表示）
+        self.show_mode_selection()
+        
+        # 選択されたモードに基づいてUIを初期化
+        if self.current_mode == 'simple':
+            self.init_simple_mode()
+        else:
+            self.init_easy_mode()
+        
+        # 電話ボタン監視の初期化
+        self.phone_monitor = PhoneButtonMonitor(self)
+        self.phone_monitor.start_monitoring()
+        
+        # フォントサイズの設定
+        font_size = self.settings.get('font_size', 10)
+        self.set_font_size(font_size)
+    
+    def check_and_show_mode_selection(self):
+        """
+        モード選択ダイアログの表示を確認し、必要に応じて表示する
+        """
+        try:
+            # 設定ファイルの読み込み
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    # モード設定が存在しない場合、または次回以降表示する設定の場合
+                    if 'mode' not in settings or settings.get('show_mode_selection', True):
+                        self.show_mode_selection_dialog()
+                    else:
+                        self.current_mode = settings.get('mode', 'simple')
+            else:
+                # 設定ファイルが存在しない場合は、モード選択ダイアログを表示
+                self.show_mode_selection_dialog()
+        except Exception as e:
+            logging.error(f"モード設定の読み込み中にエラーが発生しました: {e}")
+            # エラーが発生した場合は、モード選択ダイアログを表示
+            self.show_mode_selection_dialog()
+    
+    def show_mode_selection(self):
+        """
+        モード選択ダイアログを表示する
+        """
+        self.show_mode_selection_dialog()
+    
+    def show_mode_selection_dialog(self):
+        """
+        モード選択ダイアログを表示し、選択結果を保存する
+        """
+        dialog = ModeSelectionDialog(self)
+        if dialog.exec():
+            # 選択されたモードを保存
+            self.current_mode = dialog.get_selected_mode()
+            self.save_mode_settings(self.current_mode, dialog.should_show_again())
+            logging.info(f"モードを {self.current_mode} に設定しました")
+        else:
+            # キャンセルされた場合は、デフォルトでシンプルモードを使用
+            self.current_mode = 'simple'
+            self.save_mode_settings(self.current_mode, True)
+            logging.info("モード選択がキャンセルされました。シンプルモードを使用します。")
+    
+    def save_mode_settings(self, mode, show_again):
+        """
+        モード設定を保存する
+        
+        Args:
+            mode (str): 選択されたモード
+            show_again (bool): 次回以降表示するかどうか
+        """
+        try:
+            settings = {}
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            
+            # モード設定を更新
+            settings['mode'] = mode
+            settings['show_mode_selection'] = show_again
+            
+            # 設定を保存
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+            
+            logging.info(f"モード設定を保存しました: {mode}")
+        except Exception as e:
+            logging.error(f"モード設定の保存中にエラーが発生しました: {e}")
+            # エラーが発生した場合は、デフォルトでシンプルモードを使用
+            self.current_mode = 'simple'
+    
+    def init_simple_mode(self):
+        """シンプルモードのUIを初期化"""
+        # 設定に基づいてウィンドウタイトルを設定
         self.setWindowTitle("コールセンター業務効率化ツール")
-        self.setMinimumSize(600, 400)  # 最小サイズを600x400に変更
+        self.setMinimumSize(600, 400)
         
         # メインウィジェットの設定
         main_widget = QWidget()
@@ -53,9 +230,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # メインレイアウトの設定
         main_layout = QVBoxLayout(main_widget)
-        
-        # 設定ファイルのパス
-        self.settings_file = "settings.json"
         
         # フォーマットテンプレートの読み込み
         self.load_settings()
@@ -165,6 +339,195 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.countdown_timer.timeout.connect(self.update_countdown)
         
         self.init_menu()
+    
+    def init_easy_mode(self):
+        """使いやすいモードのUIを初期化"""
+        # 設定に基づいてウィンドウタイトルを設定
+        self.setWindowTitle("コールセンター業務効率化ツール - 使いやすいモード")
+        self.setMinimumSize(400, 300)
+        
+        # メインウィジェットの設定
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        
+        # メインレイアウトの設定
+        main_layout = QVBoxLayout(main_widget)
+        
+        # プレビューエリア
+        preview_group = QGroupBox("プレビュー")
+        preview_layout = QVBoxLayout(preview_group)
+        self.create_preview_area(preview_layout)
+        main_layout.addWidget(preview_group)
+        
+        # ボタンエリア
+        button_layout = QHBoxLayout()
+        
+        # 開始ボタン
+        self.start_button = QPushButton("開始")
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 14px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3e8e41;
+            }
+        """)
+        self.start_button.clicked.connect(self.start_input_flow)
+        button_layout.addWidget(self.start_button)
+        
+        # 設定ボタン
+        self.settings_button = QPushButton("設定")
+        self.settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 14px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+            }
+        """)
+        self.settings_button.clicked.connect(self.show_settings)
+        button_layout.addWidget(self.settings_button)
+        
+        main_layout.addLayout(button_layout)
+        
+        # シグナルの設定
+        self.setup_signals()
+        
+        # Google Sheetsの設定
+        self.setup_google_sheets()
+        
+        # フォントサイズの適用
+        self.apply_font_size()
+        
+        # CTI連携サービスの初期化
+        self.cti_service = OneClickService()
+        
+        # 電話ボタン監視の初期化と開始
+        self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
+        self.phone_monitor.start_monitoring()
+        
+        self.init_menu()
+    
+    def start_input_flow(self):
+        """使いやすいモードの入力フローを開始"""
+        try:
+            # CTIデータの取得
+            cti_data = self.cti_service.get_all_fields_data()
+            if not cti_data:
+                QMessageBox.warning(self, "警告", "CTIデータの取得に失敗しました。")
+                return
+            
+            # 入力データの保持用辞書
+            input_data = {}
+            
+            # 住所情報ダイアログの表示
+            address_dialog = AddressInfoDialog(self)
+            address_data = {
+                'postal_code': cti_data.postal_code if cti_data.postal_code else "",
+                'address': cti_data.address if cti_data.address else ""
+            }
+            address_dialog.set_address_data(address_data)
+            
+            # 提供判定ボタンのシグナル接続
+            address_dialog.judgment_btn.clicked.connect(
+                lambda: self.handle_area_judgment(address_dialog)
+            )
+            
+            if address_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            
+            # 住所情報の保存
+            self.address_data = address_dialog.get_address_data()
+            input_data['address'] = self.address_data
+            
+            # リスト情報ダイアログの表示
+            list_dialog = ListInfoDialog(self)
+            list_data = {
+                'list_name': cti_data.customer_name if cti_data.customer_name else "",
+                'list_phone': cti_data.phone if cti_data.phone else "",
+                'list_postal_code': cti_data.postal_code if cti_data.postal_code else "",
+                'list_address': cti_data.address if cti_data.address else ""
+            }
+            list_dialog.set_list_data(list_data)
+            
+            if list_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            
+            # リスト情報の保存
+            self.list_data = list_dialog.get_list_data()
+            input_data['list'] = self.list_data
+            
+            # 受注者入力項目ダイアログの表示
+            orderer_dialog = OrdererInputDialog(self)
+            orderer_data = {
+                'contractor': cti_data.customer_name if cti_data.customer_name else ""
+            }
+            orderer_dialog.set_orderer_data(orderer_data)
+            
+            if orderer_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            
+            # 受注者情報の保存
+            self.orderer_data = orderer_dialog.get_orderer_data()
+            input_data['orderer'] = self.orderer_data
+            
+            # 受注情報ダイアログの表示
+            order_dialog = OrderInfoDialog(self)
+            self.current_dialog = order_dialog  # 現在のダイアログを保存
+            
+            if order_dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            
+            # 受注情報の保存
+            input_data['order'] = order_dialog.get_order_data()
+            
+            # 全データの保存処理
+            self.save_input_data(input_data)
+            
+        except Exception as e:
+            logging.error(f"入力フローの実行中にエラーが発生しました: {e}")
+            QMessageBox.critical(self, "エラー", f"入力フローの実行中にエラーが発生しました: {e}")
+    
+    def handle_area_judgment(self, dialog):
+        """提供判定を実行し、結果を表示"""
+        try:
+            postal_code = dialog.postal_code_input.text()
+            address = dialog.address_input.text()
+            
+            if not postal_code or not address:
+                QMessageBox.warning(dialog, "警告", "郵便番号と住所を入力してください。")
+                return
+            
+            # 提供判定の実行
+            result = search_service_area(postal_code, address)
+            
+            # 結果の表示
+            dialog.show_judgment_result(result)
+            
+        except Exception as e:
+            logging.error(f"提供判定の実行中にエラーが発生しました: {e}")
+            QMessageBox.critical(dialog, "エラー", f"提供判定の実行中にエラーが発生しました: {e}")
+    
+    def handle_orderer_input(self, dialog):
+        """受注者入力の検証と処理"""
+        if dialog.validate_inputs():
+            dialog.accept()
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -563,51 +926,53 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def setup_signals(self):
         """シグナルの設定"""
-        # 自動フォーマット用のシグナル
-        # self.mobile_input.textChanged.connect(self.format_phone_number)  # 削除
-        self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
-        self.postal_code_input.textChanged.connect(self.format_postal_code)
-        self.postal_code_input.textChanged.connect(self.convert_to_half_width)
-        self.list_postal_code_input.textChanged.connect(self.format_postal_code)
-        self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
-        self.address_input.textChanged.connect(self.convert_to_half_width)
-        self.list_address_input.textChanged.connect(self.convert_to_half_width)
-        self.era_combo.currentTextChanged.connect(self.update_year_combo)
-        
-        # 名前とフリガナのバリデーション用のシグナル
-        self.contractor_input.textChanged.connect(self.validate_contractor_name)
-        self.furigana_input.textChanged.connect(self.validate_furigana_input)
-        self.list_name_input.textChanged.connect(self.validate_list_name)
-        self.list_furigana_input.textChanged.connect(self.validate_list_furigana)
-        
-        # フリガナ自動変換のシグナル
-        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
-        self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
-        
-        # 入力時に背景色をリセットするシグナル
-        self.operator_input.textChanged.connect(self.reset_background_color)
-        # self.mobile_input.textChanged.connect(self.reset_background_color)  # 削除
-        self.available_time_input.textChanged.connect(self.reset_background_color)
-        self.contractor_input.textChanged.connect(self.reset_background_color)
-        self.furigana_input.textChanged.connect(self.reset_background_color)
-        self.postal_code_input.textChanged.connect(self.reset_background_color)
-        self.address_input.textChanged.connect(self.reset_background_color)
-        self.list_name_input.textChanged.connect(self.reset_background_color)
-        self.list_furigana_input.textChanged.connect(self.reset_background_color)
-        self.list_phone_input.textChanged.connect(self.reset_background_color)
-        self.list_postal_code_input.textChanged.connect(self.reset_background_color)
-        self.list_address_input.textChanged.connect(self.reset_background_color)
-        self.order_person_input.textChanged.connect(self.reset_background_color)
-        self.fee_input.textChanged.connect(self.reset_background_color)
-        self.relationship_input.textChanged.connect(self.reset_background_color)
-        self.employee_number_input.textChanged.connect(self.reset_background_color)  # 社番の背景色リセット
-        self.nd_input.textChanged.connect(self.reset_background_color)  # NDの背景色リセット
-        
-        # ボタンのシグナル接続
-        self.area_search_btn.clicked.connect(self.search_service_area)
-        
-        # マップボタンのシグナル接続
-        self.map_btn.clicked.connect(self.open_street_view)
+        if self.current_mode == 'simple':
+            # シンプルモード用のシグナル設定
+            # 自動フォーマット用のシグナル
+            self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
+            self.postal_code_input.textChanged.connect(self.format_postal_code)
+            self.postal_code_input.textChanged.connect(self.convert_to_half_width)
+            self.list_postal_code_input.textChanged.connect(self.format_postal_code)
+            self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
+            self.address_input.textChanged.connect(self.convert_to_half_width)
+            self.list_address_input.textChanged.connect(self.convert_to_half_width)
+            self.era_combo.currentTextChanged.connect(self.update_year_combo)
+            
+            # 名前とフリガナのバリデーション用のシグナル
+            self.contractor_input.textChanged.connect(self.validate_contractor_name)
+            self.furigana_input.textChanged.connect(self.validate_furigana_input)
+            self.list_name_input.textChanged.connect(self.validate_list_name)
+            self.list_furigana_input.textChanged.connect(self.validate_list_furigana)
+            
+            # フリガナ自動変換のシグナル
+            self.contractor_input.textChanged.connect(self.auto_generate_furigana)
+            self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+            
+            # 入力時に背景色をリセットするシグナル
+            self.operator_input.textChanged.connect(self.reset_background_color)
+            self.available_time_input.textChanged.connect(self.reset_background_color)
+            self.contractor_input.textChanged.connect(self.reset_background_color)
+            self.furigana_input.textChanged.connect(self.reset_background_color)
+            self.postal_code_input.textChanged.connect(self.reset_background_color)
+            self.address_input.textChanged.connect(self.reset_background_color)
+            self.list_name_input.textChanged.connect(self.reset_background_color)
+            self.list_furigana_input.textChanged.connect(self.reset_background_color)
+            self.list_phone_input.textChanged.connect(self.reset_background_color)
+            self.list_postal_code_input.textChanged.connect(self.reset_background_color)
+            self.list_address_input.textChanged.connect(self.reset_background_color)
+            self.order_person_input.textChanged.connect(self.reset_background_color)
+            self.fee_input.textChanged.connect(self.reset_background_color)
+            self.relationship_input.textChanged.connect(self.reset_background_color)
+            self.employee_number_input.textChanged.connect(self.reset_background_color)
+            self.nd_input.textChanged.connect(self.reset_background_color)
+            
+            # ボタンのシグナル接続
+            self.area_search_btn.clicked.connect(self.search_service_area)
+            self.map_btn.clicked.connect(self.open_street_view)
+        else:
+            # 使いやすいモード用のシグナル設定
+            # 開始ボタンのシグナルは既に接続済み
+            pass
     
     def show_settings(self):
         """設定ダイアログを表示"""
@@ -664,7 +1029,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             
             # 住所
             if data.address:
-                converted_address = convert_to_half_width_except_space(data.address)
+                # 住所のハイフンとスペースの処理
+                converted_address = data.address.replace('－', '-')  # 全角ハイフンを半角に
+                converted_address = converted_address.replace('ー', '-')  # 長音記号を半角ハイフンに
+                converted_address = converted_address.replace('−', '-')  # 別種の全角ハイフンを半角に
+                converted_address = converted_address.replace(' ', '　')  # 半角スペースを全角に
+                converted_address = convert_to_half_width_except_space(converted_address)
                 self.address_input.setText(converted_address)
                 self.list_address_input.setText(converted_address)
             
@@ -924,4 +1294,169 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             "© 2024 Your Company Name\n"
             "All rights reserved."
         )
+
+    def save_input_data(self, input_data):
+        """
+        入力データを保存する
+        
+        Args:
+            input_data (dict): 保存する入力データ
+        """
+        try:
+            # 保存先ディレクトリの作成
+            save_dir = "input_data"
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            
+            # ファイル名の生成（タイムスタンプ付き）
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"input_data_{timestamp}.json"
+            filepath = os.path.join(save_dir, filename)
+            
+            # データの保存
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(input_data, f, ensure_ascii=False, indent=4)
+            
+            logging.info(f"入力データを保存しました: {filepath}")
+            QMessageBox.information(self, "完了", "入力データの保存が完了しました。")
+            
+        except Exception as e:
+            logging.error(f"入力データの保存中にエラーが発生しました: {e}")
+            QMessageBox.critical(self, "エラー", f"入力データの保存中にエラーが発生しました: {e}")
+
+    def generate_preview_text(self):
+        """
+        プレビューテキストを生成
+        
+        Returns:
+            str: 生成されたプレビューテキスト
+        """
+        try:
+            logging.info("プレビューテキストの生成を開始")
+            
+            # 設定からフォーマットテンプレートを取得
+            template = self.settings.get('format_template', '')
+            logging.info(f"フォーマットテンプレート: {template}")
+            
+            # テンプレートが空の場合はエラー
+            if not template:
+                logging.error("フォーマットテンプレートが設定されていません")
+                QMessageBox.warning(self, "警告", "フォーマットテンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
+                return None
+            
+            # シンプルモードの場合
+            if self.current_mode == 'simple':
+                logging.info("シンプルモードでのプレビュー生成")
+                # 入力データの取得
+                data = {
+                    'operator': self.operator_input.text(),
+                    'available_time': self.available_time_input.text(),
+                    'contractor': self.contractor_input.text(),
+                    'furigana': self.furigana_input.text(),
+                    'era': self.era_combo.currentText(),
+                    'year': self.year_combo.currentText(),
+                    'month': self.month_combo.currentText(),
+                    'day': self.day_combo.currentText(),
+                    'order_person': self.order_person_input.text(),
+                    'employee_number': self.employee_number_input.text(),
+                    'fee': self.fee_input.text(),
+                    'net_usage': self.net_usage_combo.currentText(),
+                    'family_approval': self.family_approval_combo.currentText(),
+                    'other_number': self.other_number_input.text(),
+                    'phone_device': self.phone_device_input.text(),
+                    'forbidden_line': self.forbidden_line_input.text(),
+                    'nd': self.nd_input.text(),
+                    'relationship': self.relationship_input.text(),
+                    'postal_code': self.postal_code_input.text(),
+                    'address': self.address_input.text(),
+                    'list_name': self.list_name_input.text(),
+                    'list_furigana': self.list_furigana_input.text(),
+                    'list_phone': self.list_phone_input.text(),
+                    'list_postal_code': self.list_postal_code_input.text(),
+                    'list_address': self.list_address_input.text(),
+                    'current_line': self.current_line_combo.currentText(),
+                    'order_date': self.order_date_input.text(),
+                    'judgment': self.judgment_combo.currentText()
+                }
+            # 使いやすいモードの場合
+            else:
+                logging.info("使いやすいモードでのプレビュー生成")
+                # 各ダイアログのデータを取得
+                address_data = getattr(self, 'address_data', {})
+                list_data = getattr(self, 'list_data', {})
+                orderer_data = getattr(self, 'orderer_data', {})
+                order_data = getattr(self, 'current_dialog', None)
+                
+                logging.info(f"住所データ: {address_data}")
+                logging.info(f"リストデータ: {list_data}")
+                logging.info(f"受注者データ: {orderer_data}")
+                
+                if order_data:
+                    order_data = order_data.get_order_data()
+                    logging.info(f"受注データ: {order_data}")
+                else:
+                    logging.warning("受注データが取得できません")
+                    order_data = {}
+                
+                # データを統合
+                data = {
+                    **address_data,
+                    **list_data,
+                    **orderer_data,
+                    **order_data
+                }
+                logging.info(f"統合されたデータ: {data}")
+                
+                # データが空の場合はエラー
+                if not data:
+                    logging.error("営コメ作成時に必要なデータが取得できません")
+                    return None
+            
+            # テンプレートの置換
+            preview_text = template
+            for key, value in data.items():
+                placeholder = f"{{{key}}}"
+                preview_text = preview_text.replace(placeholder, str(value))
+                logging.debug(f"プレースホルダー {placeholder} を {value} に置換")
+            
+            logging.info("プレビューテキストの生成が完了")
+            return preview_text
+            
+        except Exception as e:
+            logging.error(f"プレビュー生成中にエラー: {e}", exc_info=True)
+            return None
+
+    def load_settings(self):
+        """設定を読み込む"""
+        try:
+            # 設定ファイルの読み込み
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+                    logging.info("設定ファイルを読み込みました")
+                    logging.info(f"設定内容: {self.settings}")
+            else:
+                self.settings = {}
+                logging.warning("設定ファイルが存在しません")
+            
+            # フォーマットテンプレートの確認
+            if 'format_template' not in self.settings or not self.settings['format_template']:
+                logging.error("フォーマットテンプレートが設定されていません")
+                QMessageBox.warning(self, "警告", "フォーマットテンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
+                return
+            
+            logging.info(f"フォーマットテンプレート: {self.settings['format_template']}")
+            
+            # フォントサイズの設定
+            font_size = self.settings.get('font_size', 10)
+            logging.info(f"フォントサイズを {font_size} に設定しました")
+            
+            # 電話ボタン監視の設定
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.update_settings()
+            
+        except Exception as e:
+            logging.error(f"設定の読み込み中にエラーが発生しました: {e}", exc_info=True)
+            self.settings = {}
+            QMessageBox.critical(self, "エラー", f"設定の読み込み中にエラーが発生しました: {e}")
 
