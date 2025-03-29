@@ -5,7 +5,7 @@
 """
 
 # アプリケーションのバージョン
-VERSION = "1.1.1"
+VERSION = "1.1.0"
 
 # アプリケーション名
 APP_NAME = "TelephoneTool"
@@ -14,15 +14,15 @@ APP_NAME = "TelephoneTool"
 APP_DESCRIPTION = "電話番号管理ツール"
 
 # 開発者情報
-DEVELOPER = "Your Name"
+DEVELOPER = "Lizqxel"
 DEVELOPER_EMAIL = "your.email@example.com"
 
 # ライセンス情報
 LICENSE = "MIT License"
 
 # GitHub関連の情報
-GITHUB_OWNER = "Lizqxel"  # GitHubのユーザー名
-GITHUB_REPO = "TelephoneTool"   # リポジトリ名
+GITHUB_OWNER = "Lizqxel"
+GITHUB_REPO = "TelephoneTool"
 
 # アップデートチェックの間隔（秒）
 UPDATE_CHECK_INTERVAL = 86400  # 24時間 

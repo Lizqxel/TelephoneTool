@@ -1,231 +1,321 @@
 """
-アップデート設定と履歴を表示するダイアログ
+アップデート設定ダイアログ
 
 このモジュールは、アプリケーションのアップデート設定と
-アップデート履歴を表示・管理するためのUIを提供します。
+アップデート履歴を表示するダイアログを提供します。
 """
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+import os
+import sys
+import json
+import logging
+import requests
+import subprocess
+import glob
+from datetime import datetime
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QCheckBox, QSpinBox, QComboBox,
     QTableWidget, QTableWidgetItem, QMessageBox,
-    QGroupBox, QFormLayout
-)
+                              QProgressDialog, QApplication, QHeaderView, QGroupBox)
 from PySide6.QtCore import Qt, QTimer
-from datetime import datetime
-import json
-from pathlib import Path
-
-from utils.updater import UpdateChecker, Updater
-from ui.update_progress_dialog import UpdateProgressDialog
+from version import VERSION, GITHUB_OWNER, GITHUB_REPO
 
 class UpdateDialog(QDialog):
     """アップデート設定ダイアログ"""
     
     def __init__(self, parent=None):
-        """初期化"""
+        """ダイアログの初期化"""
         super().__init__(parent)
-        self.setWindowTitle("アップデート設定")
-        self.setMinimumWidth(600)
-        self.setMinimumHeight(400)
+        self.setWindowTitle("アップデート履歴")
+        self.setMinimumWidth(400)
         
-        self.update_checker = UpdateChecker()
-        self.updater = Updater()
-        self.progress_dialog = None
+        # 設定ファイルのパスと設定の初期化
+        self.settings_file = "settings.json"
+        self.settings = {}
+        self.load_settings()  # 設定を読み込む
         
-        self.init_ui()
-        self.load_settings()
-        
-    def init_ui(self):
-        """UIの初期化"""
+        # メインレイアウト
         layout = QVBoxLayout(self)
         
         # アップデート設定グループ
         settings_group = QGroupBox("アップデート設定")
-        settings_layout = QFormLayout()
+        settings_layout = QVBoxLayout()
         
-        # 自動チェック
-        self.auto_check = QCheckBox("自動的にアップデートをチェック")
-        settings_layout.addRow("自動チェック:", self.auto_check)
+        # 自動チェック設定
+        self.auto_check = QCheckBox("起動時に自動チェック")
+        self.auto_check.setChecked(self.settings.get("update_settings", {}).get("auto_check", True))
+        settings_layout.addWidget(self.auto_check)
         
-        # チェック間隔
+        # チェック間隔設定
         interval_layout = QHBoxLayout()
+        interval_layout.addWidget(QLabel("チェック間隔:"))
         self.check_interval = QSpinBox()
-        self.check_interval.setRange(3600, 604800)  # 1時間から1週間
-        self.check_interval.setSingleStep(3600)  # 1時間単位
+        self.check_interval.setRange(1, 30)  # 1-30日
+        self.check_interval.setValue(self.settings.get("update_settings", {}).get("check_interval", 86400) // 86400)  # 秒を日に変換
+        self.check_interval.setSuffix("日")
         interval_layout.addWidget(self.check_interval)
-        interval_layout.addWidget(QLabel("秒"))
-        settings_layout.addRow("チェック間隔:", interval_layout)
-        
-        # アップデートチャンネル
-        self.update_channel = QComboBox()
-        self.update_channel.addItems(["stable", "beta"])
-        settings_layout.addRow("アップデートチャンネル:", self.update_channel)
-        
-        # 自動ダウンロード
-        self.auto_download = QCheckBox("新バージョンを自動的にダウンロード")
-        settings_layout.addRow("自動ダウンロード:", self.auto_download)
-        
-        # バックアップ
-        self.backup_before_update = QCheckBox("アップデート前にバックアップを作成")
-        settings_layout.addRow("バックアップ:", self.backup_before_update)
+        interval_layout.addStretch()
+        settings_layout.addLayout(interval_layout)
         
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
         
-        # アップデート履歴
-        history_group = QGroupBox("アップデート履歴")
-        history_layout = QVBoxLayout()
+        # アップデート履歴テーブル
+        history_label = QLabel("アップデート履歴")
+        layout.addWidget(history_label)
         
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(3)
-        self.history_table.setHorizontalHeaderLabels(["バージョン", "チェック日時", "ステータス"])
-        self.history_table.horizontalHeader().setStretchLastSection(True)
-        history_layout.addWidget(self.history_table)
+        self.history_table.setHorizontalHeaderLabels(["バージョン", "チェック日時", "状態"])
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.history_table)
         
-        history_group.setLayout(history_layout)
-        layout.addWidget(history_group)
-        
-        # ボタン
+        # ボタンレイアウト
         button_layout = QHBoxLayout()
         
-        self.check_button = QPushButton("今すぐチェック")
-        self.check_button.clicked.connect(self.check_updates)
-        button_layout.addWidget(self.check_button)
+        # 今すぐチェックボタン
+        check_button = QPushButton("今すぐチェック")
+        check_button.clicked.connect(self.check_for_updates)
+        button_layout.addWidget(check_button)
         
-        self.save_button = QPushButton("設定を保存")
-        self.save_button.clicked.connect(self.save_settings)
-        button_layout.addWidget(self.save_button)
+        # 設定保存ボタン
+        save_button = QPushButton("設定を保存")
+        save_button.clicked.connect(self.save_settings)
+        button_layout.addWidget(save_button)
         
-        self.close_button = QPushButton("閉じる")
-        self.close_button.clicked.connect(self.close)
-        button_layout.addWidget(self.close_button)
+        # 閉じるボタン
+        close_button = QPushButton("閉じる")
+        close_button.clicked.connect(self.accept)
+        button_layout.addWidget(close_button)
         
         layout.addLayout(button_layout)
         
+        # アップデート履歴を読み込む
+        self.load_update_history()
+    
+    def load_update_history(self):
+        """アップデート履歴を読み込む"""
+        try:
+            # 設定ファイルを読み込む
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+            else:
+                self.settings = {}
+            
+            # 履歴を読み込む
+            history = self.settings.get("update_history", [])
+            self.history_table.setRowCount(len(history))
+            
+            for i, entry in enumerate(history):
+                self.history_table.setItem(i, 0, QTableWidgetItem(entry.get("version", "")))
+                self.history_table.setItem(i, 1, QTableWidgetItem(entry.get("check_time", "")))
+                self.history_table.setItem(i, 2, QTableWidgetItem(entry.get("status", "")))
+        except Exception as e:
+            logging.error(f"アップデート履歴の読み込み中にエラー: {e}")
+    
+    def check_for_updates(self):
+        """アップデートをチェックする"""
+        try:
+            # GitHubのAPIを使用して最新リリースを取得
+            url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+            response = requests.get(url)
+            response.raise_for_status()
+            latest_release = response.json()
+            
+            latest_version = latest_release["tag_name"].lstrip("v")
+            current_version = VERSION
+            
+            if latest_version > current_version:
+                # 新しいバージョンが利用可能
+                msg = f"新しいバージョン v{latest_version} が利用可能です。\n"
+                msg += f"現在のバージョン: v{current_version}\n\n"
+                msg += "更新しますか？"
+                
+                reply = QMessageBox.question(self, "アップデート", msg,
+                                          QMessageBox.StandardButton.Yes |
+                                          QMessageBox.StandardButton.No)
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.download_and_apply_update(latest_release)
+                else:
+                    self.add_history_entry(latest_version, "更新をスキップ")
+            else:
+                msg = "現在のバージョンが最新です。"
+                QMessageBox.information(self, "アップデート", msg)
+                self.add_history_entry(current_version, "最新版")
+            
+        except Exception as e:
+            logging.error(f"アップデートチェック中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"アップデートのチェック中にエラーが発生しました: {e}")
+        
     def load_settings(self):
         """設定を読み込む"""
-        settings = self.update_checker.settings
-        update_settings = settings.get("update_settings", {})
-        
-        self.auto_check.setChecked(update_settings.get("auto_check", True))
-        self.check_interval.setValue(update_settings.get("check_interval", 86400))
-        self.update_channel.setCurrentText(update_settings.get("update_channel", "stable"))
-        self.auto_download.setChecked(update_settings.get("auto_download", False))
-        self.backup_before_update.setChecked(update_settings.get("backup_before_update", True))
-        
-        # 履歴の表示
-        self.update_history_table(update_settings.get("update_history", []))
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    self.settings = json.load(f)
+            else:
+                self.settings = {}
+        except Exception as e:
+            logging.error(f"設定の読み込み中にエラー: {e}")
+            self.settings = {}
         
     def save_settings(self):
-        """設定を保存する"""
-        settings = self.update_checker.settings
-        update_settings = settings.get("update_settings", {})
-        
-        update_settings.update({
-            "auto_check": self.auto_check.isChecked(),
-            "check_interval": self.check_interval.value(),
-            "update_channel": self.update_channel.currentText(),
-            "auto_download": self.auto_download.isChecked(),
-            "backup_before_update": self.backup_before_update.isChecked()
-        })
-        
-        settings["update_settings"] = update_settings
-        self.update_checker.settings = settings
-        self.update_checker.save_settings()
-        
-        QMessageBox.information(self, "設定保存", "設定を保存しました。")
-        
-    def update_history_table(self, history):
-        """履歴テーブルを更新する"""
-        self.history_table.setRowCount(len(history))
-        
-        for i, entry in enumerate(history):
-            version = QTableWidgetItem(entry.get("version", ""))
-            check_time = QTableWidgetItem(
-                datetime.fromisoformat(entry.get("check_time", "")).strftime("%Y-%m-%d %H:%M:%S")
-            )
-            status = QTableWidgetItem(entry.get("status", ""))
-            
-            self.history_table.setItem(i, 0, version)
-            self.history_table.setItem(i, 1, check_time)
-            self.history_table.setItem(i, 2, status)
-            
-    def check_updates(self):
-        """アップデートをチェックする"""
-        self.check_button.setEnabled(False)
-        self.check_button.setText("チェック中...")
-        
-        # 非同期でチェックを実行
-        QTimer.singleShot(100, self._do_check_updates)
-        
-    def _do_check_updates(self):
-        """実際のアップデートチェックを実行"""
+        """設定を保存"""
         try:
-            latest_version, download_url = self.update_checker.check_for_updates()
+            # update_settings内に設定を保存
+            if "update_settings" not in self.settings:
+                self.settings["update_settings"] = {}
             
-            if latest_version:
-                msg = f"新しいバージョン {latest_version} が利用可能です。\n"
-                msg += "アップデートをダウンロードしますか？"
-                
-                reply = QMessageBox.question(
-                    self, "アップデート利用可能",
-                    msg,
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                
-                if reply == QMessageBox.Yes:
-                    self.download_and_apply_update(download_url)
-            else:
-                QMessageBox.information(
-                    self, "アップデート確認",
-                    "現在のバージョンが最新です。"
-                )
+            self.settings["update_settings"].update({
+                "auto_check": self.auto_check.isChecked(),
+                "check_interval": self.check_interval.value() * 86400  # 日を秒に変換
+            })
+            
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, ensure_ascii=False, indent=2)
+            
+            QMessageBox.information(self, "成功", "設定を保存しました")
         except Exception as e:
-            QMessageBox.warning(
-                self, "エラー",
-                f"アップデートチェック中にエラーが発生しました：\n{str(e)}"
-            )
-        finally:
-            self.check_button.setEnabled(True)
-            self.check_button.setText("今すぐチェック")
-            self.load_settings()  # 履歴を更新
-            
-    def download_and_apply_update(self, download_url):
-        """アップデートをダウンロードして適用する"""
+            logging.error(f"設定の保存中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"設定の保存中にエラーが発生しました: {e}")
+    
+    def load_history(self):
+        """アップデート履歴を読み込む"""
         try:
-            # プログレスダイアログの表示
-            self.progress_dialog = UpdateProgressDialog(self)
-            self.progress_dialog.show()
+            history = self.settings.get("update_history", [])
+            self.history_table.setRowCount(len(history))
+            
+            for i, entry in enumerate(history):
+                self.history_table.setItem(i, 0, QTableWidgetItem(entry.get("version", "")))
+                self.history_table.setItem(i, 1, QTableWidgetItem(entry.get("check_time", "")))
+                self.history_table.setItem(i, 2, QTableWidgetItem(entry.get("status", "")))
+        except Exception as e:
+            logging.error(f"履歴の読み込み中にエラー: {e}")
+            self.history_table.setRowCount(0)  # テーブルをクリア
+    
+    def add_history_entry(self, version, status):
+        """履歴エントリを追加"""
+        try:
+            history = self.settings.get("update_history", [])
+            history.insert(0, {
+                "version": version,
+                "check_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "status": status
+            })
+            self.settings["update_history"] = history
+            self.save_settings()
+            self.load_history()
+        except Exception as e:
+            logging.error(f"履歴の追加中にエラー: {e}")
+    
+    def download_and_apply_update(self, release):
+        """アップデートをダウンロードして適用"""
+        try:
+            # プログレスダイアログの作成
+            progress = QProgressDialog("アップデートをダウンロード中...", "キャンセル", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setAutoReset(False)
+            progress.setAutoClose(False)
+            progress.show()
+            
+            # アセットのダウンロード
+            assets = release.get("assets", [])
+            if not assets:
+                raise Exception("ダウンロード可能なファイルが見つかりません")
+            
+            # exeファイルを探す
+            exe_asset = next((asset for asset in assets if asset["name"].endswith(".exe")), None)
+            if not exe_asset:
+                raise Exception("実行可能ファイルが見つかりません")
+            
+            # ダウンロードURL
+            download_url = exe_asset["browser_download_url"]
+            new_version = release["tag_name"].lstrip("v")
             
             # ダウンロード
-            file_path = self.updater.download_update(
-                download_url,
-                callback=self._update_progress
-            )
+            response = requests.get(download_url, stream=True)
+            response.raise_for_status()
             
-            if file_path:
-                # アップデートの適用
-                if self.updater.apply_update(file_path):
-                    self.progress_dialog.update_progress(100, "アップデートの準備が完了しました")
-                else:
-                    raise Exception("アップデートの適用に失敗しました。")
-            else:
-                raise Exception("アップデートファイルのダウンロードに失敗しました。")
+            # ファイルサイズの取得
+            total_size = int(response.headers.get("content-length", 0))
+            block_size = 8192
+            downloaded = 0
+            
+            # 新しいバージョンを保存
+            new_exe_path = f"TelephoneTool-{new_version}.exe"
+            with open(new_exe_path, "wb") as f:
+                for data in response.iter_content(block_size):
+                    downloaded += len(data)
+                    f.write(data)
+                    if total_size:
+                        progress_value = int((downloaded / total_size) * 100)
+                        progress.setValue(progress_value)
+                        if progress.wasCanceled():
+                            raise Exception("ダウンロードがキャンセルされました")
+            
+            progress.setLabelText("アップデートを適用中...")
+            progress.setValue(100)
+            
+            # 現在の実行ファイルのパスを取得
+            current_exe = os.path.abspath(sys.executable)
+            current_dir = os.path.dirname(current_exe)
+            current_pid = os.getpid()
+            
+            # バッチファイルを作成
+            batch_path = os.path.join(current_dir, "update.bat")
+            with open(batch_path, "w", encoding="shift-jis") as f:
+                f.write("@echo off\n")
+                f.write("setlocal enabledelayedexpansion\n")
+                f.write("cd /d %~dp0\n")
+                
+                # プロセスを終了
+                f.write(f'taskkill /F /PID {current_pid} /T > nul 2>&1\n')
+                f.write("timeout /t 0.5 /nobreak > nul\n")
+                
+                # 新しいバージョンを配置
+                f.write(f'copy /Y "{new_exe_path}" "{new_exe_path}.tmp" > nul 2>&1\n')
+                
+                # すべての古いバージョンを削除（現在実行中のファイルを除く）
+                f.write('for %%f in (TelephoneTool-*.exe) do (\n')
+                f.write(f'    if /I not "%%f"=="{os.path.basename(new_exe_path)}" (\n')
+                f.write('        del "%%f" > nul 2>&1\n')
+                f.write('    )\n')
+                f.write(')\n')
+                
+                # 一時ファイルを正しい名前に変更
+                f.write(f'move /Y "{new_exe_path}.tmp" "{new_exe_path}" > nul 2>&1\n')
+                
+                # バッチファイル自身を削除
+                f.write("timeout /t 0.5 /nobreak > nul\n")
+                f.write("del %~f0 > nul 2>&1\n")
+            
+            # 履歴に追加
+            self.add_history_entry(new_version, "更新完了")
+            
+            # バッチファイルを非表示で実行
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+            # cmdを使用してバッチファイルを非表示で実行
+            subprocess.Popen(['cmd', '/c', batch_path],
+                           startupinfo=startupinfo,
+                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS)
+            
+            # アプリケーションを終了する前に少し待機
+            QTimer.singleShot(500, lambda: os._exit(0))
                 
         except Exception as e:
-            if self.progress_dialog:
-                self.progress_dialog.show_error(str(e))
-            else:
-                QMessageBox.warning(
-                    self, "エラー",
-                    f"アップデート中にエラーが発生しました：\n{str(e)}"
-                )
+            logging.error(f"アップデート中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"アップデート中にエラーが発生しました: {e}")
             
-    def _update_progress(self, progress):
-        """ダウンロード進捗を更新する"""
-        if self.progress_dialog:
-            self.progress_dialog.update_progress(
-                progress,
-                f"アップデートファイルをダウンロード中... {progress}%"
-            ) 
+            # 一時ファイルの削除
+            for file in [new_exe_path, f"{new_exe_path}.tmp", batch_path]:
+                if os.path.exists(file):
+                    try:
+                        os.remove(file)
+                    except Exception as e:
+                        logging.error(f"一時ファイルの削除中にエラー: {e}")
+                        pass 

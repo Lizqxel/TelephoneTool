@@ -1,5 +1,11 @@
 PySide6>=6.6.1
 requests>=2.31.0
+python-dotenv>=1.0.0
+google-api-python-client>=2.108.0
+google-auth-httplib2>=0.1.1
+google-auth-oauthlib>=1.1.0
+pywin32>=306
+pillow>=10.1.0
 selenium==4.18.1
 webdriver-manager==4.0.1
 jaconv==0.3.4
