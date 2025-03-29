@@ -1,0 +1,25 @@
+{
+    "address": {
+        "postal_code": "518-0463",
+        "address": "三重県名張市赤目町檀６１０−２２"
+    },
+    "list": {
+        "list_name": "大谷 忠良",
+        "list_furigana": "aa",
+        "list_phone": "0595640504",
+        "list_postal_code": "518-0463",
+        "list_address": "三重県名張市赤目町檀６１０−２２"
+    },
+    "orderer": {
+        "orderer_name": "大谷 忠良",
+        "orderer_furigana": "aa",
+        "orderer_phone": "0595640504",
+        "orderer_postal_code": "518-0463",
+        "orderer_address": "三重県名張市赤目町檀６１０−２２"
+    },
+    "order": {
+        "current_line": "アナログ",
+        "order_date": "3/27",
+        "judgment": "OK"
+    }
+}

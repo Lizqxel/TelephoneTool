@@ -1,0 +1,38 @@
+{
+    "address": {
+        "postal_code": "639-1031",
+        "address": "奈良県大和郡山市今国府町314−1"
+    },
+    "list": {
+        "list_name": "名越 茂",
+        "list_furigana": "",
+        "list_phone": "0743565939",
+        "list_postal_code": "639-1031",
+        "list_address": "奈良県大和郡山市今国府町314−1"
+    },
+    "orderer": {
+        "operator": "",
+        "available_time": "",
+        "contractor": "名越 茂",
+        "furigana": "",
+        "era": "昭和",
+        "year": "1",
+        "month": "5",
+        "day": "1",
+        "order_person": "",
+        "employee_number": "",
+        "fee": "2500円～3000円",
+        "net_usage": "あり",
+        "family_approval": "ok",
+        "other_number": "なし",
+        "phone_device": "プッシュホン",
+        "forbidden_line": "なし",
+        "nd": "",
+        "relationship": ""
+    },
+    "order": {
+        "current_line": "アナログ",
+        "order_date": "3/29",
+        "judgment": "OK"
+    }
+}
