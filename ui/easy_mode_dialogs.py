@@ -8,7 +8,7 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QEvent
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
@@ -110,6 +110,11 @@ class ServiceAreaSearchThread(QThread):
                 self.finished.emit("提供エリア外")
         except Exception as e:
             self.error.emit(str(e))
+
+class NoWheelComboBox(QComboBox):
+    """スクロールイベントを無視するQComboBox"""
+    def wheelEvent(self, event):
+        event.ignore()
 
 class AddressInfoDialog(QDialog):
     """住所情報入力ダイアログ"""
@@ -238,7 +243,7 @@ class AddressInfoDialog(QDialog):
                 background-color: #c62828;
             }
         """)
-        self.cancel_btn.clicked.connect(self.reject)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
         button_layout.addWidget(self.cancel_btn)
         
         layout.addLayout(button_layout)
@@ -345,6 +350,29 @@ class AddressInfoDialog(QDialog):
             }
         """)
         QMessageBox.critical(self, "エラー", f"提供エリアの検索中にエラーが発生しました: {error_message}")
+
+    def on_cancel_clicked(self):
+        """作成中止ボタンがクリックされた時の処理"""
+        # 確認ダイアログを表示
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            "作成を中止しますか？\n入力したデータは保存されません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # メイン画面に戻る
+            self.done(QDialog.DialogCode.Rejected)
+        else:
+            # キャンセルをキャンセル
+            pass
+
+# ダイアログの結果コード
+DIALOG_BACK = 2  # 戻るボタン用
+DIALOG_NEXT = QDialog.DialogCode.Accepted  # 次へボタン用
+DIALOG_CANCEL = QDialog.DialogCode.Rejected  # 作成中止ボタン用
 
 class ListInfoDialog(QDialog):
     """リスト情報入力ダイアログ"""
@@ -481,6 +509,7 @@ class ListInfoDialog(QDialog):
                 background-color: #c62828;
             }
         """)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
         button_layout.addWidget(self.cancel_btn)
         
         layout.addLayout(button_layout)
@@ -490,13 +519,13 @@ class ListInfoDialog(QDialog):
         # シグナルの接続
         self.back_btn.clicked.connect(self.on_back_clicked)
         self.next_btn.clicked.connect(self.on_next_clicked)
-        self.cancel_btn.clicked.connect(self.reject)
     
     def on_back_clicked(self):
         """戻るボタンがクリックされた時の処理"""
         # 現在の入力内容を保存
         self.saved_data = self.get_list_data()
-        self.reject()
+        # 一つ前のダイアログに戻る
+        self.done(DIALOG_BACK)
 
     def on_next_clicked(self):
         """次へボタンがクリックされた時の処理"""
@@ -578,6 +607,24 @@ class ListInfoDialog(QDialog):
         except Exception as e:
             logging.error(f"リスト情報の設定中にエラー: {e}")
             QMessageBox.critical(self, "エラー", f"リスト情報の設定中にエラーが発生しました: {e}")
+
+    def on_cancel_clicked(self):
+        """作成中止ボタンがクリックされた時の処理"""
+        # 確認ダイアログを表示
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            "作成を中止しますか？\n入力したデータは保存されません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # メイン画面に戻る
+            self.done(QDialog.DialogCode.Rejected)
+        else:
+            # キャンセルをキャンセル
+            pass
 
 class OrdererInputDialog(QDialog):
     """受注者入力項目ダイアログ"""
@@ -684,12 +731,12 @@ class OrdererInputDialog(QDialog):
         # 生年月日の入力部分を横並びにする
         birth_input_layout = QHBoxLayout()
         
-        self.era_combo = QComboBox()
+        self.era_combo = NoWheelComboBox()
         self.era_combo.addItems(["昭和", "平成", "西暦"])
         self.era_combo.setFixedWidth(60)
         birth_input_layout.addWidget(self.era_combo)
         
-        self.year_combo = QComboBox()
+        self.year_combo = NoWheelComboBox()
         self.year_combo.addItems([str(i) for i in range(1, 65)])
         self.year_combo.setEditable(True)
         self.year_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -699,7 +746,7 @@ class OrdererInputDialog(QDialog):
         birth_input_layout.addWidget(self.year_combo)
         birth_input_layout.addWidget(QLabel("年"))
         
-        self.month_combo = QComboBox()
+        self.month_combo = NoWheelComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
         self.month_combo.setEditable(True)
         self.month_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -709,7 +756,7 @@ class OrdererInputDialog(QDialog):
         birth_input_layout.addWidget(self.month_combo)
         birth_input_layout.addWidget(QLabel("月"))
         
-        self.day_combo = QComboBox()
+        self.day_combo = NoWheelComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
         self.day_combo.setEditable(True)
         self.day_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -746,7 +793,7 @@ class OrdererInputDialog(QDialog):
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = QComboBox()
+        self.net_usage_combo = NoWheelComboBox()
         self.net_usage_combo.addItems(["なし", "あり"])
         if self.saved_data and 'net_usage' in self.saved_data:
             self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
@@ -754,7 +801,7 @@ class OrdererInputDialog(QDialog):
         
         # 家族了承
         orderer_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = QComboBox()
+        self.family_approval_combo = NoWheelComboBox()
         self.family_approval_combo.addItems(["ok", "なし"])
         if self.saved_data and 'family_approval' in self.saved_data:
             self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
@@ -869,6 +916,7 @@ class OrdererInputDialog(QDialog):
                 background-color: #c62828;
             }
         """)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
         button_layout.addWidget(self.cancel_btn)
         
         layout.addLayout(button_layout)
@@ -878,13 +926,13 @@ class OrdererInputDialog(QDialog):
         # シグナルの接続
         self.back_btn.clicked.connect(self.on_back_clicked)
         self.next_btn.clicked.connect(self.on_next_clicked)
-        self.cancel_btn.clicked.connect(self.reject)
     
     def on_back_clicked(self):
         """戻るボタンがクリックされた時の処理"""
         # 現在の入力内容を保存
         self.saved_data = self.get_orderer_data()
-        self.reject()
+        # 一つ前のダイアログに戻る
+        self.done(DIALOG_BACK)
 
     def on_next_clicked(self):
         """次へボタンがクリックされた時の処理"""
@@ -1045,6 +1093,24 @@ class OrdererInputDialog(QDialog):
             logging.error(f"受注者情報の設定中にエラー: {e}")
             QMessageBox.critical(self, "エラー", f"受注者情報の設定中にエラーが発生しました: {e}")
 
+    def on_cancel_clicked(self):
+        """作成中止ボタンがクリックされた時の処理"""
+        # 確認ダイアログを表示
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            "作成を中止しますか？\n入力したデータは保存されません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # メイン画面に戻る
+            self.done(QDialog.DialogCode.Rejected)
+        else:
+            # キャンセルをキャンセル
+            pass
+
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
     
@@ -1079,7 +1145,7 @@ class OrderInfoDialog(QDialog):
         
         # 現状回線
         order_layout.addWidget(QLabel("現状回線"))
-        self.current_line_combo = QComboBox()
+        self.current_line_combo = NoWheelComboBox()
         self.current_line_combo.addItems(["アナログ"])
         if self.saved_data and 'current_line' in self.saved_data:
             self.current_line_combo.setCurrentText(self.saved_data['current_line'])
@@ -1098,7 +1164,7 @@ class OrderInfoDialog(QDialog):
         
         # 提供判定
         order_layout.addWidget(QLabel("提供判定"))
-        self.judgment_combo = QComboBox()
+        self.judgment_combo = NoWheelComboBox()
         self.judgment_combo.addItems(["OK", "NG"])
         if self.saved_data and 'judgment' in self.saved_data:
             self.judgment_combo.setCurrentText(self.saved_data['judgment'])
@@ -1168,6 +1234,7 @@ class OrderInfoDialog(QDialog):
                 background-color: #c62828;
             }
         """)
+        self.cancel_btn.clicked.connect(self.on_cancel_clicked)
         button_layout.addWidget(self.cancel_btn)
         
         layout.addLayout(button_layout)
@@ -1177,13 +1244,13 @@ class OrderInfoDialog(QDialog):
         # シグナルの接続
         self.back_btn.clicked.connect(self.on_back_clicked)
         self.create_comment_btn.clicked.connect(self.create_comment)
-        self.cancel_btn.clicked.connect(self.reject)
     
     def on_back_clicked(self):
         """戻るボタンがクリックされた時の処理"""
         # 現在の入力内容を保存
         self.saved_data = self.get_order_data()
-        self.reject()
+        # 一つ前のダイアログに戻る
+        self.done(DIALOG_BACK)
 
     def get_saved_data(self):
         """保存されたデータを取得"""
@@ -1233,4 +1300,22 @@ class OrderInfoDialog(QDialog):
                 QMessageBox.warning(self, "警告", "プレビュー機能が利用できません。")
         except Exception as e:
             logging.error(f"営コメ作成中にエラー: {e}", exc_info=True)
-            QMessageBox.critical(self, "エラー", f"営コメの作成中にエラーが発生しました: {e}") 
+            QMessageBox.critical(self, "エラー", f"営コメの作成中にエラーが発生しました: {e}")
+
+    def on_cancel_clicked(self):
+        """作成中止ボタンがクリックされた時の処理"""
+        # 確認ダイアログを表示
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            "作成を中止しますか？\n入力したデータは保存されません。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # メイン画面に戻る
+            self.done(QDialog.DialogCode.Rejected)
+        else:
+            # キャンセルをキャンセル
+            pass 
