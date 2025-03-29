@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QDialog)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QMetaObject, Q_ARG, QThread, Slot
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from ui.settings_dialog import SettingsDialog
@@ -103,6 +103,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """
         super().__init__()
         
+        # バージョン情報の設定
+        self.version = "1.0.0"
+        
+        # モード変更フラグ（設定ダイアログ用）
+        self.mode_changed = False
+        self.new_mode = None
+        
         # ログ設定
         self.setup_logging()
         
@@ -113,6 +120,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 設定を読み込む
         self.settings = {}
         self.load_settings()
+        
+        # アクティブな検索スレッドを保持するリスト
+        self.active_search_threads = []
         
         # モード設定
         self.current_mode = self.settings.get('mode', 'simple')
@@ -219,11 +229,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.current_mode = 'simple'
     
     def init_simple_mode(self):
-        """シンプルモードのUIを初期化"""
-        logging.info("シンプルモードの初期化を開始")
+        """通常モードのUIを初期化"""
+        logging.info("通常モードの初期化を開始")
         
         # 設定に基づいてウィンドウタイトルを設定
-        self.setWindowTitle("コールセンター業務効率化ツール")
+        self.setWindowTitle("コールセンター業務効率化ツール - 通常モード")
         self.setMinimumSize(600, 400)
         
         # メインウィジェットの設定
@@ -363,9 +373,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.init_menu()
     
     def init_easy_mode(self):
-        """使いやすいモードのUIを初期化"""
+        """誘導モードのUIを初期化"""
         # 設定に基づいてウィンドウタイトルを設定
-        self.setWindowTitle("コールセンター業務効率化ツール - 使いやすいモード")
+        self.setWindowTitle("コールセンター業務効率化ツール - 誘導モード")
         self.setMinimumSize(400, 300)
         
         # メインウィジェットの設定
@@ -450,6 +460,18 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """使いやすいモードを開始"""
         try:
             logging.info("使いやすいモードを開始")
+            
+            # 提供判定結果をリセット
+            self.judgment_result_label.setText("提供エリア: 未検索")
+            self.judgment_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    background-color: #f8f8f8;
+                }
+            """)
             
             # CTIデータを取得
             cti_data = self.cti_service.get_all_fields_data()
@@ -603,16 +625,191 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def show_address_dialog(self):
         """住所情報ダイアログを表示"""
         try:
+            # 以前のダイアログにはshow_address_dialogは保持しますが、別途管理するので
+            # active_search_threadsでスレッドを管理するため、スレッド停止処理は削除
+            
+            # 新しいダイアログを作成
             dialog = AddressInfoDialog(self, self.address_data)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # 次のダイアログへ進む前にデータを保存
-                self.address_data = dialog.get_saved_data()
+            self.address_dialog = dialog  # ダイアログへの参照を保持
+            result = dialog.exec()
+            
+            # 現在のダイアログのデータを保存
+            self.address_data = dialog.get_saved_data()
+            
+            # スレッドはダイアログを超えて動き続けるよう、ここではstopしない
+            # スレッドの管理はactive_search_threadsで行う
+            
+            if result == QDialog.DialogCode.Accepted:
                 self.show_list_dialog()
-            else:
-                logging.info("住所情報入力がキャンセルされました")
+                
         except Exception as e:
             logging.error(f"住所情報ダイアログの表示中にエラー: {e}")
             QMessageBox.critical(self, "エラー", f"住所情報ダイアログの表示中にエラーが発生しました: {e}")
+
+    @Slot(str)
+    def update_judgment_result(self, result):
+        """提供判定結果をメイン画面に反映する"""
+        try:
+            # 同じメソッドが複数回呼び出されるのを防ぐために結果をログに記録
+            logging.info(f"★★★ メイン画面のupdate_judgment_result呼び出し: {result} ★★★")
+            
+            # judgment_result_labelが存在することを確認
+            if not hasattr(self, 'judgment_result_label'):
+                # 画面レイアウトに合わせて自動的に作成（なければ）
+                logging.info("judgment_result_labelが見つからないため作成します")
+                self.init_judgment_result_label()
+            
+            # 判定結果に応じてスタイルを変更
+            if result == "検索中...":
+                style = """
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #FFA500;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #E65100;
+                    }
+                """
+            elif result == "検索エラー":
+                style = """
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #f44336;
+                        border-radius: 4px;
+                        background-color: #FFEBEE;
+                        color: #B71C1C;
+                    }
+                """
+            elif result == "提供エリア外":
+                style = """
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #FF9800;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #E65100;
+                    }
+                """
+            else:  # "提供可能"など
+                style = """
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #4CAF50;
+                        border-radius: 4px;
+                        background-color: #E8F5E9;
+                        color: #2E7D32;
+                    }
+                """
+            
+            # メイン画面の提供判定結果ラベルを更新
+            self.judgment_result_label.setText(f"提供エリア: {result}")
+            self.judgment_result_label.setStyleSheet(style)
+            self.judgment_result_label.setVisible(True)  # 必ず表示
+            logging.info(f"★★★ 提供判定結果ラベルを更新しました: {result} ★★★")
+            
+            # judgment_comboの値も更新
+            try:
+                if hasattr(self, 'judgment_combo'):
+                    if result == "提供可能":
+                        self.judgment_combo.setCurrentText("OK")
+                        logging.info("judgment_comboを'OK'に設定しました")
+                    elif result == "提供エリア外":
+                        self.judgment_combo.setCurrentText("NG")
+                        logging.info("judgment_comboを'NG'に設定しました")
+            except Exception as combo_error:
+                logging.error(f"judgment_comboの更新でエラー: {combo_error}")
+            
+            # プレビューも更新
+            try:
+                if hasattr(self, 'generate_preview_text'):
+                    self.generate_preview_text()
+                    logging.info("プレビューを更新しました")
+            except Exception as preview_error:
+                logging.error(f"プレビュー更新でエラー: {preview_error}")
+            
+            # UIが確実に更新されるようにイベントを処理
+            QApplication.processEvents()
+            
+            # 結果をログに記録
+            logging.info(f"★★★ 提供判定結果の更新が完了しました: {result} ★★★")
+            
+        except Exception as e:
+            logging.error(f"提供判定結果の更新中にエラー: {e}", exc_info=True)
+            try:
+                if hasattr(self, 'judgment_result_label'):
+                    self.judgment_result_label.setText("提供エリア: 更新エラー")
+                    self.judgment_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #f44336;
+                            border-radius: 4px;
+                            background-color: #FFEBEE;
+                            color: #B71C1C;
+                        }
+                    """)
+            except Exception as inner_e:
+                logging.error(f"エラー処理中に別のエラー: {inner_e}")
+    
+    def init_judgment_result_label(self):
+        """判定結果表示ラベルを初期化する"""
+        try:
+            logging.info("判定結果ラベルを初期化します")
+            # プレビューエリアを取得
+            preview_area = None
+            
+            # プレビューエリアを探す
+            for child in self.findChildren(QWidget):
+                if hasattr(child, 'objectName') and child.objectName() == "preview_area":
+                    preview_area = child
+                    break
+            
+            if not preview_area and hasattr(self, 'preview_area'):
+                preview_area = self.preview_area
+            
+            if not preview_area:
+                # プレビューエリアが見つからない場合は直接メインウィンドウに追加
+                logging.info("プレビューエリアが見つからないため、メインウィンドウに直接追加します")
+                self.judgment_result_label = QLabel("提供エリア: 未検索", self)
+                self.judgment_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #ddd;
+                        border-radius: 4px;
+                        background-color: #f8f9fa;
+                    }
+                """)
+                self.judgment_result_label.move(50, 50)
+                self.judgment_result_label.resize(200, 30)
+                self.judgment_result_label.show()
+            else:
+                # プレビューエリアに追加
+                layout = preview_area.layout()
+                if not layout:
+                    layout = QVBoxLayout(preview_area)
+                    preview_area.setLayout(layout)
+                
+                self.judgment_result_label = QLabel("提供エリア: 未検索")
+                self.judgment_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #ddd;
+                        border-radius: 4px;
+                        background-color: #f8f9fa;
+                    }
+                """)
+                # レイアウトの先頭に追加
+                layout.insertWidget(0, self.judgment_result_label)
+            
+            logging.info("判定結果ラベルの初期化が完了しました")
+        except Exception as e:
+            logging.error(f"判定結果ラベルの初期化中にエラー: {e}", exc_info=True)
 
     def show_list_dialog(self):
         """リスト情報ダイアログを表示"""
@@ -1044,25 +1241,64 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def create_preview_area(self, parent_layout):
         """プレビューエリアを作成"""
-        # プレビューラベル
-        preview_label = QLabel("CTIフォーマットプレビュー")
-        
-        # プレビューテキストエリア
-        self.preview_text = QTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #f8f8f8;
-                color: #333333;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'MS Gothic', monospace;
-            }
-        """)
-        
-        parent_layout.addWidget(preview_label)
-        parent_layout.addWidget(self.preview_text)
+        try:
+            # 提供判定結果を表示するエリアを追加
+            judgment_layout = QHBoxLayout()
+            
+            # 提供エリア検索結果表示用のラベル
+            self.judgment_result_label = QLabel("提供エリア: 未検索")
+            self.judgment_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    background-color: #f8f8f8;
+                }
+            """)
+            judgment_layout.addWidget(self.judgment_result_label)
+            
+            parent_layout.addLayout(judgment_layout)
+            
+            # プレビューテキストエリア
+            self.preview_text = QTextEdit()
+            self.preview_text.setReadOnly(True)
+            self.preview_text.setMinimumHeight(300)
+            self.preview_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #f8f8f8;
+                    color: #333333;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-family: 'MS Gothic', monospace;
+                }
+            """)
+            parent_layout.addWidget(self.preview_text)
+            
+            # 更新ボタン
+            self.update_preview_btn = QPushButton("プレビュー更新")
+            self.update_preview_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    border: none;
+                    padding: 8px;
+                    text-align: center;
+                    font-size: 14px;
+                    margin: 4px 2px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #45a049;
+                }
+                QPushButton:pressed {
+                    background-color: #3e8e41;
+                }
+            """)
+            parent_layout.addWidget(self.update_preview_btn)
+        except Exception as e:
+            logging.error(f"プレビューエリア作成中にエラー: {e}")
     
     def setup_signals(self):
         """シグナルの設定"""
@@ -1118,19 +1354,30 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """設定ダイアログを表示"""
         dialog = SettingsDialog(self)
         if dialog.exec():
-            try:
-                # ダイアログがOKで閉じられた場合、設定を再読み込み
-                self.load_settings()
-                # フォントサイズを適用
-                self.apply_font_size()
-                # 電話ボタン監視の設定を更新
-                self.phone_monitor.update_settings()
-                # ウィンドウ全体を更新
+            # ダイアログがOKで閉じられた場合、設定を再読み込み
+            self.load_settings()
+            # フォントサイズを適用
+            self.apply_font_size()
+            
+            # モード変更フラグがセットされている場合、UIを再構築
+            if hasattr(self, 'mode_changed') and self.mode_changed and hasattr(self, 'new_mode'):
+                self.mode_changed = False
+                new_mode = self.new_mode
+                self.new_mode = None
+                
+                # 新しいモードでUIを初期化
+                if new_mode == 'simple':
+                    self.init_simple_mode()
+                else:
+                    self.init_easy_mode()
+            else:
+                # ウィジェットを更新
                 self.update()
-                logging.info("設定を更新しました")
-            except Exception as e:
-                logging.error(f"設定の更新中にエラーが発生しました: {e}")
-                QMessageBox.critical(self, "エラー", f"設定の更新中にエラーが発生しました: {e}")
+                # 全てのウィジェットを再描画
+                for widget in self.findChildren(QWidget):
+                    widget.update()
+            
+            logging.info("設定を更新しました")
             
     def update_countdown(self):
         """カウントダウン表示を更新"""
@@ -1335,10 +1582,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
-        # 電話ボタン監視を停止
-        if hasattr(self, 'phone_monitor'):
-            self.phone_monitor.stop_monitoring()
-        event.accept()
+        try:
+            # すべてのアクティブな検索スレッドを停止
+            if hasattr(self, 'active_search_threads'):
+                for thread in self.active_search_threads:
+                    if thread and thread.isRunning():
+                        logging.info("アクティブな検索スレッドを停止します")
+                        thread.stop()
+                self.active_search_threads.clear()
+            
+            # 電話ボタン監視を停止
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.stop_monitoring()
+                
+            event.accept()
+        except Exception as e:
+            logging.error(f"アプリケーション終了処理中にエラー: {e}")
+            event.accept()
 
     def update_preview(self):
         """プレビューを更新"""
@@ -1464,22 +1724,18 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             logging.error(f"入力データの保存中にエラーが発生しました: {e}")
             QMessageBox.critical(self, "エラー", f"入力データの保存中にエラーが発生しました: {e}")
 
+    @Slot()
     def generate_preview_text(self):
-        """
-        プレビューテキストを生成
-        
-        Returns:
-            str: 生成されたプレビューテキスト
-        """
+        """プレビューテキストを生成する"""
         try:
             logging.info("プレビューテキストの生成を開始")
             
-            # 設定からフォーマットテンプレートを取得
-            template = self.settings.get('format_template', '')
-            logging.info(f"フォーマットテンプレート: {template}")
+            # フォーマットテンプレートの取得
+            format_template = self.settings.get('format_template', '')
+            logging.info(f"フォーマットテンプレート: {format_template}")
             
             # テンプレートが空の場合はエラー
-            if not template:
+            if not format_template:
                 logging.error("フォーマットテンプレートが設定されていません")
                 QMessageBox.warning(self, "警告", "フォーマットテンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
                 return None
@@ -1553,7 +1809,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     return None
             
             # テンプレートの置換
-            preview_text = template
+            preview_text = format_template
             for key, value in data.items():
                 placeholder = f"{{{key}}}"
                 preview_text = preview_text.replace(placeholder, str(value))

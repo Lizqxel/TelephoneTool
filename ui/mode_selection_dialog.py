@@ -55,8 +55,8 @@ class ModeSelectionDialog(QDialog):
         
         # 説明ラベル
         description_label = QLabel(
-            "シンプルモード：すべての入力項目を1画面で入力\n"
-            "使いやすいモード：入力項目を複数の画面に分けて入力"
+            "通常モード：すべての入力項目を1画面で入力\n"
+            "誘導モード：入力項目を複数の画面に分けて入力"
         )
         description_label.setAlignment(Qt.AlignCenter)
         description_label.setStyleSheet("""
@@ -71,8 +71,8 @@ class ModeSelectionDialog(QDialog):
         """)
         layout.addWidget(description_label)
         
-        # シンプルモードボタン
-        simple_button = QPushButton("シンプルモード")
+        # 通常モードボタン
+        simple_button = QPushButton("通常モード")
         simple_button.setMinimumHeight(50)
         simple_button.setStyleSheet("""
             QPushButton {
@@ -94,8 +94,8 @@ class ModeSelectionDialog(QDialog):
         simple_button.clicked.connect(lambda: self.select_mode('simple'))
         layout.addWidget(simple_button)
         
-        # 使いやすいモードボタン
-        easy_button = QPushButton("使いやすいモード")
+        # 誘導モードボタン
+        easy_button = QPushButton("誘導モード")
         easy_button.setMinimumHeight(50)
         easy_button.setStyleSheet("""
             QPushButton {
