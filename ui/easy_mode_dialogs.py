@@ -8,10 +8,12 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
+from services.area_search import search_service_area as area_search_service
+import threading
 
 def convert_to_half_width(text):
     """
@@ -58,6 +60,57 @@ def convert_to_half_width(text):
     
     return text.translate(trans_table)
 
+def search_service_area(postal_code, address):
+    """
+    提供エリアを検索する
+    
+    Args:
+        postal_code (str): 郵便番号
+        address (str): 住所
+        
+    Returns:
+        str: 提供エリア情報
+    """
+    try:
+        # 郵便番号と住所から提供エリアを判定
+        # ここでは簡単な例として、郵便番号の最初の3桁で判定
+        area_code = postal_code[:3]
+        
+        # 提供エリアの判定ロジック
+        if area_code in ['100', '101', '102', '103', '104', '105']:
+            return "東京23区内"
+        elif area_code in ['220', '221', '222', '223', '224', '225']:
+            return "横浜市内"
+        elif area_code in ['330', '331', '332', '333', '334', '335']:
+            return "さいたま市内"
+        else:
+            return "提供エリア外"
+            
+    except Exception as e:
+        logging.error(f"提供エリア検索中にエラー: {e}")
+        return None
+
+class ServiceAreaSearchThread(QThread):
+    """提供エリア検索用のスレッド"""
+    finished = Signal(str)  # 検索結果を通知するシグナル
+    error = Signal(str)     # エラーを通知するシグナル
+    
+    def __init__(self, postal_code, address):
+        super().__init__()
+        self.postal_code = postal_code
+        self.address = address
+    
+    def run(self):
+        try:
+            # 提供エリア検索を実行
+            result = area_search_service(self.postal_code, self.address)
+            if result:
+                self.finished.emit(result)
+            else:
+                self.finished.emit("提供エリア外")
+        except Exception as e:
+            self.error.emit(str(e))
+
 class AddressInfoDialog(QDialog):
     """住所情報入力ダイアログ"""
     
@@ -73,6 +126,9 @@ class AddressInfoDialog(QDialog):
         self.setWindowTitle("住所情報入力")
         self.setModal(True)
         self.setMinimumWidth(500)
+        
+        # 保存データの初期化
+        self.saved_data = address_data or {}
         
         # メインレイアウト
         layout = QVBoxLayout()
@@ -91,16 +147,16 @@ class AddressInfoDialog(QDialog):
         address_layout.addWidget(QLabel("郵便番号"))
         self.postal_code_input = QLineEdit()
         self.postal_code_input.setPlaceholderText("例：123-4567")
-        if address_data and 'postal_code' in address_data:
-            self.postal_code_input.setText(address_data['postal_code'])
+        if self.saved_data and 'postal_code' in self.saved_data:
+            self.postal_code_input.setText(self.saved_data['postal_code'])
         address_layout.addWidget(self.postal_code_input)
         
         # 住所
         address_layout.addWidget(QLabel("住所"))
         self.address_input = QLineEdit()
         self.address_input.setPlaceholderText("例：東京都渋谷区...")
-        if address_data and 'address' in address_data:
-            self.address_input.setText(address_data['address'])
+        if self.saved_data and 'address' in self.saved_data:
+            self.address_input.setText(self.saved_data['address'])
         address_layout.addWidget(self.address_input)
         
         address_group.setLayout(address_layout)
@@ -124,10 +180,11 @@ class AddressInfoDialog(QDialog):
                 background-color: #3e8e41;
             }
         """)
+        self.judgment_btn.clicked.connect(self.search_service_area)
         layout.addWidget(self.judgment_btn)
         
         # 提供判定結果表示ラベル
-        self.judgment_result = QLabel()
+        self.judgment_result = QLabel("提供エリア: 未検索")
         self.judgment_result.setStyleSheet("""
             QLabel {
                 font-size: 14px;
@@ -137,7 +194,6 @@ class AddressInfoDialog(QDialog):
                 background-color: #f8f9fa;
             }
         """)
-        self.judgment_result.hide()
         layout.addWidget(self.judgment_result)
         
         # ボタンエリア
@@ -161,6 +217,7 @@ class AddressInfoDialog(QDialog):
                 background-color: #1565C0;
             }
         """)
+        self.next_btn.clicked.connect(self.on_next_clicked)
         button_layout.addWidget(self.next_btn)
         
         # 作成中止ボタン
@@ -181,16 +238,23 @@ class AddressInfoDialog(QDialog):
                 background-color: #c62828;
             }
         """)
+        self.cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(self.cancel_btn)
         
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
-        
-        # シグナルの接続
-        self.next_btn.clicked.connect(self.accept)
-        self.cancel_btn.clicked.connect(self.reject)
     
+    def on_next_clicked(self):
+        """次へボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_address_data()
+        self.accept()
+
+    def get_saved_data(self):
+        """保存されたデータを取得"""
+        return self.saved_data
+
     def get_address_data(self):
         """
         住所情報を取得する
@@ -220,39 +284,67 @@ class AddressInfoDialog(QDialog):
             logging.error(f"住所データの取得中にエラー: {e}")
             return {}
     
-    def show_judgment_result(self, result):
-        """
-        提供判定結果を表示
-        
-        Args:
-            result (str): 判定結果
-        """
-        self.judgment_result.setText(f"提供判定結果: {result}")
-        self.judgment_result.show()
-
-    def set_address_data(self, data):
-        """
-        住所情報を設定する
-        
-        Args:
-            data: 住所情報データ
-        """
+    def search_service_area(self):
+        """提供エリアを検索"""
         try:
-            # 郵便番号
-            if data.get('postal_code'):
-                converted_postal_code = convert_to_half_width(data['postal_code'])
-                self.postal_code_input.setText(converted_postal_code)
+            postal_code = self.postal_code_input.text()
+            address = self.address_input.text()
             
-            # 住所
-            if data.get('address'):
-                converted_address = convert_to_half_width(data['address'])
-                self.address_input.setText(converted_address)
+            if not postal_code or not address:
+                QMessageBox.warning(self, "警告", "郵便番号と住所を入力してください。")
+                return
             
-            logging.info("住所データを正常に設定しました")
+            # 検索中表示
+            self.judgment_result.setText("提供エリア: 検索中...")
+            self.judgment_result.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #FFA500;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #E65100;
+                }
+            """)
+            
+            # 検索スレッドの作成と開始
+            self.search_thread = ServiceAreaSearchThread(postal_code, address)
+            self.search_thread.finished.connect(self.on_search_finished)
+            self.search_thread.error.connect(self.on_search_error)
+            self.search_thread.start()
             
         except Exception as e:
-            logging.error(f"住所情報の設定中にエラー: {e}")
-            QMessageBox.critical(self, "エラー", f"住所情報の設定中にエラーが発生しました: {e}")
+            logging.error(f"提供エリア検索中にエラー: {e}")
+            QMessageBox.critical(self, "エラー", f"提供エリアの検索中にエラーが発生しました: {e}")
+    
+    def on_search_finished(self, result):
+        """検索完了時の処理"""
+        self.judgment_result.setText(f"提供エリア: {result}")
+        self.judgment_result.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #4CAF50;
+                border-radius: 4px;
+                background-color: #E8F5E9;
+                color: #2E7D32;
+            }
+        """)
+    
+    def on_search_error(self, error_message):
+        """検索エラー時の処理"""
+        self.judgment_result.setText("提供エリア: 検索エラー")
+        self.judgment_result.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #f44336;
+                border-radius: 4px;
+                background-color: #FFEBEE;
+                color: #B71C1C;
+            }
+        """)
+        QMessageBox.critical(self, "エラー", f"提供エリアの検索中にエラーが発生しました: {error_message}")
 
 class ListInfoDialog(QDialog):
     """リスト情報入力ダイアログ"""
@@ -270,6 +362,9 @@ class ListInfoDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # 保存データの初期化
+        self.saved_data = list_data or {}
+        
         # メインレイアウト
         layout = QVBoxLayout()
         
@@ -286,40 +381,40 @@ class ListInfoDialog(QDialog):
         # リスト名
         list_layout.addWidget(QLabel("リスト名"))
         self.list_name_input = QLineEdit()
-        if list_data and 'list_name' in list_data:
-            self.list_name_input.setText(list_data['list_name'])
+        if self.saved_data and 'list_name' in self.saved_data:
+            self.list_name_input.setText(self.saved_data['list_name'])
         list_layout.addWidget(self.list_name_input)
         
         # リストフリガナ
         list_layout.addWidget(QLabel("リストフリガナ"))
         self.list_furigana_input = QLineEdit()
         self.list_furigana_input.setPlaceholderText("例：タナカタロウ")
-        if list_data and 'list_furigana' in list_data:
-            self.list_furigana_input.setText(list_data['list_furigana'])
+        if self.saved_data and 'list_furigana' in self.saved_data:
+            self.list_furigana_input.setText(self.saved_data['list_furigana'])
         list_layout.addWidget(self.list_furigana_input)
         
         # 電話番号
         list_layout.addWidget(QLabel("電話番号"))
         self.list_phone_input = QLineEdit()
         self.list_phone_input.setPlaceholderText("例：090-1234-5678")
-        if list_data and 'list_phone' in list_data:
-            self.list_phone_input.setText(list_data['list_phone'])
+        if self.saved_data and 'list_phone' in self.saved_data:
+            self.list_phone_input.setText(self.saved_data['list_phone'])
         list_layout.addWidget(self.list_phone_input)
         
         # リスト郵便番号
         list_layout.addWidget(QLabel("リスト郵便番号"))
         self.list_postal_code_input = QLineEdit()
         self.list_postal_code_input.setPlaceholderText("例：123-4567")
-        if list_data and 'list_postal_code' in list_data:
-            self.list_postal_code_input.setText(list_data['list_postal_code'])
+        if self.saved_data and 'list_postal_code' in self.saved_data:
+            self.list_postal_code_input.setText(self.saved_data['list_postal_code'])
         list_layout.addWidget(self.list_postal_code_input)
         
         # リスト住所
         list_layout.addWidget(QLabel("リスト住所"))
         self.list_address_input = QLineEdit()
         self.list_address_input.setPlaceholderText("例：東京都渋谷区...")
-        if list_data and 'list_address' in list_data:
-            self.list_address_input.setText(list_data['list_address'])
+        if self.saved_data and 'list_address' in self.saved_data:
+            self.list_address_input.setText(self.saved_data['list_address'])
         list_layout.addWidget(self.list_address_input)
         
         list_group.setLayout(list_layout)
@@ -393,10 +488,26 @@ class ListInfoDialog(QDialog):
         self.setLayout(layout)
         
         # シグナルの接続
-        self.back_btn.clicked.connect(self.reject)
-        self.next_btn.clicked.connect(self.accept)
+        self.back_btn.clicked.connect(self.on_back_clicked)
+        self.next_btn.clicked.connect(self.on_next_clicked)
         self.cancel_btn.clicked.connect(self.reject)
     
+    def on_back_clicked(self):
+        """戻るボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_list_data()
+        self.reject()
+
+    def on_next_clicked(self):
+        """次へボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_list_data()
+        self.accept()
+
+    def get_saved_data(self):
+        """保存されたデータを取得"""
+        return self.saved_data
+
     def get_list_data(self):
         """
         リスト情報を取得する
@@ -484,6 +595,9 @@ class OrdererInputDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # 保存データの初期化
+        self.saved_data = orderer_data or {}
+        
         # メインレイアウト
         layout = QVBoxLayout()
         
@@ -532,23 +646,23 @@ class OrdererInputDialog(QDialog):
         # 対応者名
         orderer_layout.addWidget(QLabel("対応者名"))
         self.operator_input = QLineEdit()
-        if orderer_data and 'operator' in orderer_data:
-            self.operator_input.setText(orderer_data['operator'])
+        if self.saved_data and 'operator' in self.saved_data:
+            self.operator_input.setText(self.saved_data['operator'])
         orderer_layout.addWidget(self.operator_input)
         
         # 出やすい時間帯
         orderer_layout.addWidget(QLabel("出やすい時間帯"))
         self.available_time_input = QLineEdit()
         self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
-        if orderer_data and 'available_time' in orderer_data:
-            self.available_time_input.setText(orderer_data['available_time'])
+        if self.saved_data and 'available_time' in self.saved_data:
+            self.available_time_input.setText(self.saved_data['available_time'])
         orderer_layout.addWidget(self.available_time_input)
         
         # 契約者名
         orderer_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
-        if orderer_data and 'contractor' in orderer_data:
-            self.contractor_input.setText(orderer_data['contractor'])
+        if self.saved_data and 'contractor' in self.saved_data:
+            self.contractor_input.setText(self.saved_data['contractor'])
         orderer_layout.addWidget(self.contractor_input)
         
         # フリガナ
@@ -559,8 +673,8 @@ class OrdererInputDialog(QDialog):
         furigana_layout.addWidget(self.furigana_mode_combo)
         orderer_layout.addLayout(furigana_layout)
         self.furigana_input = QLineEdit()
-        if orderer_data and 'furigana' in orderer_data:
-            self.furigana_input.setText(orderer_data['furigana'])
+        if self.saved_data and 'furigana' in self.saved_data:
+            self.furigana_input.setText(self.saved_data['furigana'])
         orderer_layout.addWidget(self.furigana_input)
         
         # 生年月日
@@ -611,70 +725,70 @@ class OrdererInputDialog(QDialog):
         # 受注者名
         orderer_layout.addWidget(QLabel("受注者名"))
         self.order_person_input = QLineEdit()
-        if orderer_data and 'order_person' in orderer_data:
-            self.order_person_input.setText(orderer_data['order_person'])
+        if self.saved_data and 'order_person' in self.saved_data:
+            self.order_person_input.setText(self.saved_data['order_person'])
         orderer_layout.addWidget(self.order_person_input)
         
         # 社番
         orderer_layout.addWidget(QLabel("社番"))
         self.employee_number_input = QLineEdit()
-        if orderer_data and 'employee_number' in orderer_data:
-            self.employee_number_input.setText(orderer_data['employee_number'])
+        if self.saved_data and 'employee_number' in self.saved_data:
+            self.employee_number_input.setText(self.saved_data['employee_number'])
         orderer_layout.addWidget(self.employee_number_input)
         
         # 料金認識
         orderer_layout.addWidget(QLabel("料金認識"))
         self.fee_input = QLineEdit()
         self.fee_input.setText("2500円～3000円")
-        if orderer_data and 'fee' in orderer_data:
-            self.fee_input.setText(orderer_data['fee'])
+        if self.saved_data and 'fee' in self.saved_data:
+            self.fee_input.setText(self.saved_data['fee'])
         orderer_layout.addWidget(self.fee_input)
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
         self.net_usage_combo = QComboBox()
         self.net_usage_combo.addItems(["なし", "あり"])
-        if orderer_data and 'net_usage' in orderer_data:
-            self.net_usage_combo.setCurrentText(orderer_data['net_usage'])
+        if self.saved_data and 'net_usage' in self.saved_data:
+            self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
         orderer_layout.addWidget(self.net_usage_combo)
         
         # 家族了承
         orderer_layout.addWidget(QLabel("家族了承"))
         self.family_approval_combo = QComboBox()
         self.family_approval_combo.addItems(["ok", "なし"])
-        if orderer_data and 'family_approval' in orderer_data:
-            self.family_approval_combo.setCurrentText(orderer_data['family_approval'])
+        if self.saved_data and 'family_approval' in self.saved_data:
+            self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
         orderer_layout.addWidget(self.family_approval_combo)
         
         # 他番号
         orderer_layout.addWidget(QLabel("他番号"))
         self.other_number_input = QLineEdit()
         self.other_number_input.setText("なし")
-        if orderer_data and 'other_number' in orderer_data:
-            self.other_number_input.setText(orderer_data['other_number'])
+        if self.saved_data and 'other_number' in self.saved_data:
+            self.other_number_input.setText(self.saved_data['other_number'])
         orderer_layout.addWidget(self.other_number_input)
         
         # 電話機
         orderer_layout.addWidget(QLabel("電話機"))
         self.phone_device_input = QLineEdit()
         self.phone_device_input.setText("プッシュホン")
-        if orderer_data and 'phone_device' in orderer_data:
-            self.phone_device_input.setText(orderer_data['phone_device'])
+        if self.saved_data and 'phone_device' in self.saved_data:
+            self.phone_device_input.setText(self.saved_data['phone_device'])
         orderer_layout.addWidget(self.phone_device_input)
         
         # 禁止回線
         orderer_layout.addWidget(QLabel("禁止回線"))
         self.forbidden_line_input = QLineEdit()
         self.forbidden_line_input.setText("なし")
-        if orderer_data and 'forbidden_line' in orderer_data:
-            self.forbidden_line_input.setText(orderer_data['forbidden_line'])
+        if self.saved_data and 'forbidden_line' in self.saved_data:
+            self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
         orderer_layout.addWidget(self.forbidden_line_input)
         
         # ND
         orderer_layout.addWidget(QLabel("ND"))
         self.nd_input = QLineEdit()
-        if orderer_data and 'nd' in orderer_data:
-            self.nd_input.setText(orderer_data['nd'])
+        if self.saved_data and 'nd' in self.saved_data:
+            self.nd_input.setText(self.saved_data['nd'])
         orderer_layout.addWidget(self.nd_input)
         
         # リストとの関係性
@@ -682,8 +796,8 @@ class OrdererInputDialog(QDialog):
         relationship_layout.addWidget(QLabel("備考："))
         self.relationship_input = QLineEdit()
         self.relationship_input.setPlaceholderText("名義人の...")
-        if orderer_data and 'relationship' in orderer_data:
-            self.relationship_input.setText(orderer_data['relationship'])
+        if self.saved_data and 'relationship' in self.saved_data:
+            self.relationship_input.setText(self.saved_data['relationship'])
         relationship_layout.addWidget(self.relationship_input)
         orderer_layout.addLayout(relationship_layout)
         
@@ -762,10 +876,26 @@ class OrdererInputDialog(QDialog):
         self.setLayout(layout)
         
         # シグナルの接続
-        self.back_btn.clicked.connect(self.reject)
-        self.next_btn.clicked.connect(self.accept)
+        self.back_btn.clicked.connect(self.on_back_clicked)
+        self.next_btn.clicked.connect(self.on_next_clicked)
         self.cancel_btn.clicked.connect(self.reject)
     
+    def on_back_clicked(self):
+        """戻るボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_orderer_data()
+        self.reject()
+
+    def on_next_clicked(self):
+        """次へボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_orderer_data()
+        self.accept()
+
+    def get_saved_data(self):
+        """保存されたデータを取得"""
+        return self.saved_data
+
     def get_orderer_data(self):
         """
         受注者情報を取得する
@@ -931,6 +1061,9 @@ class OrderInfoDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # 保存データの初期化
+        self.saved_data = order_data or {}
+        
         # メインレイアウト
         layout = QVBoxLayout()
         
@@ -948,8 +1081,8 @@ class OrderInfoDialog(QDialog):
         order_layout.addWidget(QLabel("現状回線"))
         self.current_line_combo = QComboBox()
         self.current_line_combo.addItems(["アナログ"])
-        if order_data and 'current_line' in order_data:
-            self.current_line_combo.setCurrentText(order_data['current_line'])
+        if self.saved_data and 'current_line' in self.saved_data:
+            self.current_line_combo.setCurrentText(self.saved_data['current_line'])
         order_layout.addWidget(self.current_line_combo)
         
         # 受注日（本日自動入力）
@@ -967,8 +1100,8 @@ class OrderInfoDialog(QDialog):
         order_layout.addWidget(QLabel("提供判定"))
         self.judgment_combo = QComboBox()
         self.judgment_combo.addItems(["OK", "NG"])
-        if order_data and 'judgment' in order_data:
-            self.judgment_combo.setCurrentText(order_data['judgment'])
+        if self.saved_data and 'judgment' in self.saved_data:
+            self.judgment_combo.setCurrentText(self.saved_data['judgment'])
         order_layout.addWidget(self.judgment_combo)
         
         order_group.setLayout(order_layout)
@@ -1042,10 +1175,20 @@ class OrderInfoDialog(QDialog):
         self.setLayout(layout)
         
         # シグナルの接続
-        self.back_btn.clicked.connect(self.reject)
+        self.back_btn.clicked.connect(self.on_back_clicked)
         self.create_comment_btn.clicked.connect(self.create_comment)
         self.cancel_btn.clicked.connect(self.reject)
     
+    def on_back_clicked(self):
+        """戻るボタンがクリックされた時の処理"""
+        # 現在の入力内容を保存
+        self.saved_data = self.get_order_data()
+        self.reject()
+
+    def get_saved_data(self):
+        """保存されたデータを取得"""
+        return self.saved_data
+
     def get_order_data(self):
         """
         入力された受注情報を取得
