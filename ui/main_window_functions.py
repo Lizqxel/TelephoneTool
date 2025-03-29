@@ -79,15 +79,8 @@ class MainWindowFunctions:
                 'font_size': 10  # デフォルトのフォントサイズ
             }
             
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    self.format_template = settings.get('format_template', "")
-                    # settingsオブジェクトを更新
-                    self.settings = settings
-            else:
-                # デフォルトのフォーマットテンプレート
-                self.format_template = """対応者（お客様の名前）：{operator}
+            # デフォルトのフォーマットテンプレート
+            default_template = """対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time} 携帯：{mobile}
 ★電話取次：アナログ→光電話
@@ -109,7 +102,29 @@ class MainWindowFunctions:
 提供判定：{judgment}
 
 料金認識：{fee}
-ネット利用：{net_usage}"""
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：なし
+電話機：プッシュ
+禁止回線：なし
+ND：
+
+備考：{remarks}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+※リスト名との関係性："""
+            
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    # format_templateを直接self.format_templateに設定
+                    self.format_template = settings.get('format_template', default_template)
+                    # settingsオブジェクトを更新
+                    self.settings = settings
+            else:
+                # デフォルトのフォーマットテンプレートを設定
+                self.format_template = default_template
                 # デフォルト設定をsettingsに保存
                 self.settings['format_template'] = self.format_template
                 
@@ -118,6 +133,7 @@ class MainWindowFunctions:
                     json.dump(self.settings, f, ensure_ascii=False, indent=2)
                     
             logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 10)}")
+            logging.info(f"フォーマットテンプレート: {self.format_template}")
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -125,9 +141,10 @@ class MainWindowFunctions:
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
-                'format_template': "",
+                'format_template': default_template,
                 'font_size': 10
             }
+            self.format_template = default_template
             logging.info("エラーが発生したため、デフォルト設定を使用します")
     
     def format_phone_number(self):
@@ -592,7 +609,33 @@ class MainWindowFunctions:
         if "details" in result and result.get("show_popup", True):
             details = result["details"]
             details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
-            QMessageBox.information(self, "検索結果", details_text)
+            
+            # ポップアップウィンドウの作成
+            popup = QMessageBox(self)
+            popup.setWindowTitle("検索結果")
+            popup.setText(details_text)
+            popup.setIcon(QMessageBox.Icon.Information)
+            
+            # メインウィンドウの位置とサイズを取得
+            main_window = self.window()
+            main_geometry = main_window.geometry()
+            
+            # ポップアップウィンドウのサイズを設定（メインウィンドウの1/3程度）
+            popup_width = min(400, main_geometry.width() // 3)
+            popup_height = min(300, main_geometry.height() // 3)
+            popup.resize(popup_width, popup_height)
+            
+            # ポップアップの位置を計算
+            # メインウィンドウの右側に配置し、画面外に出ないように調整
+            popup_x = min(main_geometry.x() + main_geometry.width() + 10,
+                         QApplication.primaryScreen().geometry().width() - popup_width - 10)
+            popup_y = main_geometry.y() + (main_geometry.height() - popup_height) // 2
+            
+            # ポップアップの位置を設定
+            popup.move(popup_x, popup_y)
+            
+            # ポップアップを表示
+            popup.exec()
         
         # スクリーンショットパスを更新
         if "screenshot" in result:
@@ -780,81 +823,172 @@ class MainWindowFunctions:
     
     def generate_preview_text(self):
         """
-        プレビュー表示用のテキストを生成します。
-        入力値を使用して書式設定された営業コメントのプレビューを生成します。
+        プレビューテキストを生成
         
         Returns:
-            str: 書式設定されたテキスト、または失敗した場合はNone
+            str: 生成されたプレビューテキスト
         """
         try:
-            # 入力値の取得（空でも許可）
-            operator = self.operator_input.text()
-            contractor = self.contractor_input.text() 
-            address = self.address_input.text()
-            postal_code = self.postal_code_input.text()
+            logging.info("プレビューテキストの生成を開始")
+            logging.info(f"現在のモード: {self.current_mode}")
             
-            # 日付の計算
-            birth_date = ""
-            era = self.era_combo.currentText()
-            year = self.year_combo.currentText()
-            month = self.month_combo.currentText()
-            day = self.day_combo.currentText()
+            # format_templateの確認
+            if not hasattr(self, 'format_template') or not self.format_template:
+                logging.error("format_template属性が存在しないか空です")
+                if hasattr(self, 'settings') and 'format_template' in self.settings:
+                    self.format_template = self.settings['format_template']
+                    logging.info("format_templateを設定から読み込みました")
+                else:
+                    logging.error("format_templateを設定から読み込めません")
+                    QMessageBox.warning(self, "エラー", "テンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
+                    return None
             
-            if era and year and year != "年" and month and month != "月" and day and day != "日":
-                # 和暦から西暦への変換
-                era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
-                if era in era_year_map:
+            logging.info(f"format_templateの内容: {self.format_template[:100]}...")  # 最初の100文字だけログ出力
+            
+            # シンプルモードの場合
+            if self.current_mode == 'simple':
+                logging.info("シンプルモードでのプレビュー生成")
+                # 入力データの取得と確認
+                data = {
+                    'operator': self.operator_input.text(),
+                    'available_time': self.available_time_input.text(),
+                    'contractor': self.contractor_input.text(),
+                    'furigana': self.furigana_input.text(),
+                    'postal_code': self.postal_code_input.text(),
+                    'address': self.address_input.text(),
+                    'list_name': self.list_name_input.text(),
+                    'list_furigana': self.list_furigana_input.text(),
+                    'list_phone': self.list_phone_input.text(),
+                    'list_postal_code': self.list_postal_code_input.text(),
+                    'list_address': self.list_address_input.text(),
+                    'current_line': self.current_line_combo.currentText(),
+                    'order_date': self.order_date_input.text(),
+                    'order_person': self.order_person_input.text(),
+                    'judgment': self.judgment_combo.currentText(),
+                    'fee': self.fee_input.text(),
+                    'net_usage': self.net_usage_combo.currentText(),
+                    'family_approval': self.family_approval_combo.currentText(),
+                    'employee_number': self.employee_number_input.text(),
+                    'other_number': self.other_number_input.text(),
+                    'phone_device': self.phone_device_input.text(),
+                    'forbidden_line': self.forbidden_line_input.text(),
+                    'nd': self.nd_input.text(),
+                    'relationship': self.relationship_input.text(),
+                    'mobile': '',  # 空の値を設定
+                    'remarks': ''  # 空の値を設定
+                }
+                
+                # 各フィールドの値をログ出力
+                for key, value in data.items():
+                    logging.info(f"フィールド {key}: {value}")
+                
+                # 生年月日の取得と確認
+                era = self.era_combo.currentText()
+                year = self.year_combo.currentText()
+                month = self.month_combo.currentText()
+                day = self.day_combo.currentText()
+                
+                logging.info(f"生年月日情報 - 元号: {era}, 年: {year}, 月: {month}, 日: {day}")
+                
+                # 生年月日の計算
+                birth_date = ""
+                if era and year and year != "年" and month and month != "月" and day and day != "日":
                     try:
-                        jp_year = int(year)
-                        western_year = era_year_map[era] + jp_year
-                        birth_date = f"{western_year}/{month}/{day}"
-                    except ValueError:
-                        pass
-            
-            # フォーマットデータの準備（generate_cti_formatと同じ処理）
-            format_data = {
-                'operator': self.operator_input.text(),
-                'mobile': "",  # 携帯電話番号を空に
-                'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
-                'contractor': self.contractor_input.text(),
-                'furigana': self.furigana_input.text(),
-                'birth_date': birth_date,
-                'postal_code': self.postal_code_input.text(),
-                'address': self.address_input.text(),
-                'list_name': self.list_name_input.text(),
-                'list_furigana': self.list_furigana_input.text(),
-                'list_phone': self.list_phone_input.text(),
-                'list_postal_code': self.list_postal_code_input.text(),
-                'list_address': self.list_address_input.text(),
-                'current_line': self.current_line_combo.currentText(),
-                'order_date': self.order_date_input.text(),
-                'order_person': self.order_person_input.text(),
-                'judgment': self.judgment_combo.currentText(),
-                'fee': self.fee_input.text(),
-                'net_usage': self.net_usage_combo.currentText(),
-                'family_approval': self.family_approval_combo.currentText(),
-                'employee_number': self.employee_number_input.text(),  # 社番を追加
-                'other_number': self.other_number_input.text(),  # 他番号を追加
-                'phone_device': self.phone_device_input.text(),  # 電話機を追加
-                'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
-                'nd': self.nd_input.text(),  # NDを追加
-                'relationship': self.relationship_input.text()  # 名義人との関係性
-            }
-            
-            # フォーマットテンプレートに値を埋め込む
-            try:
-                formatted_text = self.format_template.format(**format_data)
+                        # 和暦から西暦への変換
+                        era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
+                        if era in era_year_map:
+                            jp_year = int(year)
+                            western_year = era_year_map[era] + jp_year
+                            birth_date = f"{western_year}/{month}/{day}"
+                            logging.info(f"生年月日を変換: {birth_date}")
+                    except ValueError as e:
+                        logging.error(f"生年月日の変換に失敗: {e}")
                 
-                # GoogleマップのURLを追加
-                maps_url = self.get_google_maps_url()
-                if maps_url:
-                    formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+                data['birth_date'] = birth_date
                 
-                return formatted_text
-            except KeyError as e:
-                logging.error(f"テンプレート書式エラー: {str(e)}")
-                return None
+                try:
+                    # フォーマットテンプレートに値を埋め込む
+                    logging.info("テンプレートへの値の埋め込みを開始")
+                    formatted_text = self.format_template.format(**data)
+                    logging.info("テンプレートへの値の埋め込みが成功")
+                    
+                    # GoogleマップのURLを追加
+                    maps_url = self.get_google_maps_url()
+                    if maps_url:
+                        formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+                        logging.info("GoogleマップのURLを追加")
+                    
+                    # プレビューに表示
+                    self.preview_text.setText(formatted_text)
+                    
+                    # プレビューテキストの色を確保
+                    self.preview_text.setStyleSheet("""
+                        QTextEdit {
+                            background-color: #f8f8f8;
+                            color: #333333;
+                            border: 1px solid #ddd;
+                            border-radius: 4px;
+                            padding: 8px;
+                            font-family: 'MS Gothic', monospace;
+                        }
+                    """)
+                    
+                    return formatted_text
+                    
+                except KeyError as e:
+                    logging.error(f"テンプレート書式エラー - 不明なプレースホルダー: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートに不明なプレースホルダーがあります: {e}")
+                    return None
+                except Exception as e:
+                    logging.error(f"テンプレート書式エラー - 予期しないエラー: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートの書式設定中にエラーが発生しました: {e}")
+                    return None
+            
+            # 使いやすいモードの場合
+            else:
+                logging.info("使いやすいモードでのプレビュー生成")
+                # 各ダイアログのデータを取得
+                address_data = getattr(self, 'address_data', {})
+                list_data = getattr(self, 'list_data', {})
+                orderer_data = getattr(self, 'orderer_data', {})
+                order_data = getattr(self, 'current_dialog', None)
+                
+                logging.info(f"住所データ: {address_data}")
+                logging.info(f"リストデータ: {list_data}")
+                logging.info(f"受注者データ: {orderer_data}")
+                
+                if order_data:
+                    order_data = order_data.get_order_data()
+                    logging.info(f"受注データ: {order_data}")
+                else:
+                    logging.warning("受注データが取得できません")
+                    order_data = {}
+                
+                # データを統合
+                data = {
+                    **address_data,
+                    **list_data,
+                    **orderer_data,
+                    **order_data,
+                    'mobile': '',  # 空の値を設定
+                    'remarks': ''  # 空の値を設定
+                }
+                logging.info(f"統合されたデータ: {data}")
+                
+                try:
+                    # テンプレートの置換
+                    formatted_text = self.format_template.format(**data)
+                    logging.info("テンプレートの置換が成功")
+                    
+                    # プレビューに表示
+                    self.preview_text.setText(formatted_text)
+                    return formatted_text
+                except Exception as e:
+                    logging.error(f"テンプレートの置換に失敗: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートの置換に失敗しました: {e}")
+                    return None
             
         except Exception as e:
-            logging.error(f"プレビュー生成中にエラー: {e}")
+            logging.error(f"プレビュー生成中にエラー: {e}", exc_info=True)
+            QMessageBox.warning(self, "エラー", f"プレビューの生成中にエラーが発生しました: {e}")
             return None 

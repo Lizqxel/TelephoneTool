@@ -220,6 +220,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def init_simple_mode(self):
         """シンプルモードのUIを初期化"""
+        logging.info("シンプルモードの初期化を開始")
+        
         # 設定に基づいてウィンドウタイトルを設定
         self.setWindowTitle("コールセンター業務効率化ツール")
         self.setMinimumSize(600, 400)
@@ -231,8 +233,28 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # メインレイアウトの設定
         main_layout = QVBoxLayout(main_widget)
         
-        # フォーマットテンプレートの読み込み
-        self.load_settings()
+        # 設定ファイルのパスを確認
+        if not hasattr(self, 'settings_file'):
+            self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+            logging.info(f"設定ファイルのパスを設定: {self.settings_file}")
+        
+        logging.info(f"設定ファイルの存在確認: {os.path.exists(self.settings_file)}")
+        
+        # 設定を読み込む
+        if not hasattr(self, 'settings'):
+            self.settings = {}
+        
+        # format_templateを設定
+        if not hasattr(self, 'format_template') or not self.format_template:
+            logging.info("format_templateを設定します")
+            self.load_settings()
+            if hasattr(self, 'settings') and 'format_template' in self.settings:
+                self.format_template = self.settings['format_template']
+                logging.info(f"format_templateを設定しました: {self.format_template[:100]}...")
+            else:
+                logging.error("format_templateの設定に失敗しました")
+                QMessageBox.warning(self, "エラー", "テンプレートの設定に失敗しました。")
+                return
         
         # トップバーの作成
         self.create_top_bar(main_layout)
