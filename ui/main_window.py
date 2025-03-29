@@ -22,7 +22,7 @@ from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDes
 
 from ui.settings_dialog import SettingsDialog
 from ui.mode_selection_dialog import ModeSelectionDialog
-from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
+from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog, DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
 from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
@@ -425,19 +425,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.init_menu()
     
     def start_easy_mode(self):
-        """
-        使いやすいモードを開始する
-        """
+        """使いやすいモードを開始"""
         try:
             logging.info("使いやすいモードを開始")
             
-            # CTIデータの取得
+            # CTIデータを取得
             cti_data = self.cti_service.get_all_fields_data()
             if not cti_data:
                 QMessageBox.warning(self, "警告", "CTIデータの取得に失敗しました。")
                 return
-                
-            logging.info(f"CTIデータを取得: {cti_data}")
             
             # 顧客名の処理（苗字と名前の間のスペースを全角に）
             customer_name = cti_data.customer_name
@@ -477,7 +473,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 'employee_number': '',  # 社番は空で初期化
                 'fee': '2500円～3000円',  # デフォルト値を設定
                 'net_usage': 'なし',  # デフォルト値を設定
-                'family_approval': 'ok',  # デフォルト値を設定
+                'family_approval': 'なし',  # デフォルト値を設定
                 'other_number': 'なし',  # デフォルト値を設定
                 'phone_device': 'プッシュホン',  # デフォルト値を設定
                 'forbidden_line': 'なし',  # デフォルト値を設定
@@ -487,16 +483,99 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             
             self.order_data = {
                 'current_line': 'アナログ',  # デフォルト値を設定
+                'order_date': datetime.datetime.now().strftime('%m/%d'),
                 'judgment': 'OK'  # デフォルト値を設定
             }
             
-            logging.info("CTIデータを各フォームに設定")
-            
-            # 住所情報ダイアログを表示
-            self.show_address_dialog()
+            current_dialog = None
+            while True:
+                if current_dialog is None or isinstance(current_dialog, AddressInfoDialog):
+                    # 住所情報ダイアログを表示
+                    dialog = AddressInfoDialog(self, self.address_data)
+                    result = dialog.exec()
+                    
+                    # 作成中止が選択された場合
+                    if result == DIALOG_CANCEL:
+                        logging.info("作成中止が選択されました")
+                        self.preview_text.clear()
+                        self.statusBar().showMessage("作成中止")
+                        return
+                    
+                    # 住所情報を保存
+                    self.address_data = dialog.get_saved_data()
+                    current_dialog = dialog
+                    
+                    if result == DIALOG_NEXT:
+                        current_dialog = ListInfoDialog(self, self.list_data)
+                
+                elif isinstance(current_dialog, ListInfoDialog):
+                    # リスト情報ダイアログを表示
+                    result = current_dialog.exec()
+                    
+                    # 作成中止が選択された場合
+                    if result == DIALOG_CANCEL:
+                        logging.info("作成中止が選択されました")
+                        self.preview_text.clear()
+                        self.statusBar().showMessage("作成中止")
+                        return
+                    
+                    # 戻るボタンが押された場合
+                    if result == DIALOG_BACK:
+                        # リスト情報を保存
+                        self.list_data = current_dialog.get_saved_data()
+                        current_dialog = AddressInfoDialog(self, self.address_data)
+                        continue
+                    
+                    # リスト情報を保存
+                    self.list_data = current_dialog.get_saved_data()
+                    current_dialog = OrdererInputDialog(self, self.orderer_data)
+                
+                elif isinstance(current_dialog, OrdererInputDialog):
+                    # 受注者入力項目ダイアログを表示
+                    result = current_dialog.exec()
+                    
+                    # 作成中止が選択された場合
+                    if result == DIALOG_CANCEL:
+                        logging.info("作成中止が選択されました")
+                        self.preview_text.clear()
+                        self.statusBar().showMessage("作成中止")
+                        return
+                    
+                    # 戻るボタンが押された場合
+                    if result == DIALOG_BACK:
+                        # 受注者情報を保存
+                        self.orderer_data = current_dialog.get_saved_data()
+                        current_dialog = ListInfoDialog(self, self.list_data)
+                        continue
+                    
+                    # 受注者情報を保存
+                    self.orderer_data = current_dialog.get_saved_data()
+                    current_dialog = OrderInfoDialog(self, self.order_data)
+                
+                elif isinstance(current_dialog, OrderInfoDialog):
+                    # 受注情報入力ダイアログを表示
+                    result = current_dialog.exec()
+                    
+                    # 作成中止が選択された場合
+                    if result == DIALOG_CANCEL:
+                        logging.info("作成中止が選択されました")
+                        self.preview_text.clear()
+                        self.statusBar().showMessage("作成中止")
+                        return
+                    
+                    # 戻るボタンが押された場合
+                    if result == DIALOG_BACK:
+                        # 受注情報を保存
+                        self.order_data = current_dialog.get_saved_data()
+                        current_dialog = OrdererInputDialog(self, self.orderer_data)
+                        continue
+                    
+                    # 受注情報を保存
+                    self.order_data = current_dialog.get_saved_data()
+                    break
             
         except Exception as e:
-            logging.error(f"使いやすいモードの開始中にエラー: {e}")
+            logging.error(f"使いやすいモードの開始中にエラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"使いやすいモードの開始中にエラーが発生しました: {e}")
 
     def show_address_dialog(self):
