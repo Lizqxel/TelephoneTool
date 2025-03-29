@@ -1,15 +1,24 @@
 """
-アプリケーションのバージョン情報を管理するモジュール
+バージョン情報管理モジュール
 
-このモジュールは、アプリケーションのバージョン番号、
-アプリケーション名、GitHub関連の情報を提供します。
+このモジュールは、アプリケーションのバージョン情報を一元管理します。
 """
+
+# アプリケーションのバージョン
+VERSION = "1.1.1"
 
 # アプリケーション名
 APP_NAME = "TelephoneTool"
 
-# バージョン情報
-VERSION = "1.1.0"
+# アプリケーションの説明
+APP_DESCRIPTION = "電話番号管理ツール"
+
+# 開発者情報
+DEVELOPER = "Your Name"
+DEVELOPER_EMAIL = "your.email@example.com"
+
+# ライセンス情報
+LICENSE = "MIT License"
 
 # GitHub関連の情報
 GITHUB_OWNER = "Lizqxel"  # GitHubのユーザー名
