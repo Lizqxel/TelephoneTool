@@ -1,0 +1,11 @@
+{
+  "font_size": 9,
+  "browser_settings": {
+    "headless": true,
+    "disable_images": true,
+    "show_popup": true,
+    "auto_close": true,
+    "page_load_timeout": 60,
+    "script_timeout": 60
+  }
+}
