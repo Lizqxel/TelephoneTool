@@ -16,9 +16,12 @@ from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu)
+                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
+                              QSizePolicy)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
+
+from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
@@ -166,11 +169,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.countdown_timer.timeout.connect(self.update_countdown)
         
         self.init_menu()
+        
+        # 起動時にアップデートをチェック
+        QTimer.singleShot(0, self.check_for_updates)
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
         top_bar = QWidget()
-        top_bar.setFixedHeight(32)  # トップバーの高さを32pxに設定
+        top_bar.setFixedHeight(32)
         top_bar.setStyleSheet("""
             QWidget {
                 background-color: #2C3E50;
@@ -178,8 +184,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """)
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(5, 2, 5, 2)  # 上下のマージンを2pxに設定
-        top_bar_layout.setSpacing(4)  # ボタン間のスペースを4pxに設定
+        top_bar_layout.setContentsMargins(5, 2, 5, 2)
+        top_bar_layout.setSpacing(4)
         
         # ワンクリック取得ボタン（名称変更：顧客情報取得）
         self.oneclick_btn = QPushButton("顧客情報取得")
@@ -201,6 +207,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """)
         self.oneclick_btn.clicked.connect(self.fetch_cti_data)
+        self.oneclick_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         top_bar_layout.addWidget(self.oneclick_btn)
         
         # 既存のボタン
@@ -229,9 +236,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """
         
-        for btn in [self.clear_btn, self.cti_copy_btn, 
-                   self.screenshot_btn, self.spreadsheet_btn, self.settings_btn]:
+        # 各ボタンのサイズポリシーを設定
+        buttons = [self.clear_btn, self.cti_copy_btn, 
+                  self.screenshot_btn, self.spreadsheet_btn, self.settings_btn]
+        
+        for btn in buttons:
             btn.setStyleSheet(button_style)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         
         # ボタンの接続
         self.clear_btn.clicked.connect(self.clear_all_inputs)
@@ -240,12 +251,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
         self.settings_btn.clicked.connect(self.show_settings)
         
-        # ボタンをレイアウトに追加（指定された順序で）
-        top_bar_layout.addWidget(self.clear_btn)
-        top_bar_layout.addWidget(self.cti_copy_btn)
-        top_bar_layout.addWidget(self.screenshot_btn)
-        top_bar_layout.addWidget(self.spreadsheet_btn)
-        top_bar_layout.addWidget(self.settings_btn)
+        # ボタンをレイアウトに追加
+        for btn in buttons:
+            top_bar_layout.addWidget(btn)
         
         parent_layout.addWidget(top_bar)
     
@@ -951,38 +959,79 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.preview_text.clear()
 
     def init_menu(self):
-        """メニューの初期化"""
+        """メニューバーの初期化"""
         menubar = self.menuBar()
         
         # ファイルメニュー
         file_menu = menubar.addMenu("ファイル")
         
+        # 終了
         exit_action = file_menu.addAction("終了")
         exit_action.triggered.connect(self.close)
         
         # ヘルプメニュー
         help_menu = menubar.addMenu("ヘルプ")
         
-        update_action = help_menu.addAction("アップデート設定")
+        # アップデートの確認
+        update_action = help_menu.addAction("アップデートの確認")
         update_action.triggered.connect(self.show_update_dialog)
         
+        # バージョン情報
         about_action = help_menu.addAction("バージョン情報")
         about_action.triggered.connect(self.show_about_dialog)
+        
+        # バージョン表示ラベル
+        version_label = QLabel(f"v{VERSION}")
+        version_label.setStyleSheet("""
+            QLabel {
+                color: #95A5A6;
+                font-size: 12px;
+                padding: 2px 6px;
+                margin-right: 5px;
+            }
+        """)
+        menubar.setCornerWidget(version_label, Qt.TopRightCorner)
         
     def show_update_dialog(self):
         """アップデート設定ダイアログを表示する"""
         dialog = UpdateDialog(self)
+        dialog.settings_file = self.settings_file  # 設定ファイルのパスを渡す
         dialog.exec()
         
     def show_about_dialog(self):
         """バージョン情報ダイアログを表示する"""
-        from version import VERSION, APP_NAME
-        
-        QMessageBox.about(
-            self,
-            "バージョン情報",
-            f"{APP_NAME} v{VERSION}\n\n"
-            "© 2024 Your Company Name\n"
-            "All rights reserved."
-        )
+        msg = f"{APP_NAME} v{VERSION}\n\n"
+        msg += "開発者: Lizqxel\n"
+        msg += "ライセンス: MIT License"
+        QMessageBox.information(self, "バージョン情報", msg)
+
+    def check_for_updates(self):
+        """アップデートをチェック"""
+        try:
+            # GitHubのAPIを使用して最新リリースを取得
+            url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+            response = requests.get(url)
+            response.raise_for_status()
+            latest_release = response.json()
+            
+            latest_version = latest_release["tag_name"].lstrip("v")
+            current_version = VERSION
+            
+            if latest_version > current_version:
+                # 新しいバージョンが利用可能
+                msg = f"新しいバージョン v{latest_version} が利用可能です。\n"
+                msg += f"現在のバージョン: v{current_version}\n\n"
+                msg += "更新しますか？"
+                
+                reply = QMessageBox.question(self, "アップデート", msg,
+                                          QMessageBox.StandardButton.Yes |
+                                          QMessageBox.StandardButton.No)
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # アップデートダイアログを作成して更新を実行
+                    dialog = UpdateDialog(self)
+                    dialog.settings_file = self.settings_file
+                    dialog.download_and_apply_update(latest_release)
+        except Exception as e:
+            logging.error(f"アップデートチェック中にエラー: {e}")
 

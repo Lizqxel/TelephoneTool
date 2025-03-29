@@ -23,6 +23,9 @@ from version import VERSION  # バージョン情報を動的に読み込む
 # 作業ディレクトリの取得
 work_dir = os.path.abspath(SPECPATH)
 
+# 実行ファイル名の設定
+exe_name = f'TelephoneTool-{VERSION}'  # バージョン番号を含める
+
 block_cipher = None
 
 # 追加するファイル
@@ -81,7 +84,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name=f'TelephoneTool-{VERSION}',
+    name=exe_name,  # バージョン番号を含む名前を使用
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -94,5 +97,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico'  # アイコンパスを修正
+    icon='icon.ico'
 ) 
