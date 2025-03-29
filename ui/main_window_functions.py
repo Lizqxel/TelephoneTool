@@ -46,26 +46,46 @@ class ServiceAreaSearchWorker(QThread):
         self.postal_code = postal_code
         self.address = address
         self.driver = None
+        self._is_running = True
+    
+    def stop(self):
+        """スレッドを停止する"""
+        self._is_running = False
+        self.wait()  # スレッドが終了するまで待機
     
     def run(self):
         """スレッド実行時に呼び出される関数"""
         try:
+            if not self._is_running:
+                return
+                
             # 提供エリア検索を実行
             result = area_search.search_service_area(self.postal_code, self.address)
+            
+            if not self._is_running:
+                return
+                
             # 結果を信号で送信
             self.finished.emit(result)
         except Exception as e:
-            # エラーが発生した場合はエラー情報を送信
-            error_result = {
-                "status": "error",
-                "message": str(e),
-                "details": {"エラー": str(e)}
-            }
-            self.finished.emit(error_result)
+            if self._is_running:
+                # エラーが発生した場合はエラー情報を送信
+                error_result = {
+                    "status": "error",
+                    "message": str(e),
+                    "details": {"エラー": str(e)}
+                }
+                self.finished.emit(error_result)
+        finally:
+            self._is_running = False
     
     def __del__(self):
-        """デストラクタ - スレッド終了時にブラウザを閉じないようにする"""
-        logging.info("ServiceAreaSearchWorkerが終了しました - ブラウザは手動で閉じる必要があります")
+        """デストラクタ - スレッド終了時の処理"""
+        try:
+            self.stop()
+            logging.info("ServiceAreaSearchWorkerが正常に終了しました")
+        except Exception as e:
+            logging.error(f"ServiceAreaSearchWorkerの終了中にエラーが発生: {e}")
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
@@ -554,92 +574,113 @@ ND：
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
-        # 検索ボタンを有効化
-        if hasattr(self, 'area_search_btn'):
-            self.area_search_btn.setEnabled(True)
-            self.area_search_btn.setText("検索")
-        
-        # 結果表示を更新
-        status = result.get("status", "failure")
-        
-        if status == "available":
-            # 提供可能の場合
-            self.area_result_label.setText("提供エリア: 提供可能")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #27AE60;
-                    border-radius: 4px;
-                    background-color: #E8F5E9;
-                    color: #27AE60;
-                }
-            """)
-            self.judgment_combo.setCurrentText("○")
-        elif status == "unavailable":
-            # 未提供の場合
-            self.area_result_label.setText("提供エリア: 未提供")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            self.judgment_combo.setCurrentText("×")
-        else:
-            # 判定失敗の場合
-            self.area_result_label.setText("提供エリア: 判定失敗")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
-            self.judgment_combo.setCurrentText("")
-        
-        # 詳細情報がある場合は表示
-        if "details" in result and result.get("show_popup", True):
-            details = result["details"]
-            details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+        try:
+            # 検索ボタンを有効化
+            if hasattr(self, 'area_search_btn'):
+                self.area_search_btn.setEnabled(True)
+                self.area_search_btn.setText("検索")
             
-            # ポップアップウィンドウの作成
-            popup = QMessageBox(self)
-            popup.setWindowTitle("検索結果")
-            popup.setText(details_text)
-            popup.setIcon(QMessageBox.Icon.Information)
+            # 結果表示を更新
+            status = result.get("status", "failure")
             
-            # メインウィンドウの位置とサイズを取得
-            main_window = self.window()
-            main_geometry = main_window.geometry()
+            if status == "available":
+                # 提供可能の場合
+                self.area_result_label.setText("提供エリア: 提供可能")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #27AE60;
+                        border-radius: 4px;
+                        background-color: #E8F5E9;
+                        color: #27AE60;
+                    }
+                """)
+                self.judgment_combo.setCurrentText("○")
+            elif status == "unavailable":
+                # 未提供の場合
+                self.area_result_label.setText("提供エリア: 未提供")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #E74C3C;
+                        border-radius: 4px;
+                        background-color: #FFEBEE;
+                        color: #E74C3C;
+                    }
+                """)
+                self.judgment_combo.setCurrentText("×")
+            else:
+                # 判定失敗の場合
+                self.area_result_label.setText("提供エリア: 判定失敗")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #F39C12;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #F39C12;
+                    }
+                """)
+                self.judgment_combo.setCurrentText("")
             
-            # ポップアップウィンドウのサイズを設定（メインウィンドウの1/3程度）
-            popup_width = min(400, main_geometry.width() // 3)
-            popup_height = min(300, main_geometry.height() // 3)
-            popup.resize(popup_width, popup_height)
+            # 詳細情報がある場合は表示
+            if "details" in result and result.get("show_popup", True):
+                details = result["details"]
+                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+                
+                # ポップアップウィンドウの作成
+                popup = QMessageBox(self)
+                popup.setWindowTitle("検索結果")
+                popup.setText(details_text)
+                popup.setIcon(QMessageBox.Icon.Information)
+                
+                # メインウィンドウの位置とサイズを取得
+                main_window = self.window()
+                main_geometry = main_window.geometry()
+                
+                # ポップアップウィンドウのサイズを設定（メインウィンドウの1/3程度）
+                popup_width = min(400, main_geometry.width() // 3)
+                popup_height = min(300, main_geometry.height() // 3)
+                popup.resize(popup_width, popup_height)
+                
+                # ポップアップの位置を計算
+                # メインウィンドウの右側に配置し、画面外に出ないように調整
+                popup_x = min(main_geometry.x() + main_geometry.width() + 10,
+                            QApplication.primaryScreen().geometry().width() - popup_width - 10)
+                popup_y = main_geometry.y() + (main_geometry.height() - popup_height) // 2
+                
+                # ポップアップの位置を設定
+                popup.move(popup_x, popup_y)
+                
+                # ポップアップを表示
+                popup.exec()
             
-            # ポップアップの位置を計算
-            # メインウィンドウの右側に配置し、画面外に出ないように調整
-            popup_x = min(main_geometry.x() + main_geometry.width() + 10,
-                         QApplication.primaryScreen().geometry().width() - popup_width - 10)
-            popup_y = main_geometry.y() + (main_geometry.height() - popup_height) // 2
-            
-            # ポップアップの位置を設定
-            popup.move(popup_x, popup_y)
-            
-            # ポップアップを表示
-            popup.exec()
-        
-        # スクリーンショットパスを更新
-        if "screenshot" in result:
-            self.update_screenshot_button(result["screenshot"])
+            # スクリーンショットパスを更新
+            if "screenshot" in result:
+                self.update_screenshot_button(result["screenshot"])
+                
+        except Exception as e:
+            logging.error(f"検索結果の処理中にエラーが発生: {e}")
+            QMessageBox.warning(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
+        finally:
+            # ワーカースレッドを停止（安全に処理）
+            try:
+                if hasattr(self, 'search_worker') and self.search_worker is not None:
+                    logging.info("ワーカースレッドの終了処理を開始します")
+                    self.search_worker.stop()
+                    # スレッドが終了するまで最大3秒待機
+                    if not self.search_worker.wait(3000):
+                        logging.warning("ワーカースレッドが3秒以内に終了しませんでした")
+                    # 参照をクリア
+                    self.search_worker = None
+                    # UIイベントを処理して、UIのフリーズを防止
+                    QApplication.processEvents()
+                    logging.info("ワーカースレッドの終了処理が完了しました")
+            except Exception as e:
+                logging.error(f"ワーカースレッドの終了処理中にエラーが発生: {e}")
     
     def update_screenshot_button(self, screenshot_path=None):
         """スクリーンショットボタンを更新"""
@@ -669,21 +710,41 @@ ND：
                 
             # QPixmapを使用して画像を表示
             from PySide6.QtGui import QPixmap
-            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout
+            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout, QScrollArea, QDialogButtonBox
             
             dialog = QDialog(self)
             dialog.setWindowTitle("スクリーンショット - 提供判定結果")
             dialog.setMinimumSize(800, 600)
             layout = QVBoxLayout(dialog)
             
-            label = QLabel()
+            # スクロールエリアを作成して画像を含める
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            
+            # 画像ラベルを作成
+            image_label = QLabel()
             pixmap = QPixmap(screenshot_path)
-            label.setPixmap(pixmap)
-            label.setScaledContents(True)
-            layout.addWidget(label)
+            image_label.setPixmap(pixmap)
+            image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # スクロールエリアに画像ラベルを設定
+            scroll_area.setWidget(image_label)
+            layout.addWidget(scroll_area)
+            
+            # 閉じるボタンを追加
+            button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
             
             dialog.setLayout(layout)
+            
+            # イベント処理を確保するために非モーダルで表示
+            # 表示前にUIイベントを処理して、UIの応答性を確保
+            QApplication.processEvents()
             dialog.exec()
+            
+            # ダイアログ終了後もイベント処理
+            QApplication.processEvents()
             
         except Exception as e:
             logging.error(f"スクリーンショット表示エラー: {str(e)}")
