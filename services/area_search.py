@@ -1229,7 +1229,6 @@ def search_service_area(postal_code, address, progress_callback=None):
     finally:
         # どのような場合でもブラウザは閉じない
         if driver:
-            logging.info("ブラウザウィンドウを維持します - 手動で閉じてください")
-            # driver.quit() を呼び出さない
+            logging.info("ブラウザウィンドウを維持します - 手動で閉じてください")            # driver.quit() を呼び出さない
             # グローバル変数にドライバーを保持
             global_driver = driver
