@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QSizePolicy, QProgressBar)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
@@ -532,10 +532,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         area_result_layout.addWidget(self.area_result_label)
 
         # プログレスバー（初期状態では非表示）
-        self.search_progress_bar = QProgressBar()
-        self.search_progress_bar.setRange(0, 0)  # 不定のプログレスバー
-        self.search_progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
-        self.search_progress_bar.setStyleSheet("""
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # 不定のプログレスバー
+        self.progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
+        self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
                 background-color: #E3F2FD;
@@ -544,8 +544,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 background-color: #3498DB;
             }
         """)
-        self.search_progress_bar.hide()  # 初期状態では非表示
-        area_result_layout.addWidget(self.search_progress_bar)
+        self.progress_bar.hide()  # 初期状態では非表示
+        area_result_layout.addWidget(self.progress_bar)
 
         address_layout.addWidget(area_result_container)
         
@@ -1117,4 +1117,277 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 "エラー",
                 f"スクリーンショットの表示中にエラーが発生しました: {str(e)}"
             )
+
+    def search_service_area(self):
+        """提供エリア検索を開始"""
+        postal_code = self.postal_code_input.text().strip()
+        address = self.address_input.text().strip()
+        
+        if not postal_code or not address:
+            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
+            return
+        
+        try:
+            # 既存のスレッドとワーカーをクリーンアップ
+            self.cleanup_thread()
+            
+            # 検索ボタンをキャンセルボタンに変更
+            self.area_search_btn.setEnabled(True)
+            self.area_search_btn.setText("キャンセル")
+            self.area_search_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #E74C3C;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    text-align: center;
+                    font-size: 14px;
+                    margin: 4px 2px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #C0392B;
+                }
+                QPushButton:pressed {
+                    background-color: #A93226;
+                }
+            """)
+            self.area_search_btn.clicked.disconnect()
+            self.area_search_btn.clicked.connect(self.cancel_search)
+            
+            # プログレスバーを表示
+            self.progress_bar.setVisible(True)
+            
+            # 検索ステータスを更新
+            self.area_result_label.setText("提供エリア: 検索を開始します...")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #3498DB;
+                    border-radius: 4px;
+                    background-color: #E3F2FD;
+                    color: #2980B9;
+                }
+            """)
+            
+            # ワーカーを作成
+            self.worker = ServiceAreaSearchWorker(postal_code, address)
+            self.worker.finished.connect(self.on_search_completed)
+            self.worker.progress.connect(self.update_search_progress)
+            
+            # スレッドを作成して検索を開始
+            self.thread = QThread()
+            self.worker.moveToThread(self.thread)
+            self.thread.started.connect(self.worker.run)
+            self.thread.finished.connect(self.thread.deleteLater)
+            self.thread.start()
+            
+        except Exception as e:
+            logging.error(f"検索の開始に失敗: {str(e)}")
+            self.reset_search_button()
+            QMessageBox.critical(self, "エラー", f"検索の開始に失敗しました: {str(e)}")
+
+    def cancel_search(self):
+        """提供エリア検索をキャンセルする"""
+        # キャンセル中の状態をUIに即時反映
+        self.area_search_btn.setEnabled(False)
+        self.area_search_btn.setText("キャンセル中...")
+        self.area_result_label.setText("提供エリア: キャンセル中...")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #F39C12;
+                border-radius: 4px;
+                background-color: #FFF3E0;
+                color: #F39C12;
+            }
+        """)
+
+        # バックエンド処理のキャンセル
+        if hasattr(self, 'worker'):
+            self.worker.cancel()
+            # キャンセル完了を待つため、ボタンとプログレスバーはそのまま維持
+
+    def reset_search_button(self):
+        """検索ボタンを初期状態に戻す"""
+        self.area_search_btn.setText("提供エリア検索")
+        self.area_search_btn.setEnabled(True)
+        self.area_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                text-align: center;
+                font-size: 14px;
+                margin: 4px 2px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:pressed {
+                background-color: #2471A3;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        # 検索ボタンのクリックイベントを元に戻す
+        self.area_search_btn.clicked.disconnect()
+        self.area_search_btn.clicked.connect(self.search_service_area)
+
+    def on_search_completed(self, result):
+        """検索完了時の処理"""
+        # プログレスバーを非表示
+        self.progress_bar.setVisible(False)
+        
+        status = result.get("status", "failure")
+        
+        if status == "cancelled":
+            self.area_result_label.setText("提供エリア: 検索がキャンセルされました")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #F39C12;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #F39C12;
+                }
+            """)
+            # キャンセル完了後に検索ボタンを初期状態に戻す
+            self.reset_search_button()
+            return
+        
+        # キャンセル以外の完了時の処理
+        self.reset_search_button()
+        
+        if status == "available":
+            self.area_result_label.setText("提供エリア: 提供可能")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #27AE60;
+                    border-radius: 4px;
+                    background-color: #E8F5E9;
+                    color: #27AE60;
+                }
+            """)
+            self.judgment_combo.setCurrentText("○")
+        elif status == "unavailable":
+            self.area_result_label.setText("提供エリア: 未提供")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #E74C3C;
+                    border-radius: 4px;
+                    background-color: #FFEBEE;
+                    color: #E74C3C;
+                }
+            """)
+            self.judgment_combo.setCurrentText("×")
+        else:
+            self.area_result_label.setText("提供エリア: 判定失敗")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #F39C12;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #F39C12;
+                }
+            """)
+            self.judgment_combo.setCurrentText("")
+
+        # スクリーンショットの更新
+        if "screenshot" in result:
+            self.update_screenshot_button(result["screenshot"])
+
+        # 詳細情報の表示
+        if "details" in result and result.get("show_popup", True):
+            details = result["details"]
+            details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+            QMessageBox.information(self, "検索結果", details_text)
+
+    def cleanup_thread(self):
+        """
+        スレッドのクリーンアップを行う
+        """
+        try:
+            if self.thread and isinstance(self.thread, QThread):
+                if self.thread.isRunning():
+                    self.thread.quit()
+                    self.thread.wait()
+                self.thread.deleteLater()
+                self.thread = None
+        except Exception as e:
+            logging.error(f"スレッドのクリーンアップ中にエラー: {str(e)}")
+            # エラーが発生しても、スレッドをNoneに設定して続行
+            self.thread = None
+
+
+class ServiceAreaSearchWorker(QObject):
+    """
+    提供エリア検索を実行するワーカークラス
+    """
+    finished = Signal(dict)  # 検索結果を通知するシグナル
+    progress = Signal(str)   # 進捗状況を通知するシグナル
+    
+    def __init__(self, postal_code, address):
+        super().__init__()
+        self.postal_code = postal_code
+        self.address = address
+        self._is_cancelled = False
+    
+    def cancel(self):
+        """
+        検索をキャンセルする
+        """
+        self._is_cancelled = True
+    
+    def run(self):
+        """
+        提供エリア検索を実行し、結果をシグナルで通知する
+        """
+        try:
+            # 進捗状況を通知するコールバック関数を定義
+            def progress_callback(message):
+                if self._is_cancelled:
+                    raise CancellationError("検索がキャンセルされました")
+                self.progress.emit(message)
+
+            # 検索を実行
+            result = search_service_area(
+                self.postal_code,
+                self.address,
+                progress_callback=progress_callback
+            )
+            if self._is_cancelled:
+                raise CancellationError("検索がキャンセルされました")
+            self.finished.emit(result)
+        except CancellationError as e:
+            logging.info("検索がキャンセルされました")
+            self.progress.emit("検索がキャンセルされました")
+            self.finished.emit({
+                "status": "cancelled",
+                "message": "検索がキャンセルされました"
+            })
+        except Exception as e:
+            logging.error(f"検索処理中にエラーが発生: {str(e)}")
+            self.progress.emit("エラーが発生しました")
+            self.finished.emit({
+                "status": "error",
+                "message": f"検索処理中にエラーが発生: {str(e)}"
+            })
+
+class CancellationError(Exception):
+    """検索キャンセル時に発生する例外"""
+    pass
 
