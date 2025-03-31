@@ -105,14 +105,21 @@ def split_address(address):
                             town = remaining[:remaining.find('丁目')].strip()
                         block = chome_match.group(1)
                     else:
-                        # 通常の番地パターンを検索
-                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
-                        if number_match:
-                            number_part = number_match.group(1)
-                            town = remaining[:number_match.start()].strip()
+                        # ハイフンが2つある場合は、最初の数字を丁目として扱う
+                        double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
+                        if double_hyphen_match:
+                            block = double_hyphen_match.group(1)
+                            number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
+                            town = remaining[:double_hyphen_match.start()].strip()
                         else:
-                            number_part = None
-                            town = remaining
+                            # 通常の番地パターンを検索
+                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                            if number_match:
+                                number_part = number_match.group(1)
+                                town = remaining[:number_match.start()].strip()
+                            else:
+                                number_part = None
+                                town = remaining
                 
                 return {
                     'prefecture': prefecture,
