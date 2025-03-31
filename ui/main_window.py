@@ -1,37 +1,39 @@
 """
-メインウィンドウ
+メインウィンドウモジュール
 
-このモジュールは、アプリケーションのメインウィンドウを
-提供します。
+このモジュールは、アプリケーションのメインウィンドウを提供します。
 """
 
-import datetime
+import sys
 import logging
+import datetime
 import json
 import os
-import re
-import requests
-from urllib.parse import quote
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                              QLabel, QLineEdit, QComboBox, QPushButton,
-                              QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QDialog)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QMetaObject, Q_ARG, QThread, Slot
-from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
+import time
+from typing import Dict, Any, List, Optional, Union, Tuple
 
-from ui.settings_dialog import SettingsDialog
-from ui.mode_selection_dialog import ModeSelectionDialog
-from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog, DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
-from services.area_search import search_service_area
-from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
-                               format_postal_code, convert_to_half_width)
+from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, 
+                             QLabel, QLineEdit, QPushButton, 
+                             QTextEdit, QComboBox, QWidget, 
+                             QMessageBox, QApplication, QDialog,
+                             QStatusBar, QSizePolicy, QSpacerItem,
+                             QTabWidget, QRadioButton, QGroupBox,
+                             QScrollArea, QSplitter, QToolTip, QMenuBar)
+from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot, QMetaObject, Q_ARG, QPoint, QEvent
+from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowEvent, QIcon
+
 from ui.main_window_functions import MainWindowFunctions
-from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space
-from utils.furigana_utils import convert_to_furigana
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
-from .update_dialog import UpdateDialog
+from utils.format_utils import format_phone_number, format_phone_number_without_hyphen, format_postal_code
+from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
+from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
+from ui.easy_mode_dialogs import ServiceAreaSearchThread, convert_to_half_width
+from ui.settings_dialog import SettingsDialog
+from ui.mode_selection_dialog import ModeSelectionDialog
+from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space
+from utils.furigana_utils import convert_to_furigana
+from ui.update_dialog import UpdateDialog
 
 
 class CustomComboBox(QComboBox):
@@ -457,9 +459,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.init_menu()
     
     def start_easy_mode(self):
-        """使いやすいモードを開始"""
+        """誘導モードを開始"""
         try:
-            logging.info("使いやすいモードを開始")
+            logging.info("誘導モードを開始")
             
             # 提供判定結果をリセット
             self.judgment_result_label.setText("提供エリア: 未検索")
@@ -500,9 +502,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 'address': address if address else ""
             }
             
+            # 顧客名のフリガナを取得して設定
+            customer_furigana = ""
+            if customer_name:
+                # フリガナ変換APIを使用
+                customer_furigana = convert_to_furigana(customer_name)
+            
             self.list_data = {
                 'list_name': customer_name if customer_name else "",
-                'list_furigana': convert_to_half_width(getattr(cti_data, 'customer_furigana', '')) if hasattr(cti_data, 'customer_furigana') else "",
+                'list_furigana': customer_furigana,  # 自動生成したフリガナを設定
                 'list_phone': convert_to_half_width(cti_data.phone) if cti_data.phone else "",
                 'list_postal_code': convert_to_half_width(cti_data.postal_code) if cti_data.postal_code else "",
                 'list_address': address if address else ""
@@ -512,7 +520,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 'operator': '',  # 対応者名は空で初期化
                 'available_time': '',  # 出やすい時間帯は空で初期化
                 'contractor': customer_name if customer_name else "",  # 変換済みの顧客名を使用
-                'furigana': convert_to_half_width(getattr(cti_data, 'customer_furigana', '')) if hasattr(cti_data, 'customer_furigana') else "",
+                'furigana': customer_furigana,  # 自動生成したフリガナを設定
+                'birth_date': '1926/1/1',  # 誕生日の初期値を設定
                 'order_person': '',  # 受注者名は空で初期化
                 'employee_number': '',  # 社番は空で初期化
                 'fee': '2500円～3000円',  # デフォルト値を設定
@@ -527,101 +536,74 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             
             self.order_data = {
                 'current_line': 'アナログ',  # デフォルト値を設定
-                'order_date': datetime.datetime.now().strftime('%m/%d'),
+                'order_date': f"{datetime.datetime.now().month}/{datetime.datetime.now().day}",
                 'judgment': 'OK'  # デフォルト値を設定
             }
             
-            current_dialog = None
-            while True:
-                if current_dialog is None or isinstance(current_dialog, AddressInfoDialog):
-                    # 住所情報ダイアログを表示
-                    dialog = AddressInfoDialog(self, self.address_data)
-                    result = dialog.exec()
-                    
-                    # 作成中止が選択された場合
-                    if result == DIALOG_CANCEL:
-                        logging.info("作成中止が選択されました")
-                        self.preview_text.clear()
-                        self.statusBar().showMessage("作成中止")
-                        return
-                    
-                    # 住所情報を保存
-                    self.address_data = dialog.get_saved_data()
-                    current_dialog = dialog
-                    
-                    if result == DIALOG_NEXT:
-                        current_dialog = ListInfoDialog(self, self.list_data)
-                
-                elif isinstance(current_dialog, ListInfoDialog):
-                    # リスト情報ダイアログを表示
-                    result = current_dialog.exec()
-                    
-                    # 作成中止が選択された場合
-                    if result == DIALOG_CANCEL:
-                        logging.info("作成中止が選択されました")
-                        self.preview_text.clear()
-                        self.statusBar().showMessage("作成中止")
-                        return
-                    
-                    # 戻るボタンが押された場合
-                    if result == DIALOG_BACK:
-                        # リスト情報を保存
-                        self.list_data = current_dialog.get_saved_data()
-                        current_dialog = AddressInfoDialog(self, self.address_data)
-                        continue
-                    
-                    # リスト情報を保存
-                    self.list_data = current_dialog.get_saved_data()
-                    current_dialog = OrdererInputDialog(self, self.orderer_data)
-                
-                elif isinstance(current_dialog, OrdererInputDialog):
-                    # 受注者入力項目ダイアログを表示
-                    result = current_dialog.exec()
-                    
-                    # 作成中止が選択された場合
-                    if result == DIALOG_CANCEL:
-                        logging.info("作成中止が選択されました")
-                        self.preview_text.clear()
-                        self.statusBar().showMessage("作成中止")
-                        return
-                    
-                    # 戻るボタンが押された場合
-                    if result == DIALOG_BACK:
-                        # 受注者情報を保存
-                        self.orderer_data = current_dialog.get_saved_data()
-                        current_dialog = ListInfoDialog(self, self.list_data)
-                        continue
-                    
-                    # 受注者情報を保存
-                    self.orderer_data = current_dialog.get_saved_data()
-                    current_dialog = OrderInfoDialog(self, self.order_data)
-                
-                elif isinstance(current_dialog, OrderInfoDialog):
-                    # 受注情報入力ダイアログを表示
-                    result = current_dialog.exec()
-                    
-                    # 作成中止が選択された場合
-                    if result == DIALOG_CANCEL:
-                        logging.info("作成中止が選択されました")
-                        self.preview_text.clear()
-                        self.statusBar().showMessage("作成中止")
-                        return
-                    
-                    # 戻るボタンが押された場合
-                    if result == DIALOG_BACK:
-                        # 受注情報を保存
-                        self.order_data = current_dialog.get_saved_data()
-                        current_dialog = OrdererInputDialog(self, self.orderer_data)
-                        continue
-                    
-                    # 受注情報を保存
-                    self.order_data = current_dialog.get_saved_data()
-                    break
+            # 並行して提供判定処理を開始（バックグラウンドで実行）
+            self.start_service_area_search()
+            
+            # 受注者入力項目ダイアログを直接表示
+            dialog = OrdererInputDialog(self, self.orderer_data)
+            result = dialog.exec()
+            
+            # 作成中止が選択された場合
+            if result == DIALOG_CANCEL:
+                logging.info("作成中止が選択されました")
+                self.preview_text.clear()
+                self.statusBar().showMessage("作成中止")
+                return
+            
+            # 受注者情報を保存
+            self.orderer_data = dialog.get_saved_data()
+            
+            # プレビューテキストが既に設定されている場合は何もしない
+            # （作成ボタンクリック時にすでにプレビューテキストが設定されている）
             
         except Exception as e:
-            logging.error(f"使いやすいモードの開始中にエラー: {e}", exc_info=True)
-            QMessageBox.critical(self, "エラー", f"使いやすいモードの開始中にエラーが発生しました: {e}")
-
+            logging.error(f"誘導モードの開始中にエラー: {e}", exc_info=True)
+            QMessageBox.critical(self, "エラー", f"誘導モードの開始中にエラーが発生しました: {e}")
+    
+    def start_service_area_search(self):
+        """提供判定処理を開始"""
+        try:
+            postal_code = self.address_data.get('postal_code', '')
+            address = self.address_data.get('address', '')
+            
+            if not postal_code or not address:
+                logging.warning("郵便番号または住所が空のため、提供判定を行いません")
+                self.update_judgment_result("未検索")
+                return
+            
+            # 提供判定中の表示に更新
+            self.update_judgment_result("検索中...")
+            
+            # 検索スレッドの作成と開始
+            self.search_thread = ServiceAreaSearchThread(postal_code, address, self)
+            
+            # active_search_threadsがなければ作成
+            if not hasattr(self, 'active_search_threads'):
+                self.active_search_threads = []
+            
+            # 古いスレッドをクリーンアップ
+            active_threads = []
+            for thread in self.active_search_threads:
+                if thread.isRunning():
+                    active_threads.append(thread)
+                else:
+                    logging.info("実行していない古いスレッドを削除します")
+            
+            self.active_search_threads = active_threads
+            
+            # スレッドをリストに追加して開始
+            self.active_search_threads.append(self.search_thread)
+            self.search_thread.start()
+            logging.info(f"提供エリア検索スレッドを開始しました: postal_code={postal_code}, address={address}")
+            
+        except Exception as e:
+            logging.error(f"提供判定処理の開始中にエラー: {e}", exc_info=True)
+            self.update_judgment_result("検索エラー")
+    
     def show_address_dialog(self):
         """住所情報ダイアログを表示"""
         try:
@@ -1783,26 +1765,49 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 address_data = getattr(self, 'address_data', {})
                 list_data = getattr(self, 'list_data', {})
                 orderer_data = getattr(self, 'orderer_data', {})
-                order_data = getattr(self, 'current_dialog', None)
+                order_data = getattr(self, 'order_data', {})
                 
                 logging.info(f"住所データ: {address_data}")
                 logging.info(f"リストデータ: {list_data}")
                 logging.info(f"受注者データ: {orderer_data}")
                 
-                if order_data:
-                    order_data = order_data.get_order_data()
-                    logging.info(f"受注データ: {order_data}")
-                else:
-                    logging.warning("受注データが取得できません")
-                    order_data = {}
+                # データを統合（最新のデータを優先）
+                data = {}
+                data.update(address_data)
+                data.update(list_data)
                 
-                # データを統合
-                data = {
-                    **address_data,
-                    **list_data,
-                    **orderer_data,
-                    **order_data
-                }
+                # 最新の受注者データを確実に使用
+                if orderer_data:
+                    # 受注者データが存在する場合、それを最優先で使用
+                    logging.info(f"最新の受注者データを使用: {orderer_data}")
+                    data.update(orderer_data)
+                
+                # 注文データ
+                data.update(order_data)
+                
+                # リスト名フリガナが空の場合、受注者データのフリガナを使用
+                if not data.get('list_furigana') and data.get('furigana'):
+                    data['list_furigana'] = data['furigana']
+                
+                # 現状回線が設定されていない場合はデフォルト値を設定
+                if not data.get('current_line'):
+                    data['current_line'] = 'アナログ'
+                
+                # 受注日が設定されていない場合は今日の日付を設定
+                if not data.get('order_date'):
+                    now = datetime.datetime.now()
+                    data['order_date'] = f"{now.month}/{now.day}"
+                
+                # 提供判定が設定されていない場合はJudgment_result_labelから取得
+                if not data.get('judgment') and hasattr(self, 'judgment_result_label'):
+                    judgment_text = self.judgment_result_label.text()
+                    if "提供可能" in judgment_text:
+                        data['judgment'] = "OK"
+                    elif "提供エリア外" in judgment_text:
+                        data['judgment'] = "NG"
+                    else:
+                        data['judgment'] = "未検索"
+                
                 logging.info(f"統合されたデータ: {data}")
                 
                 # データが空の場合はエラー
