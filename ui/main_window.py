@@ -1059,3 +1059,62 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         except Exception as e:
             logging.error(f"アップデートチェック中にエラー: {e}")
 
+    def show_screenshot(self):
+        """スクリーンショットを表示する"""
+        try:
+            if hasattr(self, 'screenshot_path') and self.screenshot_path:
+                screenshot_path = self.screenshot_path
+            else:
+                screenshot_path = "debug_screenshot.png"
+            
+            if not os.path.exists(screenshot_path):
+                QMessageBox.warning(
+                    self,
+                    "エラー",
+                    "スクリーンショットファイルが見つかりません。"
+                )
+                return
+            
+            # QPixmapを使用して画像を表示
+            from PySide6.QtGui import QPixmap
+            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout, QScrollArea
+            from PySide6.QtCore import Qt
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("スクリーンショット - 提供判定結果")
+            dialog.setMinimumSize(800, 600)
+            layout = QVBoxLayout(dialog)
+            
+            # スクロールエリアを作成
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            
+            # ラベルを作成してピクスマップを設定
+            label = QLabel()
+            pixmap = QPixmap(screenshot_path)
+            
+            # 画像のアスペクト比を維持しながらスケーリング
+            scaled_pixmap = pixmap.scaled(
+                800,  # 最大幅
+                4000,  # 十分な高さ（スクロール可能）
+                Qt.AspectRatioMode.KeepAspectRatio,  # アスペクト比を維持
+                Qt.TransformationMode.SmoothTransformation  # スムーズな変換
+            )
+            
+            label.setPixmap(scaled_pixmap)
+            
+            # スクロールエリアにラベルを設定
+            scroll_area.setWidget(label)
+            layout.addWidget(scroll_area)
+            
+            dialog.setLayout(layout)
+            dialog.exec()
+            
+        except Exception as e:
+            logging.error(f"スクリーンショット表示エラー: {str(e)}")
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"スクリーンショットの表示中にエラーが発生しました: {str(e)}"
+            )
+
