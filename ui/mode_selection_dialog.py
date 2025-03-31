@@ -139,29 +139,6 @@ class ModeSelectionDialog(QDialog):
         checkbox_widget.setLayout(checkbox_layout)
         layout.addWidget(checkbox_widget)
         
-        # キャンセルボタン
-        cancel_button = QPushButton("キャンセル")
-        cancel_button.setMinimumHeight(40)
-        cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                padding: 10px;
-                border-radius: 5px;
-                font-size: 14px;
-                margin: 5px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:pressed {
-                background-color: #c62828;
-            }
-        """)
-        cancel_button.clicked.connect(self.reject)
-        layout.addWidget(cancel_button)
-        
         self.setLayout(layout)
         
         # 選択されたモードを保存する変数

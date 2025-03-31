@@ -1661,7 +1661,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     def init_menu(self):
         """メニューの初期化"""
+        # 既存のメニューバーをクリア
         menubar = self.menuBar()
+        menubar.clear()
         
         # ファイルメニュー
         file_menu = menubar.addMenu("ファイル")
