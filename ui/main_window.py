@@ -1026,7 +1026,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def show_about_dialog(self):
         """バージョン情報ダイアログを表示する"""
         msg = f"{APP_NAME} v{VERSION}\n\n"
-        msg += "開発者: Lizqxel\n"
         msg += "ライセンス: MIT License"
         QMessageBox.information(self, "バージョン情報", msg)
 
