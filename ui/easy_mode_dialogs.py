@@ -656,6 +656,9 @@ class ListInfoDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # 親ウィンドウへの参照を保持
+        self.parent_window = parent
+        
         # 保存データの初期化
         self.saved_data = list_data or {}
         
@@ -675,16 +678,18 @@ class ListInfoDialog(QDialog):
         # リスト名
         list_layout.addWidget(QLabel("リスト名"))
         self.list_name_input = QLineEdit()
-        if self.saved_data and 'list_name' in self.saved_data:
-            self.list_name_input.setText(self.saved_data['list_name'])
         list_layout.addWidget(self.list_name_input)
         
-        # リストフリガナ
-        list_layout.addWidget(QLabel("リストフリガナ"))
+        # リストフリガナ（自動・手動切り替え機能付き）
+        list_furigana_layout = QHBoxLayout()
+        list_furigana_layout.addWidget(QLabel("リストフリガナ"))
+        self.list_furigana_mode_combo = NoWheelComboBox()
+        self.list_furigana_mode_combo.addItems(["自動", "手動"])
+        list_furigana_layout.addWidget(self.list_furigana_mode_combo)
+        list_layout.addLayout(list_furigana_layout)
+        
         self.list_furigana_input = QLineEdit()
         self.list_furigana_input.setPlaceholderText("例：タナカタロウ")
-        if self.saved_data and 'list_furigana' in self.saved_data:
-            self.list_furigana_input.setText(self.saved_data['list_furigana'])
         list_layout.addWidget(self.list_furigana_input)
         
         # 電話番号
@@ -785,6 +790,21 @@ class ListInfoDialog(QDialog):
         # シグナルの接続
         self.back_btn.clicked.connect(self.on_back_clicked)
         self.next_btn.clicked.connect(self.on_next_clicked)
+        
+        # ここでデータをセットしてから、シグナルを接続する（先にデータセット）
+        if self.saved_data and 'list_name' in self.saved_data:
+            self.list_name_input.setText(self.saved_data['list_name'])
+        
+        if self.saved_data and 'list_furigana' in self.saved_data:
+            self.list_furigana_input.setText(self.saved_data['list_furigana'])
+        
+        # リスト名入力時のフリガナ自動生成のシグナルを接続
+        self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+        # コンボボックス変更時にも自動生成を試行
+        self.list_furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_list_furigana())
+        
+        # 初期表示時に一度だけ自動生成を実行
+        QTimer.singleShot(100, self.auto_generate_list_furigana)
     
     def on_back_clicked(self):
         """戻るボタンがクリックされた時の処理"""
@@ -802,6 +822,43 @@ class ListInfoDialog(QDialog):
     def get_saved_data(self):
         """保存されたデータを取得"""
         return self.saved_data
+
+    def auto_generate_list_furigana(self):
+        """リスト名からフリガナを自動生成する"""
+        try:
+            # 自動モードの場合のみ処理
+            if self.list_furigana_mode_combo.currentText() != "自動":
+                logging.info("フリガナ自動生成: 手動モードのため生成をスキップします")
+                return
+                
+            # リスト名が空の場合は何もしない
+            name = self.list_name_input.text()
+            if not name:
+                logging.info("フリガナ自動生成: リスト名が空のため生成をスキップします")
+                return
+                
+            # 既にフリガナが入力されている場合はスキップする特殊なケース
+            current_furigana = self.list_furigana_input.text()
+            if current_furigana and len(current_furigana) > 1 and name in self.saved_data.get('list_name', ''):
+                logging.info(f"フリガナ自動生成: 既にフリガナ({current_furigana})が設定されているためスキップします")
+                return
+            
+            # フリガナ変換APIを使用
+            logging.info(f"フリガナ自動生成: 変換を開始します（リスト名: {name}）")
+            from utils.furigana_utils import convert_to_furigana
+            furigana = convert_to_furigana(name)
+            
+            if furigana:
+                # blockSignalsでシグナルを一時的にブロックして再帰呼び出しを防止
+                self.list_furigana_input.blockSignals(True)
+                self.list_furigana_input.setText(furigana)
+                self.list_furigana_input.blockSignals(False)
+                logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
+            else:
+                logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（リスト名: {name}）")
+        
+        except Exception as e:
+            logging.error(f"リストフリガナ自動生成エラー: {str(e)}", exc_info=True)
 
     def get_list_data(self):
         """
@@ -908,6 +965,9 @@ class OrdererInputDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # 親ウィンドウへの参照を保持
+        self.parent_window = parent
+        
         # 保存データの初期化
         self.saved_data = orderer_data or {}
         
@@ -959,23 +1019,17 @@ class OrdererInputDialog(QDialog):
         # 対応者名
         orderer_layout.addWidget(QLabel("対応者名"))
         self.operator_input = QLineEdit()
-        if self.saved_data and 'operator' in self.saved_data:
-            self.operator_input.setText(self.saved_data['operator'])
         orderer_layout.addWidget(self.operator_input)
         
         # 出やすい時間帯
         orderer_layout.addWidget(QLabel("出やすい時間帯"))
         self.available_time_input = QLineEdit()
         self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
-        if self.saved_data and 'available_time' in self.saved_data:
-            self.available_time_input.setText(self.saved_data['available_time'])
         orderer_layout.addWidget(self.available_time_input)
         
         # 契約者名
         orderer_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
-        if self.saved_data and 'contractor' in self.saved_data:
-            self.contractor_input.setText(self.saved_data['contractor'])
         orderer_layout.addWidget(self.contractor_input)
         
         # フリガナ
@@ -986,8 +1040,6 @@ class OrdererInputDialog(QDialog):
         furigana_layout.addWidget(self.furigana_mode_combo)
         orderer_layout.addLayout(furigana_layout)
         self.furigana_input = QLineEdit()
-        if self.saved_data and 'furigana' in self.saved_data:
-            self.furigana_input.setText(self.saved_data['furigana'])
         orderer_layout.addWidget(self.furigana_input)
         
         # 生年月日
@@ -1038,70 +1090,52 @@ class OrdererInputDialog(QDialog):
         # 受注者名
         orderer_layout.addWidget(QLabel("受注者名"))
         self.order_person_input = QLineEdit()
-        if self.saved_data and 'order_person' in self.saved_data:
-            self.order_person_input.setText(self.saved_data['order_person'])
         orderer_layout.addWidget(self.order_person_input)
         
         # 社番
         orderer_layout.addWidget(QLabel("社番"))
         self.employee_number_input = QLineEdit()
-        if self.saved_data and 'employee_number' in self.saved_data:
-            self.employee_number_input.setText(self.saved_data['employee_number'])
         orderer_layout.addWidget(self.employee_number_input)
         
         # 料金認識
         orderer_layout.addWidget(QLabel("料金認識"))
         self.fee_input = QLineEdit()
         self.fee_input.setText("2500円～3000円")
-        if self.saved_data and 'fee' in self.saved_data:
-            self.fee_input.setText(self.saved_data['fee'])
         orderer_layout.addWidget(self.fee_input)
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
         self.net_usage_combo = NoWheelComboBox()
         self.net_usage_combo.addItems(["なし", "あり"])
-        if self.saved_data and 'net_usage' in self.saved_data:
-            self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
         orderer_layout.addWidget(self.net_usage_combo)
         
         # 家族了承
         orderer_layout.addWidget(QLabel("家族了承"))
         self.family_approval_combo = NoWheelComboBox()
         self.family_approval_combo.addItems(["ok", "なし"])
-        if self.saved_data and 'family_approval' in self.saved_data:
-            self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
         orderer_layout.addWidget(self.family_approval_combo)
         
         # 他番号
         orderer_layout.addWidget(QLabel("他番号"))
         self.other_number_input = QLineEdit()
         self.other_number_input.setText("なし")
-        if self.saved_data and 'other_number' in self.saved_data:
-            self.other_number_input.setText(self.saved_data['other_number'])
         orderer_layout.addWidget(self.other_number_input)
         
         # 電話機
         orderer_layout.addWidget(QLabel("電話機"))
         self.phone_device_input = QLineEdit()
         self.phone_device_input.setText("プッシュホン")
-        if self.saved_data and 'phone_device' in self.saved_data:
-            self.phone_device_input.setText(self.saved_data['phone_device'])
         orderer_layout.addWidget(self.phone_device_input)
         
         # 禁止回線
         orderer_layout.addWidget(QLabel("禁止回線"))
         self.forbidden_line_input = QLineEdit()
         self.forbidden_line_input.setText("なし")
-        if self.saved_data and 'forbidden_line' in self.saved_data:
-            self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
         orderer_layout.addWidget(self.forbidden_line_input)
         
         # ND
         orderer_layout.addWidget(QLabel("ND"))
         self.nd_input = QLineEdit()
-        if self.saved_data and 'nd' in self.saved_data:
-            self.nd_input.setText(self.saved_data['nd'])
         orderer_layout.addWidget(self.nd_input)
         
         # リストとの関係性
@@ -1109,8 +1143,6 @@ class OrdererInputDialog(QDialog):
         relationship_layout.addWidget(QLabel("備考："))
         self.relationship_input = QLineEdit()
         self.relationship_input.setPlaceholderText("名義人の...")
-        if self.saved_data and 'relationship' in self.saved_data:
-            self.relationship_input.setText(self.saved_data['relationship'])
         relationship_layout.addWidget(self.relationship_input)
         orderer_layout.addLayout(relationship_layout)
         
@@ -1192,6 +1224,56 @@ class OrdererInputDialog(QDialog):
         # シグナルの接続
         self.back_btn.clicked.connect(self.on_back_clicked)
         self.next_btn.clicked.connect(self.on_next_clicked)
+        
+        # ここでデータをセット（先にデータをセット）
+        if self.saved_data and 'operator' in self.saved_data:
+            self.operator_input.setText(self.saved_data['operator'])
+            
+        if self.saved_data and 'available_time' in self.saved_data:
+            self.available_time_input.setText(self.saved_data['available_time'])
+            
+        if self.saved_data and 'contractor' in self.saved_data:
+            self.contractor_input.setText(self.saved_data['contractor'])
+            
+        if self.saved_data and 'furigana' in self.saved_data:
+            self.furigana_input.setText(self.saved_data['furigana'])
+            
+        if self.saved_data and 'order_person' in self.saved_data:
+            self.order_person_input.setText(self.saved_data['order_person'])
+            
+        if self.saved_data and 'employee_number' in self.saved_data:
+            self.employee_number_input.setText(self.saved_data['employee_number'])
+            
+        if self.saved_data and 'fee' in self.saved_data:
+            self.fee_input.setText(self.saved_data['fee'])
+            
+        if self.saved_data and 'net_usage' in self.saved_data:
+            self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
+            
+        if self.saved_data and 'family_approval' in self.saved_data:
+            self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
+            
+        if self.saved_data and 'other_number' in self.saved_data:
+            self.other_number_input.setText(self.saved_data['other_number'])
+            
+        if self.saved_data and 'phone_device' in self.saved_data:
+            self.phone_device_input.setText(self.saved_data['phone_device'])
+            
+        if self.saved_data and 'forbidden_line' in self.saved_data:
+            self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
+            
+        if self.saved_data and 'nd' in self.saved_data:
+            self.nd_input.setText(self.saved_data['nd'])
+            
+        if self.saved_data and 'relationship' in self.saved_data:
+            self.relationship_input.setText(self.saved_data['relationship'])
+            
+        # フリガナ自動生成のシグナルを接続
+        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
+        self.furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_furigana())
+        
+        # 初期表示時に一度だけ自動生成を実行
+        QTimer.singleShot(100, self.auto_generate_furigana)
     
     def on_back_clicked(self):
         """戻るボタンがクリックされた時の処理"""
@@ -1209,6 +1291,43 @@ class OrdererInputDialog(QDialog):
     def get_saved_data(self):
         """保存されたデータを取得"""
         return self.saved_data
+
+    def auto_generate_furigana(self):
+        """契約者名からフリガナを自動生成する"""
+        try:
+            # 自動モードの場合のみ処理
+            if self.furigana_mode_combo.currentText() != "自動":
+                logging.info("フリガナ自動生成: 手動モードのため生成をスキップします")
+                return
+                
+            # 契約者名が空の場合は何もしない
+            name = self.contractor_input.text()
+            if not name:
+                logging.info("フリガナ自動生成: 契約者名が空のため生成をスキップします")
+                return
+                
+            # 既にフリガナが入力されている場合はスキップする特殊なケース
+            current_furigana = self.furigana_input.text()
+            if current_furigana and len(current_furigana) > 1 and name in self.saved_data.get('contractor', ''):
+                logging.info(f"フリガナ自動生成: 既にフリガナ({current_furigana})が設定されているためスキップします")
+                return
+            
+            # フリガナ変換APIを使用
+            logging.info(f"フリガナ自動生成: 変換を開始します（契約者名: {name}）")
+            from utils.furigana_utils import convert_to_furigana
+            furigana = convert_to_furigana(name)
+            
+            if furigana:
+                # blockSignalsでシグナルを一時的にブロックして再帰呼び出しを防止
+                self.furigana_input.blockSignals(True)
+                self.furigana_input.setText(furigana)
+                self.furigana_input.blockSignals(False)
+                logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
+            else:
+                logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（契約者名: {name}）")
+        
+        except Exception as e:
+            logging.error(f"フリガナ自動生成エラー: {str(e)}", exc_info=True)
 
     def get_orderer_data(self):
         """
