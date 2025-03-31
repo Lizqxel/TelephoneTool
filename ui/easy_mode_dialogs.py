@@ -8,7 +8,7 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
@@ -965,6 +965,9 @@ class OrdererInputDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         
+        # エンターキーの挙動を変更（ダイアログを閉じないようにする）
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        
         # 親ウィンドウへの参照を保持
         self.parent_window = parent
         
@@ -1146,6 +1149,14 @@ class OrdererInputDialog(QDialog):
         relationship_layout.addWidget(self.relationship_input)
         orderer_layout.addLayout(relationship_layout)
         
+        # 提供判定エリア
+        judgment_layout = QHBoxLayout()
+        judgment_layout.addWidget(QLabel("提供判定："))
+        self.judgment_combo = NoWheelComboBox()
+        self.judgment_combo.addItems(["OK", "NG"])
+        judgment_layout.addWidget(self.judgment_combo)
+        orderer_layout.addLayout(judgment_layout)
+        
         orderer_group.setLayout(orderer_layout)
         scroll_layout.addWidget(orderer_group)
         
@@ -1156,11 +1167,11 @@ class OrdererInputDialog(QDialog):
         # ボタンエリア
         button_layout = QHBoxLayout()
         
-        # 戻るボタン
-        self.back_btn = QPushButton("戻る")
-        self.back_btn.setStyleSheet("""
+        # 作成ボタン（旧「次へ」ボタンの代わり）
+        self.create_btn = QPushButton("作成")
+        self.create_btn.setStyleSheet("""
             QPushButton {
-                background-color: #757575;
+                background-color: #4CAF50;
                 color: white;
                 border: none;
                 padding: 10px 20px;
@@ -1168,33 +1179,14 @@ class OrdererInputDialog(QDialog):
                 border-radius: 4px;
             }
             QPushButton:hover {
-                background-color: #616161;
+                background-color: #45a049;
             }
             QPushButton:pressed {
-                background-color: #424242;
+                background-color: #3e8e41;
             }
         """)
-        button_layout.addWidget(self.back_btn)
-        
-        # 次へボタン
-        self.next_btn = QPushButton("次へ")
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #1565C0;
-            }
-        """)
-        button_layout.addWidget(self.next_btn)
+        self.create_btn.clicked.connect(self.on_create_clicked)
+        button_layout.addWidget(self.create_btn)
         
         # 作成中止ボタン
         self.cancel_btn = QPushButton("作成中止")
@@ -1222,8 +1214,20 @@ class OrdererInputDialog(QDialog):
         self.setLayout(layout)
         
         # シグナルの接続
-        self.back_btn.clicked.connect(self.on_back_clicked)
-        self.next_btn.clicked.connect(self.on_next_clicked)
+        # 戻るボタンは削除
+        
+        # エンターキーが押されたときに次の入力項目に移動するための設定
+        self.input_fields = [
+            self.operator_input, self.available_time_input, self.contractor_input,
+            self.furigana_input, self.order_person_input, self.employee_number_input,
+            self.fee_input, self.other_number_input, self.phone_device_input,
+            self.forbidden_line_input, self.nd_input, self.relationship_input
+        ]
+        
+        # 各入力フィールドにイベントハンドラーを設定
+        for i, field in enumerate(self.input_fields):
+            if isinstance(field, QLineEdit):
+                field.installEventFilter(self)
         
         # ここでデータをセット（先にデータをセット）
         if self.saved_data and 'operator' in self.saved_data:
@@ -1268,6 +1272,17 @@ class OrdererInputDialog(QDialog):
         if self.saved_data and 'relationship' in self.saved_data:
             self.relationship_input.setText(self.saved_data['relationship'])
             
+        # 親ウィンドウの提供判定結果を確認し、判定コンボボックスを更新
+        try:
+            if hasattr(self.parent_window, 'judgment_result_label'):
+                judgment_text = self.parent_window.judgment_result_label.text()
+                if "提供可能" in judgment_text:
+                    self.judgment_combo.setCurrentText("OK")
+                elif "提供エリア外" in judgment_text:
+                    self.judgment_combo.setCurrentText("NG")
+        except Exception as e:
+            logging.error(f"提供判定結果の取得でエラー: {e}")
+            
         # フリガナ自動生成のシグナルを接続
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_furigana())
@@ -1275,59 +1290,155 @@ class OrdererInputDialog(QDialog):
         # 初期表示時に一度だけ自動生成を実行
         QTimer.singleShot(100, self.auto_generate_furigana)
     
-    def on_back_clicked(self):
-        """戻るボタンがクリックされた時の処理"""
-        # 現在の入力内容を保存
-        self.saved_data = self.get_orderer_data()
-        # 一つ前のダイアログに戻る
-        self.done(DIALOG_BACK)
-
-    def on_next_clicked(self):
-        """次へボタンがクリックされた時の処理"""
-        # 現在の入力内容を保存
-        self.saved_data = self.get_orderer_data()
-        self.accept()
-
-    def get_saved_data(self):
-        """保存されたデータを取得"""
-        return self.saved_data
-
-    def auto_generate_furigana(self):
-        """契約者名からフリガナを自動生成する"""
-        try:
-            # 自動モードの場合のみ処理
-            if self.furigana_mode_combo.currentText() != "自動":
-                logging.info("フリガナ自動生成: 手動モードのため生成をスキップします")
-                return
-                
-            # 契約者名が空の場合は何もしない
-            name = self.contractor_input.text()
-            if not name:
-                logging.info("フリガナ自動生成: 契約者名が空のため生成をスキップします")
-                return
-                
-            # 既にフリガナが入力されている場合はスキップする特殊なケース
-            current_furigana = self.furigana_input.text()
-            if current_furigana and len(current_furigana) > 1 and name in self.saved_data.get('contractor', ''):
-                logging.info(f"フリガナ自動生成: 既にフリガナ({current_furigana})が設定されているためスキップします")
-                return
-            
-            # フリガナ変換APIを使用
-            logging.info(f"フリガナ自動生成: 変換を開始します（契約者名: {name}）")
-            from utils.furigana_utils import convert_to_furigana
-            furigana = convert_to_furigana(name)
-            
-            if furigana:
-                # blockSignalsでシグナルを一時的にブロックして再帰呼び出しを防止
-                self.furigana_input.blockSignals(True)
-                self.furigana_input.setText(furigana)
-                self.furigana_input.blockSignals(False)
-                logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
-            else:
-                logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（契約者名: {name}）")
+    def eventFilter(self, obj, event):
+        """
+        イベントフィルターを実装して、エンターキーの動作をカスタマイズする
         
+        Args:
+            obj: イベントの発生元オブジェクト
+            event: イベントオブジェクト
+            
+        Returns:
+            bool: イベント処理済みかどうか
+        """
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Return:
+            # Enterキーが押された場合
+            current_index = -1
+            for i, field in enumerate(self.input_fields):
+                if obj == field:
+                    current_index = i
+                    break
+            
+            if current_index != -1 and current_index < len(self.input_fields) - 1:
+                # 次の入力フィールドにフォーカスを移動
+                next_index = current_index + 1
+                next_field = self.input_fields[next_index]
+                next_field.setFocus()
+                
+                # スクロールエリアを取得
+                scroll_area = None
+                parent = next_field.parent()
+                while parent:
+                    if isinstance(parent, QScrollArea):
+                        scroll_area = parent
+                        break
+                    parent = parent.parent()
+                
+                # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
+                if scroll_area:
+                    # スクロールエリア内のビューポートの座標系に変換
+                    viewport = scroll_area.viewport()
+                    widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
+                    
+                    # 現在のスクロール位置を取得
+                    current_scroll_y = scroll_area.verticalScrollBar().value()
+                    
+                    # ビューポートの高さを取得
+                    viewport_height = viewport.height()
+                    
+                    # ウィジェットの位置と高さ
+                    widget_y = widget_pos.y()
+                    widget_height = next_field.height()
+                    
+                    # ウィジェットが完全に表示されているかチェック
+                    if widget_y < 0:
+                        # ウィジェットが上に隠れている場合、上にスクロール
+                        scroll_area.verticalScrollBar().setValue(current_scroll_y + widget_y)
+                    elif widget_y + widget_height > viewport_height:
+                        # ウィジェットが下に隠れている場合、下にスクロール
+                        scroll_area.verticalScrollBar().setValue(
+                            current_scroll_y + (widget_y + widget_height - viewport_height) + 10
+                        )
+                
+                return True
+                
+        # 標準のイベント処理を継続
+        return super().eventFilter(obj, event)
+        
+    def keyPressEvent(self, event):
+        """
+        キー押下イベントを処理する
+        
+        Args:
+            event: キーイベント
+        """
+        # Enterキーでダイアログを閉じないようにする
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            # Enterキーの標準動作を無効化
+            event.accept()
+        else:
+            # それ以外のキーは通常通り処理
+            super().keyPressEvent(event)
+    
+    def on_create_clicked(self):
+        """作成ボタンがクリックされた時の処理"""
+        try:
+            logging.info("作成ボタンがクリックされました")
+            
+            # 現在の入力内容を保存
+            self.saved_data = self.get_orderer_data()
+            logging.info(f"受注者データを取得: {self.saved_data}")
+            
+            # 生年月日を正しいフォーマットに変換（YYYY/M/D形式）
+            if 'birth_date' in self.saved_data:
+                birth_parts = self.saved_data['birth_date'].split('/')
+                if len(birth_parts) == 3:
+                    year = int(birth_parts[0])
+                    month = int(birth_parts[1])
+                    day = int(birth_parts[2])
+                    self.saved_data['birth_date'] = f"{year}/{month}/{day}"
+            
+            # リスト名フリガナをセット
+            if self.parent_window and hasattr(self.parent_window, 'list_data') and 'list_furigana' in self.parent_window.list_data:
+                list_furigana = self.parent_window.list_data.get('list_furigana')
+                if not list_furigana and 'furigana' in self.saved_data:
+                    # リスト名フリガナが空で、フリガナが入力されている場合はそれをセット
+                    self.parent_window.list_data['list_furigana'] = self.saved_data['furigana']
+            
+            # 受注情報を作成（現在の日付とユーザー選択の判定結果を使用）
+            now = datetime.datetime.now()
+            month = now.month  # 0埋めなしの月
+            day = now.day      # 0埋めなしの日
+            
+            order_data = {
+                'current_line': 'アナログ',  # デフォルト値
+                'order_date': f"{month}/{day}",
+                'judgment': self.judgment_combo.currentText()  # ユーザーが選択した判定結果
+            }
+            
+            # 親ウィンドウのプロパティに保存
+            if self.parent_window:
+                # 重要：最新の受注者データを親ウィンドウに確実に保存
+                self.parent_window.orderer_data = self.saved_data
+                self.parent_window.order_data = order_data
+                
+                # 営コメを作成して表示
+                if hasattr(self.parent_window, 'generate_preview_text'):
+                    logging.info("親ウィンドウのgenerate_preview_textメソッドを呼び出し")
+                    
+                    # プレビューテキストを生成
+                    preview_text = self.parent_window.generate_preview_text()
+                    if preview_text:
+                        logging.info("プレビューテキストの生成に成功")
+                        # プレビューに表示
+                        self.parent_window.preview_text.setText(preview_text)
+                        logging.info("プレビューにテキストを表示")
+                        self.accept()
+                    else:
+                        logging.error("プレビューテキストの生成に失敗")
+                        QMessageBox.warning(self, "警告", "営コメの作成に失敗しました。")
+                else:
+                    logging.error("親ウィンドウにgenerate_preview_textメソッドが存在しません")
+                    QMessageBox.warning(self, "警告", "プレビュー機能が利用できません。")
+                    self.accept()
+            else:
+                logging.error("親ウィンドウへの参照が存在しません")
+                QMessageBox.warning(self, "警告", "親ウィンドウへの参照が失われました。")
+                self.accept()
+                
         except Exception as e:
-            logging.error(f"フリガナ自動生成エラー: {str(e)}", exc_info=True)
+            logging.error(f"作成ボタンのクリック処理中にエラー: {e}", exc_info=True)
+            QMessageBox.critical(self, "エラー", f"作成処理中にエラーが発生しました: {e}")
 
     def get_orderer_data(self):
         """
@@ -1382,6 +1493,10 @@ class OrdererInputDialog(QDialog):
         except Exception as e:
             logging.error(f"受注者データの取得中にエラー: {e}")
             return {}
+    
+    def get_saved_data(self):
+        """保存されたデータを取得"""
+        return self.get_orderer_data()
 
     def set_orderer_data(self, data):
         """
@@ -1495,6 +1610,43 @@ class OrdererInputDialog(QDialog):
         else:
             # キャンセルをキャンセル
             pass
+
+    def auto_generate_furigana(self):
+        """契約者名からフリガナを自動生成する"""
+        try:
+            # 自動モードの場合のみ処理
+            if self.furigana_mode_combo.currentText() != "自動":
+                logging.info("フリガナ自動生成: 手動モードのため生成をスキップします")
+                return
+                
+            # 契約者名が空の場合は何もしない
+            name = self.contractor_input.text()
+            if not name:
+                logging.info("フリガナ自動生成: 契約者名が空のため生成をスキップします")
+                return
+                
+            # 既にフリガナが入力されている場合はスキップする特殊なケース
+            current_furigana = self.furigana_input.text()
+            if current_furigana and len(current_furigana) > 1 and name in self.saved_data.get('contractor', ''):
+                logging.info(f"フリガナ自動生成: 既にフリガナ({current_furigana})が設定されているためスキップします")
+                return
+            
+            # フリガナ変換APIを使用
+            logging.info(f"フリガナ自動生成: 変換を開始します（契約者名: {name}）")
+            from utils.furigana_utils import convert_to_furigana
+            furigana = convert_to_furigana(name)
+            
+            if furigana:
+                # blockSignalsでシグナルを一時的にブロックして再帰呼び出しを防止
+                self.furigana_input.blockSignals(True)
+                self.furigana_input.setText(furigana)
+                self.furigana_input.blockSignals(False)
+                logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
+            else:
+                logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（契約者名: {name}）")
+        
+        except Exception as e:
+            logging.error(f"フリガナ自動生成エラー: {str(e)}", exc_info=True)
 
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
