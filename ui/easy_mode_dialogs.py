@@ -131,21 +131,89 @@ class ServiceAreaSearchThread(QThread):
                 # シグナルで結果を通知
                 self.finished.emit(result_str)
                 
+                # 親ウィンドウに直接結果を通知（ダイアログが閉じられていても反映されるように）
+                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+                    try:
+                        # QMetaObjectを使用して、UIスレッドで安全に実行
+                        QMetaObject.invokeMethod(
+                            self.parent_window,
+                            "update_judgment_result",
+                            Qt.ConnectionType.QueuedConnection,
+                            Q_ARG(str, result_str)
+                        )
+                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
+                    except Exception as e:
+                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
+                
             elif isinstance(result, str):
                 logging.info(f"検索結果（文字列）: {result}")
                 self.finished.emit(result)
                 
+                # 親ウィンドウに直接結果を通知
+                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+                    try:
+                        QMetaObject.invokeMethod(
+                            self.parent_window,
+                            "update_judgment_result",
+                            Qt.ConnectionType.QueuedConnection,
+                            Q_ARG(str, result)
+                        )
+                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result}")
+                    except Exception as e:
+                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
+                
             elif result is None:
                 logging.warning("検索結果が空（None）でした")
-                self.finished.emit("検索エラー")
+                result_str = "検索エラー"
+                self.finished.emit(result_str)
+                
+                # 親ウィンドウに直接結果を通知
+                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+                    try:
+                        QMetaObject.invokeMethod(
+                            self.parent_window,
+                            "update_judgment_result",
+                            Qt.ConnectionType.QueuedConnection,
+                            Q_ARG(str, result_str)
+                        )
+                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
+                    except Exception as e:
+                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
                 
             else:
                 logging.warning(f"予期せぬ検索結果の型: {type(result)}")
-                self.finished.emit("検索エラー")
+                result_str = "検索エラー"
+                self.finished.emit(result_str)
+                
+                # 親ウィンドウに直接結果を通知
+                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+                    try:
+                        QMetaObject.invokeMethod(
+                            self.parent_window,
+                            "update_judgment_result",
+                            Qt.ConnectionType.QueuedConnection,
+                            Q_ARG(str, result_str)
+                        )
+                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
+                    except Exception as e:
+                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
                 
         except Exception as e:
             logging.error(f"提供エリア検索中に例外が発生: {e}", exc_info=True)
             self.error.emit(str(e))
+            
+            # エラー時も親ウィンドウに通知
+            if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+                try:
+                    QMetaObject.invokeMethod(
+                        self.parent_window,
+                        "update_judgment_result",
+                        Qt.ConnectionType.QueuedConnection,
+                        Q_ARG(str, "検索エラー")
+                    )
+                    logging.info("親ウィンドウにエラーを直接通知しました")
+                except Exception as e:
+                    logging.error(f"親ウィンドウへのエラー通知でエラー: {e}", exc_info=True)
             
     def stop(self):
         """スレッドを停止する"""
