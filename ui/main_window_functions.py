@@ -62,7 +62,7 @@ class ServiceAreaSearchWorker(QThread):
                 
             logging.info("★★★ ServiceAreaSearchWorker: 提供エリア検索を開始します ★★★")
             # 提供エリア検索を実行
-            result = area_search.search_service_area(self.postal_code, self.address, show_popup=True)
+            result = area_search.search_service_area(self.postal_code, self.address)
             
             if not self._is_running:
                 logging.info("ServiceAreaSearchWorker: スレッドが停止状態のため結果を返しません")
