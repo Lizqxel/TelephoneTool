@@ -717,18 +717,14 @@ class OrdererInputDialog(QDialog):
             orderer_data: 受注者情報データ
         """
         super().__init__(parent)
-        self.setWindowTitle("受注者入力項目")
+        self.setWindowTitle("受注者情報入力")
         self.setModal(True)
-        self.setMinimumWidth(500)
-        
-        # エンターキーの挙動を変更（ダイアログを閉じないようにする）
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         
         # 親ウィンドウへの参照を保持
         self.parent_window = parent
         
         # 保存データの初期化
-        self.saved_data = orderer_data or {}
+        self.saved_data = orderer_data if orderer_data is not None else {}
         
         # メインレイアウト
         layout = QVBoxLayout()
@@ -964,13 +960,10 @@ class OrdererInputDialog(QDialog):
         
         self.setLayout(layout)
         
-        # シグナルの接続
-        # 戻るボタンは削除
-        
         # エンターキーが押されたときに次の入力項目に移動するための設定
         self.input_fields = [
             self.operator_input, self.available_time_input, self.contractor_input,
-            self.furigana_input, self.order_person_input, self.employee_number_input,
+            self.furigana_input, self.order_person_input,
             self.fee_input, self.other_number_input, self.phone_device_input,
             self.forbidden_line_input, self.nd_input, self.relationship_input
         ]
@@ -980,60 +973,35 @@ class OrdererInputDialog(QDialog):
             if isinstance(field, QLineEdit):
                 field.installEventFilter(self)
         
-        # ここでデータをセット（先にデータをセット）
-        if self.saved_data and 'operator' in self.saved_data:
-            self.operator_input.setText(self.saved_data['operator'])
-            
-        if self.saved_data and 'available_time' in self.saved_data:
-            self.available_time_input.setText(self.saved_data['available_time'])
-            
-        if self.saved_data and 'contractor' in self.saved_data:
-            self.contractor_input.setText(self.saved_data['contractor'])
-            
-        if self.saved_data and 'furigana' in self.saved_data:
-            self.furigana_input.setText(self.saved_data['furigana'])
-            
-        if self.saved_data and 'order_person' in self.saved_data:
-            self.order_person_input.setText(self.saved_data['order_person'])
-            
-        if self.saved_data and 'employee_number' in self.saved_data:
-            self.employee_number_input.setText(self.saved_data['employee_number'])
-            
-        if self.saved_data and 'fee' in self.saved_data:
-            self.fee_input.setText(self.saved_data['fee'])
-            
-        if self.saved_data and 'net_usage' in self.saved_data:
-            self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
-            
-        if self.saved_data and 'family_approval' in self.saved_data:
-            self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
-            
-        if self.saved_data and 'other_number' in self.saved_data:
-            self.other_number_input.setText(self.saved_data['other_number'])
-            
-        if self.saved_data and 'phone_device' in self.saved_data:
-            self.phone_device_input.setText(self.saved_data['phone_device'])
-            
-        if self.saved_data and 'forbidden_line' in self.saved_data:
-            self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
-            
-        if self.saved_data and 'nd' in self.saved_data:
-            self.nd_input.setText(self.saved_data['nd'])
-            
-        if self.saved_data and 'relationship' in self.saved_data:
-            self.relationship_input.setText(self.saved_data['relationship'])
-            
-        # 親ウィンドウの提供判定結果を確認し、判定コンボボックスを更新
-        try:
-            if hasattr(self.parent_window, 'judgment_result_label'):
-                judgment_text = self.parent_window.judgment_result_label.text()
-                if "提供可能" in judgment_text:
-                    self.judgment_combo.setCurrentText("OK")
-                elif "提供エリア外" in judgment_text:
-                    self.judgment_combo.setCurrentText("NG")
-        except Exception as e:
-            logging.error(f"提供判定結果の取得でエラー: {e}")
-            
+        # データの設定
+        if self.saved_data:
+            if 'operator' in self.saved_data:
+                self.operator_input.setText(self.saved_data['operator'])
+            if 'available_time' in self.saved_data:
+                self.available_time_input.setText(self.saved_data['available_time'])
+            if 'contractor' in self.saved_data:
+                self.contractor_input.setText(self.saved_data['contractor'])
+            if 'furigana' in self.saved_data:
+                self.furigana_input.setText(self.saved_data['furigana'])
+            if 'order_person' in self.saved_data:
+                self.order_person_input.setText(self.saved_data['order_person'])
+            if 'fee' in self.saved_data:
+                self.fee_input.setText(self.saved_data['fee'])
+            if 'net_usage' in self.saved_data:
+                self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
+            if 'family_approval' in self.saved_data:
+                self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
+            if 'other_number' in self.saved_data:
+                self.other_number_input.setText(self.saved_data['other_number'])
+            if 'phone_device' in self.saved_data:
+                self.phone_device_input.setText(self.saved_data['phone_device'])
+            if 'forbidden_line' in self.saved_data:
+                self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
+            if 'nd' in self.saved_data:
+                self.nd_input.setText(self.saved_data['nd'])
+            if 'relationship' in self.saved_data:
+                self.relationship_input.setText(self.saved_data['relationship'])
+        
         # フリガナ自動生成のシグナルを接続
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_furigana())
@@ -1227,7 +1195,6 @@ class OrdererInputDialog(QDialog):
                 'furigana': self.furigana_input.text(),
                 'birth_date': birth_date,  # 生年月日を設定
                 'order_person': self.order_person_input.text(),
-                'employee_number': self.employee_number_input.text(),
                 'fee': self.fee_input.text(),
                 'net_usage': self.net_usage_combo.currentText(),
                 'family_approval': self.family_approval_combo.currentText(),
@@ -1294,11 +1261,6 @@ class OrdererInputDialog(QDialog):
             if data.get('order_person'):
                 converted_person = convert_to_half_width(data['order_person'])
                 self.order_person_input.setText(converted_person)
-            
-            # 社番
-            if data.get('employee_number'):
-                converted_number = convert_to_half_width(data['employee_number'])
-                self.employee_number_input.setText(converted_number)
             
             # 料金認識
             if data.get('fee'):
