@@ -1,5 +1,5 @@
 {
-  "font_size": 9,
+  "font_size": 11,
   "browser_settings": {
     "headless": true,
     "disable_images": true,
