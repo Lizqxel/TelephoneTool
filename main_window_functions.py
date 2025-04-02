@@ -73,7 +73,7 @@ class MainWindowFunctions:
         try:
             # 初期設定を設定
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
                 'font_size': 11,
                 'delay_seconds': 0,
                 'browser_settings': {
@@ -118,7 +118,7 @@ class MainWindowFunctions:
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
                 'font_size': 11,
                 'delay_seconds': 0,
                 'browser_settings': {
@@ -205,215 +205,171 @@ class MainWindowFunctions:
             self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
     
     def generate_cti_format(self):
-        """CTIフォーマットのテキストを生成"""
-        try:
-            # 必須項目の検証
-            required_fields = {
-                'operator': self.operator_input,
-                'contractor': self.contractor_input,
-                'furigana': self.furigana_input,
-                'address': self.address_input,
-                'postal_code': self.postal_code_input,
-                'list_name': self.list_name_input,
-                'list_furigana': self.list_furigana_input,
-                'list_phone': self.list_phone_input,
-                'list_postal_code': self.list_postal_code_input,
-                'list_address': self.list_address_input,
-                'order_person': self.order_person_input,
-                'available_time': self.available_time_input,
-                'fee': self.fee_input,
-                'relationship': self.relationship_input,
-                'employee_number': self.employee_number_input,
-                'nd': self.nd_input
+        """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
+        # 必須項目の検証
+        required_fields = {
+            'operator': self.operator_input,
+            'contractor': self.contractor_input,
+            'furigana': self.furigana_input,
+            'address': self.address_input,
+            'postal_code': self.postal_code_input,  # 郵便番号を追加
+            'list_name': self.list_name_input,  # リスト名を追加
+            'list_furigana': self.list_furigana_input,  # リストフリガナを追加
+            'list_phone': self.list_phone_input,
+            'list_postal_code': self.list_postal_code_input,  # リスト郵便番号を追加
+            'list_address': self.list_address_input,  # リスト住所を追加
+            'order_person': self.order_person_input,
+            'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
+            'fee': self.fee_input,  # 料金認識を追加
+            'relationship': self.relationship_input,  # 名義人との関係性
+            'nd': self.nd_input  # NDを追加
+        }
+        
+        # すべてのフィールドの背景色をリセット
+        for field in required_fields.values():
+            field.setStyleSheet("")
+        
+        # 未入力のフィールドをチェック
+        missing_fields = []
+        for name, field in required_fields.items():
+            if not field.text().strip():
+                # 背景を赤くする
+                field.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+                missing_fields.append(name)
+        
+        # 未入力フィールドがある場合
+        has_empty_fields = len(missing_fields) > 0
+        
+        # 未入力項目があることを警告し、続行するか確認
+        if has_empty_fields:
+            # 日本語のフィールド名に変換
+            field_names_ja = {
+                'operator': '対応者名',
+                'contractor': '契約者名',
+                'furigana': 'フリガナ',
+                'address': '住所',
+                'postal_code': '郵便番号',  # 追加
+                'list_name': 'リスト名',  # 追加
+                'list_furigana': 'リストフリガナ',  # 追加
+                'list_phone': '電話番号',
+                'list_postal_code': 'リスト郵便番号',  # 追加
+                'list_address': 'リスト住所',  # 追加
+                'order_person': '受注者名',
+                'available_time': '出やすい時間帯',
+                'fee': '料金認識',  # 追加
+                'relationship': '備考：名義人の...',  # 名義人との関係性に変更
+                'nd': 'ND'  # NDを追加
             }
             
-            # 未入力のフィールドをチェック
-            missing_fields = []
-            for name, field in required_fields.items():
-                if not field.text().strip():
-                    missing_fields.append(name)
-                    # 未入力フィールドの背景を赤くする
-                    field.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
+            # 未入力項目の日本語名のリスト
+            missing_fields_ja = [field_names_ja[field] for field in missing_fields]
             
-            # 未入力フィールドがある場合
-            has_empty_fields = len(missing_fields) > 0
+            # 確認ダイアログを表示（日本語ボタン）
+            message_box = QMessageBox()
+            message_box.setWindowTitle("未入力項目があります")
+            message_box.setText(f"以下の項目が未入力です:\n\n{', '.join(missing_fields_ja)}\n\n営コメを作成しますか？")
+            message_box.setIcon(QMessageBox.Question)
+            yes_button = message_box.addButton("はい", QMessageBox.YesRole)
+            no_button = message_box.addButton("いいえ", QMessageBox.NoRole)
+            message_box.setDefaultButton(no_button)
             
-            # 未入力項目があることを警告し、続行するか確認
-            if has_empty_fields:
-                # 日本語のフィールド名に変換
-                field_names_ja = {
-                    'operator': '対応者名',
-                    'contractor': '契約者名',
-                    'furigana': 'フリガナ',
-                    'address': '住所',
-                    'postal_code': '郵便番号',
-                    'list_name': 'リスト名',
-                    'list_furigana': 'リストフリガナ',
-                    'list_phone': '電話番号',
-                    'list_postal_code': 'リスト郵便番号',
-                    'list_address': 'リスト住所',
-                    'order_person': '受注者名',
-                    'available_time': '出やすい時間帯',
-                    'fee': '料金認識',
-                    'relationship': '備考：名義人の...',
-                    'employee_number': '社番',
-                    'nd': 'ND'
-                }
-                
-                # 未入力項目の日本語名のリスト
-                missing_fields_ja = [field_names_ja[field] for field in missing_fields]
-                
-                # 確認ダイアログを表示（日本語ボタン）
-                message_box = QMessageBox()
-                message_box.setWindowTitle("未入力項目があります")
-                message_box.setText(f"以下の項目が未入力です:\n\n{', '.join(missing_fields_ja)}\n\n営コメを作成しますか？")
-                message_box.setIcon(QMessageBox.Question)
-                yes_button = message_box.addButton("はい", QMessageBox.YesRole)
-                no_button = message_box.addButton("いいえ", QMessageBox.NoRole)
-                message_box.setDefaultButton(no_button)
-                
-                message_box.exec()
-                
-                # いいえが選択された場合は処理を中止
-                if message_box.clickedButton() == no_button:
-                    return None
+            message_box.exec()
             
-            # 基本情報
-            operator = self.operator_input.text()
-            available_time = self.available_time_input.text()
-            contractor = self.contractor_input.text()
-            furigana = self.furigana_input.text()
-            
-            # 生年月日
-            era = self.era_combo.currentText()
-            year = self.year_input.text()
-            month = self.month_input.text()
-            day = self.day_input.text()
-            
-            # 生年月日の書式設定
-            birth_date = ""
-            if era and year and month and day:
-                # 和暦から西暦への変換
-                era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867, "西暦": 0}
-                if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
-                    try:
-                        jp_year = int(year)
-                        if era == "西暦":
-                            western_year = jp_year
-                        else:
-                            western_year = era_year_map[era] + jp_year
-                        birth_date = f"{western_year}/{month}/{day}"
-                    except (ValueError, TypeError):
-                        logging.warning("生年月日の変換に失敗しました")
-            
-            # その他の情報
-            order_person = self.order_person_input.text()
-            employee_number = self.employee_number_input.text()
-            fee = self.fee_input.text()
-            net_usage = self.net_usage_combo.currentText()
-            family_approval = self.family_approval_combo.currentText()
-            other_number = self.other_number_input.text()
-            phone_device = self.phone_device_input.text()
-            forbidden_line = self.forbidden_line_input.text()
-            nd = self.nd_input.text()
-            relationship = self.relationship_input.text()
-            
-            # 住所情報
-            postal_code = self.postal_code_input.text()
-            address = self.address_input.text()
-            address_furigana = self.address_furigana_input.text()
-            
-            # リスト情報
-            list_name = self.list_name_input.text()
-            list_furigana = self.list_furigana_input.text()
-            list_phone = self.list_phone_input.text()
-            list_postal_code = self.list_postal_code_input.text()
-            list_address = self.list_address_input.text()
-            list_address_furigana = self.list_address_furigana_input.text()
-            
-            # 受注情報
-            current_line = self.current_line_combo.currentText()
-            order_date = self.order_date_input.text()
-            judgment = self.judgment_combo.currentText()
-            
-            # フォーマットテンプレートを取得
-            template = self.settings.get("format_template", "")
-            
-            # テンプレート内のプレースホルダーを置換
-            formatted_text = template.format(
-                operator=operator,
-                available_time=available_time,
-                contractor=contractor,
-                furigana=furigana,
-                birth_date=birth_date,
-                postal_code=postal_code,
-                address=address,
-                list_name=list_name,
-                list_furigana=list_furigana,
-                list_phone=list_phone,
-                list_postal_code=list_postal_code,
-                list_address=list_address,
-                current_line=current_line,
-                order_date=order_date,
-                order_person=order_person,
-                judgment=judgment,
-                fee=fee,
-                net_usage=net_usage,
-                family_approval=family_approval,
-                employee_number=employee_number,
-                other_number=other_number,
-                phone_device=phone_device,
-                forbidden_line=forbidden_line,
-                nd=nd,
-                relationship=relationship
-            )
-            
+            # いいえが選択された場合は処理を中止
+            if message_box.clickedButton() == no_button:
+                return None
+        
+        # 日付の書式設定
+        order_date = self.order_date_input.text()
+        
+        # 生年月日の取得
+        birth_date = ""
+        era = self.era_combo.currentText()
+        year = self.year_combo.currentText()
+        month = self.month_combo.currentText()
+        day = self.day_combo.currentText()
+        
+        if era and year and month and day:
+            # 和暦から西暦への変換
+            era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867, "西暦": 0}
+            if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
+                try:
+                    jp_year = int(year)
+                    if era == "西暦":
+                        western_year = jp_year
+                    else:
+                        western_year = era_year_map[era] + jp_year
+                    birth_date = f"{western_year}/{month}/{day}"
+                except (ValueError, TypeError):
+                    logging.warning("生年月日の変換に失敗しました")
+                    
+        # フォーマットデータの準備
+        format_data = {
+            'operator': self.operator_input.text(),
+            'mobile': "",  # 携帯電話番号を空に
+            'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
+            'contractor': self.contractor_input.text(),
+            'furigana': self.furigana_input.text(),
+            'birth_date': birth_date,
+            'postal_code': self.postal_code_input.text(),
+            'address': self.address_input.text(),
+            'list_name': self.list_name_input.text(),
+            'list_furigana': self.list_furigana_input.text(),
+            'list_phone': self.list_phone_input.text(),
+            'list_postal_code': self.list_postal_code_input.text(),
+            'list_address': self.list_address_input.text(),
+            'current_line': self.current_line_combo.currentText(),
+            'order_date': order_date,
+            'order_person': self.order_person_input.text(),
+            'judgment': self.judgment_combo.currentText(),
+            'fee': self.fee_input.text(),
+            'net_usage': self.net_usage_combo.currentText(),
+            'family_approval': self.family_approval_combo.currentText(),
+            'other_number': self.other_number_input.text(),  # 他番号を追加
+            'phone_device': self.phone_device_input.text(),  # 電話機を追加
+            'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
+            'nd': self.nd_input.text(),  # NDを追加
+            'relationship': self.relationship_input.text()  # 名義人との関係性
+        }
+        
+        # フォーマットテンプレートに値を埋め込む
+        try:
+            formatted_text = self.format_template.format(**format_data)
+
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
             if maps_url:
                 formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
             
-            # プレビューエリアに表示
+            # プレビューに表示
             self.preview_text.setText(formatted_text)
+
+            # プレビューテキストの色を確保
+            self.preview_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #f8f8f8;
+                    color: #333333;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-family: 'MS Gothic', monospace;
+                }
+            """)
             
+            # フォーマットしたテキストを返す
             return formatted_text
-            
+        except KeyError as e:
+            logging.error(f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
         except Exception as e:
-            logging.error(f"CTIフォーマットの生成中にエラー: {e}")
-            return ""
+            QMessageBox.warning(self, "エラー", f"フォーマットの生成に失敗しました: {str(e)}")
+        
+        return None
     
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""
-        # すべての入力フィールドの背景色を白にリセット
-        input_fields = [
-            self.operator_input,
-            self.available_time_input,
-            self.contractor_input,
-            self.furigana_input,
-            self.postal_code_input,
-            self.address_input,
-            self.list_name_input,
-            self.list_furigana_input,
-            self.list_phone_input,
-            self.list_postal_code_input,
-            self.list_address_input,
-            self.order_person_input,
-            self.employee_number_input,
-            self.fee_input,
-            self.relationship_input,
-            self.nd_input,
-            self.other_number_input,
-            self.phone_device_input,
-            self.forbidden_line_input
-        ]
-        
-        # 背景色を白にリセット
-        for field in input_fields:
-            field.setStyleSheet("")
-            field.setStyleSheet("background-color: white;")
-        
         # テキスト入力フィールドのクリア
         self.operator_input.clear()
+        # 携帯電話番号入力エリアの参照を削除
         self.available_time_input.clear()  # 出やすい時間帯をクリア
         self.contractor_input.clear()
         self.furigana_input.clear()
@@ -424,6 +380,8 @@ class MainWindowFunctions:
         self.list_phone_input.clear()
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
+        # 受注者名はクリアしない（保持する）
+        # self.order_person_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
         self.other_number_input.setText("なし")
@@ -460,6 +418,9 @@ class MainWindowFunctions:
         month = str(now.month)  # 0埋めなしの月
         day = str(now.day)      # 0埋めなしの日
         self.order_date_input.setText(f"{month}/{day}")
+        
+        # 料金認識は初期値に戻さない（保持する）
+        # self.fee_input.setText("2500円～3000円")
         
         # プレビューエリアをクリア
         self.preview_text.clear()
@@ -771,19 +732,33 @@ class MainWindowFunctions:
     def apply_font_size(self):
         """フォントサイズを適用する"""
         try:
-            # 設定からフォントサイズを取得
-            font_size = self.settings.get('font_size', 11)
+            # 設定ファイルからフォントサイズを取得
+            font_size = 10  # デフォルト値
             
-            # スタイルシートを更新
-            current_style = self.styleSheet()
-            updated_style = f"""
-                * {{
-                    font-family: 'Yu Gothic UI', 'Meiryo UI', sans-serif;
-                    font-size: {font_size}pt;
-                }}
-                {current_style}
-            """
-            self.setStyleSheet(updated_style)
+            if hasattr(self, 'settings') and 'font_size' in self.settings:
+                font_size = self.settings['font_size']
+            else:
+                logging.warning("設定が見つからないため、デフォルトのフォントサイズ(10)を使用します")
+                # 設定が存在しない場合は初期化
+                if not hasattr(self, 'settings'):
+                    self.settings = {'font_size': font_size}
+                else:
+                    self.settings['font_size'] = font_size
+            
+            # アプリケーション全体のフォントを設定
+            app = QApplication.instance()
+            font = QFont()
+            font.setPointSize(font_size)
+            app.setFont(font)
+            
+            # スタイルシートを使用してフォントサイズを設定
+            self.setStyleSheet(f"* {{ font-size: {font_size}pt; }}")
+            
+            # メインウィンドウの全てのウィジェットに対してフォントを再設定
+            for widget in self.findChildren(QWidget):
+                widget_font = widget.font()
+                widget_font.setPointSize(font_size)
+                widget.setFont(widget_font)
             
             logging.info(f"フォントサイズを {font_size} に設定しました")
             
@@ -885,9 +860,9 @@ class MainWindowFunctions:
             # 日付の計算
             birth_date = ""
             era = self.era_combo.currentText()
-            year = self.year_input.text()
-            month = self.month_input.text()
-            day = self.day_input.text()
+            year = self.year_combo.currentText()
+            month = self.month_combo.currentText()
+            day = self.day_combo.currentText()
             
             if era and year and year != "年" and month and month != "月" and day and day != "日":
                 # 和暦から西暦への変換
@@ -922,7 +897,6 @@ class MainWindowFunctions:
                 'fee': self.fee_input.text(),
                 'net_usage': self.net_usage_combo.currentText(),
                 'family_approval': self.family_approval_combo.currentText(),
-                'employee_number': self.employee_number_input.text(),  # 社番を追加
                 'other_number': self.other_number_input.text(),  # 他番号を追加
                 'phone_device': self.phone_device_input.text(),  # 電話機を追加
                 'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
