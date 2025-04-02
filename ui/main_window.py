@@ -215,8 +215,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def show_mode_selection(self):
         """
         モード選択ダイアログを表示する
+        設定ファイルのshow_mode_selectionの値に基づいて表示を制御する
         """
-        self.show_mode_selection_dialog()
+        try:
+            # 設定ファイルの読み込み
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    # show_mode_selectionがFalseの場合は表示しない
+                    if not settings.get('show_mode_selection', True):
+                        self.current_mode = settings.get('mode', 'simple')
+                        return
+            # 設定ファイルが存在しない場合、またはshow_mode_selectionがTrueの場合は表示
+            self.show_mode_selection_dialog()
+        except Exception as e:
+            logging.error(f"モード設定の読み込み中にエラーが発生しました: {e}")
+            # エラーが発生した場合は、モード選択ダイアログを表示
+            self.show_mode_selection_dialog()
     
     def show_mode_selection_dialog(self):
         """
@@ -239,10 +254,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         モード設定を保存する
         
         Args:
-            mode (str): 選択されたモード
-            show_again (bool): 次回以降表示するかどうか
+            mode: 選択されたモード（'simple'または'easy'）
+            show_again: 次回から表示するかどうか
         """
         try:
+            # 設定ファイルの読み込み
             settings = {}
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
@@ -252,15 +268,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             settings['mode'] = mode
             settings['show_mode_selection'] = show_again
             
-            # 設定を保存
+            # 設定ファイルに保存
             with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, ensure_ascii=False, indent=4)
+                json.dump(settings, f, ensure_ascii=False, indent=2)
             
-            logging.info(f"モード設定を保存しました: {mode}")
+            logging.info(f"モード設定を保存しました: mode={mode}, show_mode_selection={show_again}")
         except Exception as e:
             logging.error(f"モード設定の保存中にエラーが発生しました: {e}")
-            # エラーが発生した場合は、デフォルトでシンプルモードを使用
-            self.current_mode = 'simple'
     
     def init_simple_mode(self):
         """通常モードのUIを初期化"""
@@ -1076,11 +1090,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input = QLineEdit()
         input_layout.addWidget(self.order_person_input)
         
-        # 社番
-        input_layout.addWidget(QLabel("社番"))
-        self.employee_number_input = QLineEdit()
-        input_layout.addWidget(self.employee_number_input)
-        
         # 料金認識を追加（移動）
         input_layout.addWidget(QLabel("料金認識"))
         self.fee_input = QLineEdit()
@@ -1313,63 +1322,52 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def create_preview_area(self, parent_layout):
         """プレビューエリアを作成"""
         try:
-            # 提供判定結果を表示するエリアを追加
-            judgment_layout = QHBoxLayout()
-            
-            # 提供エリア検索結果表示用のラベル
-            self.judgment_result_label = QLabel("提供エリア: 未検索")
-            self.judgment_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #ddd;
-                    border-radius: 4px;
-                    background-color: #f8f8f8;
-                }
-            """)
-            judgment_layout.addWidget(self.judgment_result_label)
-            
-            parent_layout.addLayout(judgment_layout)
+            # 誘導モードの場合のみ、提供判定結果を表示するエリアを追加
+            if self.current_mode != 'simple':
+                # 提供エリア検索結果表示用のラベル
+                self.judgment_result_label = QLabel("提供エリア: 未検索")
+                self.judgment_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #ddd;
+                        border-radius: 4px;
+                        background-color: #f8f8f8;
+                    }
+                """)
+                parent_layout.addWidget(self.judgment_result_label)
             
             # プレビューテキストエリア
             self.preview_text = QTextEdit()
             self.preview_text.setReadOnly(True)
             self.preview_text.setMinimumHeight(300)
-            self.preview_text.setStyleSheet("""
-                QTextEdit {
-                    background-color: #f8f8f8;
-                    color: #333333;
-                    border: 1px solid #ddd;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-family: 'MS Gothic', monospace;
-                }
-            """)
             parent_layout.addWidget(self.preview_text)
             
-            # 更新ボタン
-            self.update_preview_btn = QPushButton("プレビュー更新")
-            self.update_preview_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #4CAF50;
-                    color: white;
-                    border: none;
-                    padding: 8px;
-                    text-align: center;
-                    font-size: 14px;
-                    margin: 4px 2px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #45a049;
-                }
-                QPushButton:pressed {
-                    background-color: #3e8e41;
-                }
-            """)
-            # プレビュー更新ボタンのシグナル接続
-            self.update_preview_btn.clicked.connect(self.generate_preview_text)
-            parent_layout.addWidget(self.update_preview_btn)
+            # 通常モードの場合のみ、プレビュー更新ボタンを追加
+            if self.current_mode == 'normal':
+                # プレビュー更新ボタン
+                self.update_preview_btn = QPushButton("プレビュー更新")
+                self.update_preview_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 8px 16px;
+                        text-align: center;
+                        font-size: 14px;
+                        margin: 4px 2px;
+                        border-radius: 4px;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                    QPushButton:pressed {
+                        background-color: #3e8e41;
+                    }
+                """)
+                # プレビュー更新ボタンのシグナル接続
+                self.update_preview_btn.clicked.connect(self.generate_preview_text)
+                parent_layout.addWidget(self.update_preview_btn)
             
         except Exception as e:
             logging.error(f"プレビューエリア作成中にエラー: {e}")
@@ -1413,7 +1411,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.order_person_input.textChanged.connect(self.reset_background_color)
             self.fee_input.textChanged.connect(self.reset_background_color)
             self.relationship_input.textChanged.connect(self.reset_background_color)
-            self.employee_number_input.textChanged.connect(self.reset_background_color)
             self.nd_input.textChanged.connect(self.reset_background_color)
             
             # ボタンのシグナル接続
@@ -2252,7 +2249,7 @@ class CancellationError(Exception):
                     'month': self.month_combo.currentText(),
                     'day': self.day_combo.currentText(),
                     'order_person': self.order_person_input.text(),
-                    'employee_number': self.employee_number_input.text(),
+                    'employee_number': '',  # 社番は空で初期化
                     'fee': self.fee_input.text(),
                     'net_usage': self.net_usage_combo.currentText(),
                     'family_approval': self.family_approval_combo.currentText(),

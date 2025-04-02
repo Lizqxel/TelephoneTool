@@ -364,11 +364,12 @@ ND：
             'fee': self.fee_input.text(),
             'net_usage': self.net_usage_combo.currentText(),
             'family_approval': self.family_approval_combo.currentText(),
-            'other_number': self.other_number_input.text(),  # 他番号を追加
-            'phone_device': self.phone_device_input.text(),  # 電話機を追加
-            'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
-            'nd': self.nd_input.text(),  # NDを追加
-            'relationship': self.relationship_input.text()  # 名義人との関係性
+            'other_number': self.other_number_input.text(),
+            'phone_device': self.phone_device_input.text(),
+            'forbidden_line': self.forbidden_line_input.text(),
+            'nd': self.nd_input.text(),
+            'relationship': self.relationship_input.text(),
+            'employee_number': ''  # 社番は空で初期化
         }
         
         # フォーマットテンプレートに値を埋め込む
