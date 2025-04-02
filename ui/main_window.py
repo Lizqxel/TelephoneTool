@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout,
                              QStatusBar, QSizePolicy, QSpacerItem,
                              QTabWidget, QRadioButton, QGroupBox,
                              QScrollArea, QSplitter, QToolTip, QMenuBar)
-from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot, QMetaObject, Q_ARG, QPoint, QEvent
+from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot, QMetaObject, Q_ARG, QPoint, QEvent, QThread
 from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowEvent, QIcon
 
 from ui.main_window_functions import MainWindowFunctions
@@ -28,12 +28,13 @@ from services.phone_button_monitor import PhoneButtonMonitor
 from utils.format_utils import format_phone_number, format_phone_number_without_hyphen, format_postal_code
 from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
 from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
-from ui.easy_mode_dialogs import ServiceAreaSearchThread, convert_to_half_width
+from ui.easy_mode_dialogs import convert_to_half_width
 from ui.settings_dialog import SettingsDialog
 from ui.mode_selection_dialog import ModeSelectionDialog
 from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space
 from utils.furigana_utils import convert_to_furigana
 from ui.update_dialog import UpdateDialog
+from services.area_search import search_service_area
 
 
 class CustomComboBox(QComboBox):
@@ -540,11 +541,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 'judgment': 'OK'  # デフォルト値を設定
             }
             
-            # 並行して提供判定処理を開始（バックグラウンドで実行）
-            self.start_service_area_search()
-            
-            # 受注者入力項目ダイアログを直接表示
+            # 受注者入力項目ダイアログを表示
             dialog = OrdererInputDialog(self, self.orderer_data)
+            
+            # 提供判定処理を開始（非同期で実行）
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.start_service_area_search)
+            
+            # ダイアログの結果を処理
             result = dialog.exec()
             
             # 作成中止が選択された場合
@@ -578,51 +582,61 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             # 提供判定中の表示に更新
             self.update_judgment_result("検索中...")
             
-            # 検索スレッドの作成と開始
-            self.search_thread = ServiceAreaSearchThread(postal_code, address, self)
+            # 非同期で検索を実行
+            from PySide6.QtCore import QThread, Signal
             
-            # active_search_threadsがなければ作成
-            if not hasattr(self, 'active_search_threads'):
-                self.active_search_threads = []
+            class SearchThread(QThread):
+                finished = Signal(dict)
+                error = Signal(str)
+                
+                def __init__(self, postal_code, address):
+                    super().__init__()
+                    self.postal_code = postal_code
+                    self.address = address
+                
+                def run(self):
+                    try:
+                        result = search_service_area(self.postal_code, self.address)
+                        self.finished.emit(result)
+                    except Exception as e:
+                        self.error.emit(str(e))
             
-            # 古いスレッドをクリーンアップ
-            active_threads = []
-            for thread in self.active_search_threads:
-                if thread.isRunning():
-                    active_threads.append(thread)
-                else:
-                    logging.info("実行していない古いスレッドを削除します")
-            
-            self.active_search_threads = active_threads
-            
-            # スレッドをリストに追加して開始
-            self.active_search_threads.append(self.search_thread)
+            # 検索スレッドを作成して開始
+            self.search_thread = SearchThread(postal_code, address)
+            self.search_thread.finished.connect(self.handle_search_result)
+            self.search_thread.error.connect(self.handle_search_error)
             self.search_thread.start()
-            logging.info(f"提供エリア検索スレッドを開始しました: postal_code={postal_code}, address={address}")
             
-            # 提供判定サイトのポップアップ位置を設定
-            if hasattr(self.search_thread, 'browser'):
-                # 画面のサイズを取得
-                screen = QApplication.primaryScreen().geometry()
-                screen_width = screen.width()
-                screen_height = screen.height()
-                
-                # 提供判定サイトのサイズを想定（一般的なブラウザウィンドウサイズ）
-                browser_width = 800
-                browser_height = 600
-                
-                # 画面右下に配置
-                # 画面の下端から100px、右端から20pxの位置に配置
-                x = screen_width - browser_width - 20
-                y = screen_height - browser_height - 100
-                
-                # 位置を設定
-                self.search_thread.browser.move(x, y)
-                logging.info(f"提供判定サイトを画面右下に配置: x={x}, y={y}")
+            logging.info(f"提供エリア検索を開始しました: postal_code={postal_code}, address={address}")
             
         except Exception as e:
             logging.error(f"提供判定処理の開始中にエラー: {e}", exc_info=True)
             self.update_judgment_result("検索エラー")
+    
+    def handle_search_result(self, result):
+        """検索結果を処理"""
+        try:
+            if result.get("status") == "available":
+                self.update_judgment_result("提供可能")
+            elif result.get("status") == "unavailable":
+                self.update_judgment_result("提供エリア外")
+            else:
+                self.update_judgment_result("判定失敗")
+            
+            logging.info(f"提供エリア検索が完了しました: {result}")
+            
+        except Exception as e:
+            logging.error(f"検索結果の処理中にエラー: {e}", exc_info=True)
+            self.update_judgment_result("検索エラー")
+    
+    def handle_search_error(self, error_message):
+        """検索エラーを処理"""
+        try:
+            logging.error(f"提供エリア検索中にエラー: {error_message}")
+            self.update_judgment_result("検索エラー")
+            
+        except Exception as e:
+            logging.error(f"エラー処理中に別のエラー: {e}", exc_info=True)
 
     def show_address_dialog(self):
         """住所情報ダイアログを表示"""
