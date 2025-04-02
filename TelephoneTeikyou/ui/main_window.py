@@ -26,6 +26,12 @@ from ui.settings_dialog import SettingsDialog
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
 
+
+class CancellationError(Exception):
+    """検索キャンセル時に発生する例外"""
+    pass
+
+
 class ServiceAreaSearchWorker(QObject):
     """
     提供エリア検索を実行するワーカークラス
@@ -37,6 +43,13 @@ class ServiceAreaSearchWorker(QObject):
         super().__init__()
         self.postal_code = postal_code
         self.address = address
+        self._is_cancelled = False
+    
+    def cancel(self):
+        """
+        検索をキャンセルする
+        """
+        self._is_cancelled = True
     
     def run(self):
         """
@@ -45,6 +58,8 @@ class ServiceAreaSearchWorker(QObject):
         try:
             # 進捗状況を通知するコールバック関数を定義
             def progress_callback(message):
+                if self._is_cancelled:
+                    raise CancellationError("検索がキャンセルされました")
                 self.progress.emit(message)
 
             # 検索を実行
@@ -53,14 +68,24 @@ class ServiceAreaSearchWorker(QObject):
                 self.address,
                 progress_callback=progress_callback
             )
+            if self._is_cancelled:
+                raise CancellationError("検索がキャンセルされました")
             self.finished.emit(result)
+        except CancellationError as e:
+            logging.info("検索がキャンセルされました")
+            self.progress.emit("検索がキャンセルされました")
+            self.finished.emit({
+                "status": "cancelled",
+                "message": "検索がキャンセルされました"
+            })
         except Exception as e:
-            logging.error(f"検索処理中にエラーが発生: {str(e)}")
+            logging.error(f"検索中にエラーが発生しました: {str(e)}")
             self.progress.emit("エラーが発生しました")
             self.finished.emit({
-                "status": "error",
-                "message": f"検索処理中にエラーが発生: {str(e)}"
+                "status": "failure",
+                "message": f"エラーが発生しました: {str(e)}"
             })
+
 
 class MainWindow(QMainWindow):
     """メインウィンドウクラス"""
@@ -257,7 +282,7 @@ class MainWindow(QMainWindow):
         self.area_search_btn = QPushButton("提供エリア検索")
         self.area_search_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #2ECC71;
                 color: white;
                 border: none;
                 padding: 8px 16px;
@@ -267,10 +292,10 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #27AE60;
             }
             QPushButton:pressed {
-                background-color: #3e8e41;
+                background-color: #219A52;
             }
             QPushButton:disabled {
                 background-color: #cccccc;
@@ -283,20 +308,23 @@ class MainWindow(QMainWindow):
         # プログレスバー
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setFixedHeight(2)
+        self.progress_bar.setRange(0, 0)  # 不定進捗バーに設定
+        self.progress_bar.setFixedHeight(4)  # 高さを固定
+        self.progress_bar.setTextVisible(False)  # テキストを非表示
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
                 background-color: #E3F2FD;
+                border-radius: 2px;
             }
             QProgressBar::chunk {
                 background-color: #3498DB;
+                border-radius: 2px;
             }
         """)
         address_layout.addWidget(self.progress_bar)
         
-        # 結果表示
+        # 結果表示ラベル
         self.result_label = QLabel("提供エリア: 未検索")
         self.result_label.setStyleSheet("""
             QLabel {
@@ -311,11 +339,11 @@ class MainWindow(QMainWindow):
         address_layout.addWidget(self.result_label)
         
         # スクリーンショットボタン
-        self.screenshot_btn = QPushButton("スクリーンショット表示")
+        self.screenshot_btn = QPushButton("スクリーンショットを表示")
         self.screenshot_btn.setEnabled(False)
         self.screenshot_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3498DB;
+                background-color: #9B59B6;
                 color: white;
                 border: none;
                 padding: 8px 16px;
@@ -325,10 +353,10 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
             }
             QPushButton:hover {
-                background-color: #2980B9;
+                background-color: #8E44AD;
             }
             QPushButton:pressed {
-                background-color: #2471A3;
+                background-color: #7D3C98;
             }
             QPushButton:disabled {
                 background-color: #cccccc;
@@ -338,8 +366,12 @@ class MainWindow(QMainWindow):
         self.screenshot_btn.clicked.connect(self.show_screenshot)
         address_layout.addWidget(self.screenshot_btn)
         
+        # 住所情報グループをレイアウトに追加
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
+        
+        # 垂直方向のスペーサーを追加
+        parent_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
     
     def load_settings(self):
         """設定ファイルを読み込む"""
@@ -434,9 +466,29 @@ class MainWindow(QMainWindow):
             # 既存のスレッドとワーカーをクリーンアップ
             self.cleanup_thread()
             
-            # 検索ボタンを無効化
-            self.area_search_btn.setEnabled(False)
-            self.area_search_btn.setText("検索中...")
+            # 検索ボタンをキャンセルボタンに変更
+            self.area_search_btn.setEnabled(True)
+            self.area_search_btn.setText("キャンセル")
+            self.area_search_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #E74C3C;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    text-align: center;
+                    font-size: 14px;
+                    margin: 4px 2px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #C0392B;
+                }
+                QPushButton:pressed {
+                    background-color: #A93226;
+                }
+            """)
+            self.area_search_btn.clicked.disconnect()
+            self.area_search_btn.clicked.connect(self.cancel_search)
             
             # プログレスバーを表示
             self.progress_bar.setVisible(True)
@@ -463,51 +515,92 @@ class MainWindow(QMainWindow):
             self.thread = QThread()
             self.worker.moveToThread(self.thread)
             self.thread.started.connect(self.worker.run)
-            self.thread.finished.connect(self.thread.deleteLater)  # スレッド終了時にクリーンアップ
+            self.thread.finished.connect(self.thread.deleteLater)
             self.thread.start()
             
         except Exception as e:
-            logging.error(f"検索処理の開始時にエラー: {str(e)}")
-            self.result_label.setText("提供エリア: エラーが発生しました")
-            self.result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            self.area_search_btn.setEnabled(True)
-            self.area_search_btn.setText("検索")
-            self.progress_bar.setVisible(False)
-            self.cleanup_thread()
+            logging.error(f"検索の開始に失敗: {str(e)}")
+            self.reset_search_button()
+            QMessageBox.critical(self, "エラー", f"検索の開始に失敗しました: {str(e)}")
     
-    def update_search_progress(self, message):
-        """検索の進捗状況を更新"""
-        self.result_label.setText(f"提供エリア: {message}")
+    def cancel_search(self):
+        """提供エリア検索をキャンセルする"""
+        # キャンセル中の状態をUIに即時反映
+        self.area_search_btn.setEnabled(False)
+        self.area_search_btn.setText("キャンセル中...")
+        self.result_label.setText("提供エリア: キャンセル中...")
         self.result_label.setStyleSheet("""
             QLabel {
                 font-size: 14px;
                 padding: 5px;
-                border: 1px solid #3498DB;
+                border: 1px solid #F39C12;
                 border-radius: 4px;
-                background-color: #E3F2FD;
-                color: #2980B9;
+                background-color: #FFF3E0;
+                color: #F39C12;
             }
         """)
-        QApplication.processEvents()
-    
+
+        # バックエンド処理のキャンセル
+        if hasattr(self, 'worker'):
+            self.worker.cancel()
+            # キャンセル完了を待つため、ボタンとプログレスバーはそのまま維持
+
+    def reset_search_button(self):
+        """検索ボタンを初期状態に戻す"""
+        self.area_search_btn.setEnabled(True)
+        self.area_search_btn.setText("提供エリア検索")
+        self.area_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ECC71;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                text-align: center;
+                font-size: 14px;
+                margin: 4px 2px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #27AE60;
+            }
+            QPushButton:pressed {
+                background-color: #219A52;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.area_search_btn.clicked.disconnect()
+        self.area_search_btn.clicked.connect(self.search_service_area)
+
     def on_search_completed(self, result):
         """検索完了時の処理"""
         # プログレスバーを非表示
         self.progress_bar.setVisible(False)
-        self.area_search_btn.setEnabled(True)
-        self.area_search_btn.setText("検索")
+        
+        status = result.get("status", "failure")
+        
+        if status == "cancelled":
+            self.result_label.setText("提供エリア: 検索がキャンセルされました")
+            self.result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #F39C12;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #F39C12;
+                }
+            """)
+            # キャンセル完了後に検索ボタンを初期状態に戻す
+            self.reset_search_button()
+            return
+        
+        # キャンセル以外の完了時の処理
+        self.reset_search_button()
         
         try:
-            status = result.get("status")
             message = result.get("message", "")
             details = result.get("details", {})
             
@@ -718,4 +811,12 @@ class MainWindow(QMainWindow):
                 self,
                 "エラー",
                 f"地図の表示中にエラーが発生しました: {str(e)}"
-            ) 
+            )
+    
+    def update_search_progress(self, message):
+        """検索の進捗状況を更新"""
+        self.result_label.setText(f"提供エリア: {message}")
+        # プログレスバーを表示
+        if not self.progress_bar.isVisible():
+            self.progress_bar.setVisible(True)
+        QApplication.processEvents() 

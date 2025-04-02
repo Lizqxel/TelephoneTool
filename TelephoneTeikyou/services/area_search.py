@@ -17,6 +17,7 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
+from PIL import Image  # PILライブラリを追加
 
 from services.web_driver import create_driver
 from utils.string_utils import normalize_string, calculate_similarity
@@ -104,14 +105,21 @@ def split_address(address):
                             town = remaining[:remaining.find('丁目')].strip()
                         block = chome_match.group(1)
                     else:
-                        # 通常の番地パターンを検索
-                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
-                        if number_match:
-                            number_part = number_match.group(1)
-                            town = remaining[:number_match.start()].strip()
+                        # ハイフンが2つある場合は、最初の数字を丁目として扱う
+                        double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
+                        if double_hyphen_match:
+                            block = double_hyphen_match.group(1)
+                            number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
+                            town = remaining[:double_hyphen_match.start()].strip()
                         else:
-                            number_part = None
-                            town = remaining
+                            # 通常の番地パターンを検索
+                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                            if number_match:
+                                number_part = number_match.group(1)
+                                town = remaining[:number_match.start()].strip()
+                            else:
+                                number_part = None
+                                town = remaining
                 
                 return {
                     'prefecture': prefecture,
@@ -426,6 +434,98 @@ def create_driver(headless=False):
     except Exception as e:
         logging.error(f"ドライバーの作成に失敗: {str(e)}")
         raise
+
+def take_full_page_screenshot(driver, save_path):
+    """
+    ページ全体のスクリーンショットを取得する（スクロール部分も含む）
+
+    Args:
+        driver (webdriver): Seleniumのwebdriverインスタンス
+        save_path (str): スクリーンショットの保存パス
+
+    Returns:
+        str: 保存されたスクリーンショットの絶対パス
+    """
+    # 元のウィンドウサイズと位置、スクロール位置を保存
+    original_size = driver.get_window_size()
+    original_position = driver.get_window_position()
+    original_scroll = driver.execute_script("return window.pageYOffset;")
+
+    try:
+        # ページ全体のサイズを取得
+        total_width = driver.execute_script("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);")
+        total_height = driver.execute_script("return Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);")
+        
+        # ビューポートの高さを取得
+        viewport_width = driver.execute_script("return window.innerWidth;")
+        viewport_height = driver.execute_script("return window.innerHeight;")
+        
+        # スクリーンショットを保存するリスト
+        screenshots = []
+        
+        # スクロールの開始位置
+        current_position = 0
+        
+        # ウィンドウサイズを設定（幅はビューポートに合わせる）
+        driver.set_window_size(viewport_width, viewport_height)
+        
+        while current_position < total_height:
+            # 指定位置までスクロール
+            driver.execute_script(f"window.scrollTo(0, {current_position});")
+            time.sleep(0.5)  # スクロール後の描画を待機
+            
+            # 一時的なスクリーンショットファイル名
+            temp_screenshot = f"temp_screenshot_{current_position}.png"
+            
+            # スクリーンショットを撮影
+            driver.save_screenshot(temp_screenshot)
+            screenshots.append(temp_screenshot)
+            
+            # 次のスクロール位置（ビューポートの高さ分）
+            current_position += viewport_height
+        
+        # スクリーンショットを合成
+        images = [Image.open(s) for s in screenshots]
+        
+        # 合成後の画像サイズを計算
+        max_width = max(img.width for img in images)
+        total_height = min(sum(img.height for img in images), total_height)  # ページの実際の高さを超えないように
+        
+        # 新しい画像を作成
+        combined_image = Image.new('RGB', (max_width, total_height))
+        
+        # 画像を縦に結合
+        y_offset = 0
+        for img in images:
+            # 最後の画像の場合、はみ出る部分をトリミング
+            if y_offset + img.height > total_height:
+                crop_height = total_height - y_offset
+                img = img.crop((0, 0, img.width, crop_height))
+            
+            combined_image.paste(img, (0, y_offset))
+            y_offset += img.height
+            
+            # 一時ファイルを削除
+            img.close()
+        
+        # 最終画像を保存
+        combined_image.save(save_path)
+        combined_image.close()
+        
+        # 一時ファイルを削除
+        for screenshot in screenshots:
+            try:
+                os.remove(screenshot)
+            except Exception as e:
+                logging.warning(f"一時ファイルの削除に失敗: {str(e)}")
+        
+        return os.path.abspath(save_path)
+        
+    finally:
+        # ウィンドウサイズと位置、スクロール位置を元に戻す
+        driver.set_window_size(original_size['width'], original_size['height'])
+        driver.set_window_position(original_position['x'], original_position['y'])
+        driver.execute_script(f"window.scrollTo(0, {original_scroll});")
 
 def search_service_area(postal_code, address, progress_callback=None):
     """
@@ -994,13 +1094,13 @@ def search_service_area(postal_code, address, progress_callback=None):
                     if found_image and found_pattern:
                         # 画像確認時のスクリーンショットを保存
                         screenshot_path = f"debug_{found_pattern['status']}_confirmation.png"
-                        driver.save_screenshot(screenshot_path)
+                        take_full_page_screenshot(driver, screenshot_path)
                         result_message = f"{found_pattern['message']}状態が確認されました"
                         logging.info(f"{result_message} - スクリーンショットを保存しました")
                         
                         # 結果を返す（JavaScriptによる画面書き換えは行わない）
                         result = found_pattern.copy()
-                        result["screenshot"] = os.path.abspath(screenshot_path)
+                        result["screenshot"] = screenshot_path
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
                         if progress_callback:
                             progress_callback(f"{result['message']}が確認されました")
@@ -1008,7 +1108,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                     else:
                         # 提供不可時のスクリーンショットを保存
                         screenshot_path = "debug_unavailable_confirmation.png"
-                        driver.save_screenshot(screenshot_path)
+                        take_full_page_screenshot(driver, screenshot_path)
                         logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
                         if progress_callback:
                             progress_callback("判定できませんでした")
@@ -1020,14 +1120,14 @@ def search_service_area(postal_code, address, progress_callback=None):
                                 "提供エリア": "判定できませんでした",
                                 "備考": "提供可否を判定できませんでした"
                             },
-                            "screenshot": os.path.abspath(screenshot_path),
+                            "screenshot": screenshot_path,
                             "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存
                     screenshot_path = "debug_timeout_confirmation.png"
-                    driver.save_screenshot(screenshot_path)
+                    take_full_page_screenshot(driver, screenshot_path)
                     logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
                     if progress_callback:
                         progress_callback("タイムアウトが発生しました")
@@ -1039,13 +1139,13 @@ def search_service_area(postal_code, address, progress_callback=None):
                             "提供エリア": "判定できませんでした",
                             "備考": "提供可否の確認中にタイムアウトが発生しました"
                         },
-                        "screenshot": os.path.abspath(screenshot_path),
+                        "screenshot": screenshot_path,
                         "show_popup": show_popup  # ポップアップ表示設定を追加
                     }
                 except Exception as e:
                     # エラー時のスクリーンショットを保存
                     screenshot_path = "debug_error_confirmation.png"
-                    driver.save_screenshot(screenshot_path)
+                    take_full_page_screenshot(driver, screenshot_path)
                     logging.error(f"提供判定の確認中にエラー: {str(e)}")
                     if progress_callback:
                         progress_callback("エラーが発生しました")
@@ -1057,14 +1157,14 @@ def search_service_area(postal_code, address, progress_callback=None):
                             "提供エリア": "判定できませんでした",
                             "備考": f"エラーが発生しました: {str(e)}"
                         },
-                        "screenshot": os.path.abspath(screenshot_path),
+                        "screenshot": screenshot_path,
                         "show_popup": show_popup  # ポップアップ表示設定を追加
                     }
             
             except Exception as e:
                 logging.error(f"結果の判定中にエラー: {str(e)}")
                 screenshot_path = "debug_result_error.png"
-                driver.save_screenshot(screenshot_path)
+                take_full_page_screenshot(driver, screenshot_path)
                 if progress_callback:
                     progress_callback("エラーが発生しました")
                 return {
@@ -1075,14 +1175,14 @@ def search_service_area(postal_code, address, progress_callback=None):
                         "提供エリア": "判定できませんでした",
                         "備考": f"結果の判定中にエラーが発生しました: {str(e)}"
                     },
-                    "screenshot": os.path.abspath(screenshot_path),
+                    "screenshot": screenshot_path,
                     "show_popup": show_popup  # ポップアップ表示設定を追加
                 }
                 
         except TimeoutException as e:
             logging.error(f"住所候補の表示待ちでタイムアウトしました: {str(e)}")
             screenshot_path = "debug_address_timeout.png"
-            driver.save_screenshot(screenshot_path)
+            take_full_page_screenshot(driver, screenshot_path)
             if progress_callback:
                 progress_callback("タイムアウトが発生しました")
             return {
@@ -1093,13 +1193,13 @@ def search_service_area(postal_code, address, progress_callback=None):
                     "提供エリア": "判定できませんでした",
                     "備考": "住所候補が見つかりませんでした"
                 },
-                "screenshot": os.path.abspath(screenshot_path),
+                "screenshot": screenshot_path,
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
         except Exception as e:
             logging.error(f"住所選択処理中にエラーが発生しました: {str(e)}")
             screenshot_path = "debug_address_error.png"
-            driver.save_screenshot(screenshot_path)
+            take_full_page_screenshot(driver, screenshot_path)
             if progress_callback:
                 progress_callback("エラーが発生しました")
             return {
@@ -1110,7 +1210,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                     "提供エリア": "判定できませんでした",
                     "備考": f"住所選択に失敗しました: {str(e)}"
                 },
-                "screenshot": os.path.abspath(screenshot_path),
+                "screenshot": screenshot_path,
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
     
@@ -1118,7 +1218,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         logging.error(f"自動化に失敗しました: {str(e)}")
         screenshot_path = "debug_general_error.png"
         if driver:
-            driver.save_screenshot(screenshot_path)
+            take_full_page_screenshot(driver, screenshot_path)
         if progress_callback:
             progress_callback("エラーが発生しました")
         return {
@@ -1129,14 +1229,13 @@ def search_service_area(postal_code, address, progress_callback=None):
                 "提供エリア": "判定できませんでした",
                 "備考": f"エラーが発生しました: {str(e)}"
             },
-            "screenshot": os.path.abspath(screenshot_path),
+            "screenshot": screenshot_path,
             "show_popup": show_popup  # ポップアップ表示設定を追加
         }
     
     finally:
         # どのような場合でもブラウザは閉じない
         if driver:
-            logging.info("ブラウザウィンドウを維持します - 手動で閉じてください")
-            # driver.quit() を呼び出さない
+            logging.info("ブラウザウィンドウを維持します - 手動で閉じてください")            # driver.quit() を呼び出さない
             # グローバル変数にドライバーを保持
             global_driver = driver
