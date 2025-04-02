@@ -192,178 +192,191 @@ class MainWindowFunctions:
         """
         営業コメントを生成してクリップボードにコピーする
         """
-        # 既存のgenerate_cti_formatメソッドを使用して営業コメントを生成
-        formatted_text = self.generate_cti_format()
-        
-        # 生成に成功した場合のみクリップボードにコピーして通知
-        if formatted_text:
-            # クリップボードにコピー
-            clipboard = QApplication.clipboard()
-            clipboard.setText(formatted_text)
-            
-            # 成功メッセージをステータスバーに表示
-            self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
-    
-    def generate_cti_format(self):
-        """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
-        # 必須項目の検証
-        required_fields = {
-            'operator': self.operator_input,
-            'contractor': self.contractor_input,
-            'furigana': self.furigana_input,
-            'address': self.address_input,
-            'postal_code': self.postal_code_input,  # 郵便番号を追加
-            'list_name': self.list_name_input,  # リスト名を追加
-            'list_furigana': self.list_furigana_input,  # リストフリガナを追加
-            'list_phone': self.list_phone_input,
-            'list_postal_code': self.list_postal_code_input,  # リスト郵便番号を追加
-            'list_address': self.list_address_input,  # リスト住所を追加
-            'order_person': self.order_person_input,
-            'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
-            'fee': self.fee_input,  # 料金認識を追加
-            'relationship': self.relationship_input,  # 名義人との関係性
-            'nd': self.nd_input  # NDを追加
-        }
-        
-        # すべてのフィールドの背景色をリセット
-        for field in required_fields.values():
-            field.setStyleSheet("")
-        
-        # 未入力のフィールドをチェック
-        missing_fields = []
-        for name, field in required_fields.items():
-            if not field.text().strip():
-                # 背景を赤くする
-                field.setStyleSheet("background-color: #FFE4E1;")  # 薄い赤色
-                missing_fields.append(name)
-        
-        # 未入力フィールドがある場合
-        has_empty_fields = len(missing_fields) > 0
-        
-        # 未入力項目があることを警告し、続行するか確認
-        if has_empty_fields:
-            # 日本語のフィールド名に変換
-            field_names_ja = {
-                'operator': '対応者名',
-                'contractor': '契約者名',
-                'furigana': 'フリガナ',
-                'address': '住所',
-                'postal_code': '郵便番号',  # 追加
-                'list_name': 'リスト名',  # 追加
-                'list_furigana': 'リストフリガナ',  # 追加
-                'list_phone': '電話番号',
-                'list_postal_code': 'リスト郵便番号',  # 追加
-                'list_address': 'リスト住所',  # 追加
-                'order_person': '受注者名',
-                'available_time': '出やすい時間帯',
-                'fee': '料金認識',  # 追加
-                'relationship': '備考：名義人の...',  # 名義人との関係性に変更
-                'nd': 'ND'  # NDを追加
+        try:
+            # 必須項目の検証
+            required_fields = {
+                'operator': self.operator_input,
+                'contractor': self.contractor_input,
+                'furigana': self.furigana_input,
+                'address': self.address_input,
+                'postal_code': self.postal_code_input,
+                'list_name': self.list_name_input,
+                'list_furigana': self.list_furigana_input,
+                'list_phone': self.list_phone_input,
+                'list_postal_code': self.list_postal_code_input,
+                'list_address': self.list_address_input,
+                'order_person': self.order_person_input,
+                'available_time': self.available_time_input,
+                'fee': self.fee_input,
+                'relationship': self.relationship_input,
+                'nd': self.nd_input
             }
             
-            # 未入力項目の日本語名のリスト
-            missing_fields_ja = [field_names_ja[field] for field in missing_fields]
+            # すべてのフィールドの背景色をリセット
+            for field in required_fields.values():
+                field.setStyleSheet("")
             
-            # 確認ダイアログを表示（日本語ボタン）
-            message_box = QMessageBox()
-            message_box.setWindowTitle("未入力項目があります")
-            message_box.setText(f"以下の項目が未入力です:\n\n{', '.join(missing_fields_ja)}\n\n営コメを作成しますか？")
-            message_box.setIcon(QMessageBox.Question)
-            yes_button = message_box.addButton("はい", QMessageBox.YesRole)
-            no_button = message_box.addButton("いいえ", QMessageBox.NoRole)
-            message_box.setDefaultButton(no_button)
+            # 未入力のフィールドをチェック
+            missing_fields = []
+            for name, field in required_fields.items():
+                if not field.text().strip():
+                    field.setStyleSheet("background-color: #FFE4E1;")
+                    missing_fields.append(name)
             
-            message_box.exec()
+            # 未入力フィールドがある場合
+            if missing_fields:
+                # 日本語のフィールド名に変換
+                field_names_ja = {
+                    'operator': '対応者名',
+                    'contractor': '契約者名',
+                    'furigana': 'フリガナ',
+                    'address': '住所',
+                    'postal_code': '郵便番号',
+                    'list_name': 'リスト名',
+                    'list_furigana': 'リストフリガナ',
+                    'list_phone': '電話番号',
+                    'list_postal_code': 'リスト郵便番号',
+                    'list_address': 'リスト住所',
+                    'order_person': '受注者名',
+                    'available_time': '出やすい時間帯',
+                    'fee': '料金認識',
+                    'relationship': '備考：名義人の...',
+                    'nd': 'ND'
+                }
+                
+                # 未入力項目の日本語名のリスト
+                missing_fields_ja = [field_names_ja[field] for field in missing_fields]
+                
+                # 確認ダイアログを表示
+                message_box = QMessageBox()
+                message_box.setWindowTitle("未入力項目があります")
+                message_box.setText(f"以下の項目が未入力です:\n\n{', '.join(missing_fields_ja)}\n\n営コメを作成しますか？")
+                message_box.setIcon(QMessageBox.Question)
+                yes_button = message_box.addButton("はい", QMessageBox.YesRole)
+                no_button = message_box.addButton("いいえ", QMessageBox.NoRole)
+                message_box.setDefaultButton(no_button)
+                
+                message_box.exec()
+                
+                # いいえが選択された場合は処理を中止
+                if message_box.clickedButton() == no_button:
+                    return
             
-            # いいえが選択された場合は処理を中止
-            if message_box.clickedButton() == no_button:
-                return None
-        
-        # 日付の書式設定
-        order_date = self.order_date_input.text()
-        
-        # 生年月日の取得
-        birth_date = ""
-        era = self.era_combo.currentText()
-        year = self.year_combo.currentText()
-        month = self.month_combo.currentText()
-        day = self.day_combo.currentText()
-        
-        if era and year and month and day:
+            # 営業コメントを生成
+            formatted_text = self.generate_cti_format()
+            
+            if formatted_text:
+                # クリップボードにコピー
+                clipboard = QApplication.clipboard()
+                clipboard.setText(formatted_text)
+                
+                # プレビューを更新
+                self.preview_text.setText(formatted_text)
+                
+                # 成功メッセージをステータスバーに表示
+                self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
+                
+        except Exception as e:
+            logging.error(f"営業コメント生成エラー: {e}")
+            QMessageBox.warning(self, "エラー", f"営業コメントの生成に失敗しました: {str(e)}")
+    
+    def generate_cti_format(self):
+        """CTIフォーマットのテキストを生成"""
+        try:
+            # 基本情報
+            operator = self.operator_input.text()
+            available_time = self.available_time_input.text()
+            contractor = self.contractor_input.text()
+            furigana = self.furigana_input.text()
+            
+            # 生年月日
+            era = self.era_combo.currentText()
+            year = self.year_input.text()
+            month = self.month_input.text()
+            day = self.day_input.text()
+            
             # 和暦から西暦への変換
-            era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867, "西暦": 0}
-            if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
+            era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
+            if era in era_year_map and year and month and day:
                 try:
                     jp_year = int(year)
-                    if era == "西暦":
-                        western_year = jp_year
-                    else:
-                        western_year = era_year_map[era] + jp_year
+                    western_year = era_year_map[era] + jp_year
                     birth_date = f"{western_year}/{month}/{day}"
-                except (ValueError, TypeError):
-                    logging.warning("生年月日の変換に失敗しました")
-                    
-        # フォーマットデータの準備
-        format_data = {
-            'operator': self.operator_input.text(),
-            'mobile': "",  # 携帯電話番号を空に
-            'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
-            'contractor': self.contractor_input.text(),
-            'furigana': self.furigana_input.text(),
-            'birth_date': birth_date,
-            'postal_code': self.postal_code_input.text(),
-            'address': self.address_input.text(),
-            'list_name': self.list_name_input.text(),
-            'list_furigana': self.list_furigana_input.text(),
-            'list_phone': self.list_phone_input.text(),
-            'list_postal_code': self.list_postal_code_input.text(),
-            'list_address': self.list_address_input.text(),
-            'current_line': self.current_line_combo.currentText(),
-            'order_date': order_date,
-            'order_person': self.order_person_input.text(),
-            'judgment': self.judgment_combo.currentText(),
-            'fee': self.fee_input.text(),
-            'net_usage': self.net_usage_combo.currentText(),
-            'family_approval': self.family_approval_combo.currentText(),
-            'other_number': self.other_number_input.text(),  # 他番号を追加
-            'phone_device': self.phone_device_input.text(),  # 電話機を追加
-            'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
-            'nd': self.nd_input.text(),  # NDを追加
-            'relationship': self.relationship_input.text()  # 名義人との関係性
-        }
-        
-        # フォーマットテンプレートに値を埋め込む
-        try:
-            formatted_text = self.format_template.format(**format_data)
-
+                except ValueError:
+                    birth_date = f"{year}/{month}/{day}"
+            else:
+                birth_date = f"{year}/{month}/{day}"
+            
+            # 住所情報
+            postal_code = self.postal_code_input.text()
+            address = self.address_input.text()
+            address_furigana = self.address_furigana_input.text()
+            
+            # リスト情報
+            list_name = self.list_name_input.text()
+            list_furigana = self.list_furigana_input.text()
+            list_phone = self.list_phone_input.text()
+            list_postal_code = self.list_postal_code_input.text()
+            list_address = self.list_address_input.text()
+            list_address_furigana = self.list_address_furigana_input.text()
+            
+            # 受注情報
+            order_person = self.order_person_input.text()
+            fee = self.fee_input.text()
+            other_number = self.other_number_input.text()
+            phone_device = self.phone_device_input.text()
+            forbidden_line = self.forbidden_line_input.text()
+            relationship = self.relationship_input.text()
+            nd = self.nd_input.text()
+            order_date = self.order_date_input.text()
+            
+            # 判定情報
+            current_line = self.current_line_combo.currentText()
+            judgment = self.judgment_combo.currentText()
+            net_usage = self.net_usage_combo.currentText()
+            family_approval = self.family_approval_combo.currentText()
+            
+            # テンプレートに値を代入
+            template = self.settings.get("format_template", "")
+            formatted_text = template.format(
+                operator=operator,
+                available_time=available_time,
+                contractor=contractor,
+                furigana=furigana,
+                birth_date=birth_date,
+                postal_code=postal_code,
+                address=address,
+                address_furigana=address_furigana,
+                list_name=list_name,
+                list_furigana=list_furigana,
+                list_phone=list_phone,
+                list_postal_code=list_postal_code,
+                list_address=list_address,
+                list_address_furigana=list_address_furigana,
+                order_person=order_person,
+                fee=fee,
+                other_number=other_number,
+                phone_device=phone_device,
+                forbidden_line=forbidden_line,
+                relationship=relationship,
+                nd=nd,
+                order_date=order_date,
+                current_line=current_line,
+                judgment=judgment,
+                net_usage=net_usage,
+                family_approval=family_approval
+            )
+            
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
             if maps_url:
                 formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
             
-            # プレビューに表示
-            self.preview_text.setText(formatted_text)
-
-            # プレビューテキストの色を確保
-            self.preview_text.setStyleSheet("""
-                QTextEdit {
-                    background-color: #f8f8f8;
-                    color: #333333;
-                    border: 1px solid #ddd;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-family: 'MS Gothic', monospace;
-                }
-            """)
-            
-            # フォーマットしたテキストを返す
             return formatted_text
-        except KeyError as e:
-            logging.error(f"フォーマットテンプレートに不明なプレースホルダーがあります: {e}")
+            
         except Exception as e:
-            QMessageBox.warning(self, "エラー", f"フォーマットの生成に失敗しました: {str(e)}")
-        
-        return None
+            logging.error(f"CTIフォーマット生成エラー: {e}")
+            raise
     
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""
@@ -822,25 +835,20 @@ class MainWindowFunctions:
         except Exception as e:
             logging.error(f"住所フリガナ自動生成エラー: {str(e)}")
             
-    def auto_generate_list_address_furigana(self):
-        """リスト住所からフリガナを自動生成する"""
-        # 自動モードの場合のみ処理
-        if self.list_address_furigana_mode_combo.currentText() != "自動":
-            return
-            
-        # リスト住所が空の場合は何もしない
-        address = self.list_address_input.text()
-        if not address:
-            return
-            
-        try:
-            # フリガナ変換APIを使用
-            furigana = convert_to_furigana(address)
-            if furigana:
-                self.list_address_furigana_input.setText(furigana)
-                logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
-        except Exception as e:
-            logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
+    def auto_generate_list_address_furigana(self, text):
+        """
+        リスト住所からフリガナを自動生成
+        
+        Args:
+            text (str): リスト住所
+        """
+        if self.furigana_mode_combo.currentText() == "自動":
+            try:
+                furigana = convert_to_furigana(text)
+                if furigana:
+                    self.list_address_furigana_input.setText(furigana)
+            except Exception as e:
+                logging.error(f"リスト住所フリガナ自動生成エラー: {e}")
     
     def generate_preview_text(self):
         """

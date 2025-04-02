@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy, QProgressBar)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread
+                              QSizePolicy, QProgressBar, QFrame)
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QSize
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
@@ -49,14 +49,104 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """メインウィンドウの初期化"""
         super().__init__()
         self.setWindowTitle("コールセンター業務効率化ツール")
-        self.setMinimumSize(600, 400)  # 最小サイズを600x400に変更
+        self.setMinimumSize(600, 400)
+        
+        # 現在の日付を取得して受付日に設定
+        current_date = datetime.datetime.now().strftime("%Y/%m/%d")
+        
+        # フォントの設定
+        self.setStyleSheet("""
+            * {
+                font-family: 'Roboto', 'Noto Sans JP', sans-serif;
+            }
+            QMainWindow {
+                background-color: #F5F5F5;
+            }
+            QLineEdit {
+                padding: 4px 8px;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
+                min-height: 24px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #1565C0;
+                background-color: #FFFFFF;
+            }
+            QComboBox {
+                padding: 4px 8px;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
+                min-height: 24px;
+            }
+            QComboBox:focus {
+                border: 2px solid #1565C0;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: url(icons/arrow_down.png);
+                width: 12px;
+                height: 12px;
+            }
+            QGroupBox {
+                border: none;
+                background-color: white;
+                border-radius: 4px;
+                margin-top: 1em;
+                font-size: 13px;
+                padding: 16px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+                color: #1565C0;
+                font-weight: bold;
+            }
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #F5F5F5;
+                width: 8px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: #BDBDBD;
+                min-height: 20px;
+                border-radius: 2px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+            QLabel {
+                font-size: 12px;
+                color: #424242;
+                margin-bottom: 2px;
+            }
+            QWidget#mainWidget {
+                background-color: #F5F5F5;
+            }
+        """)
         
         # メインウィジェットの設定
         main_widget = QWidget()
+        main_widget.setObjectName("mainWidget")
         self.setCentralWidget(main_widget)
         
         # メインレイアウトの設定
         main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(16, 8, 16, 16)
+        main_layout.setSpacing(8)
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -118,13 +208,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         """)
         
         # プレビューエリア（右側）
-        preview_group = QGroupBox("プレビュー")
-        preview_layout = QVBoxLayout(preview_group)
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
         self.create_preview_area(preview_layout)
         
         # スプリッターにウィジェットを追加
         splitter.addWidget(scroll_area)
-        splitter.addWidget(preview_group)
+        splitter.addWidget(preview_widget)
         
         # 初期のサイズ比率を設定（7:3）
         splitter.setSizes([700, 300])
@@ -176,477 +266,505 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
         top_bar = QWidget()
-        top_bar.setFixedHeight(32)
+        top_bar.setFixedHeight(48)
         top_bar.setStyleSheet("""
             QWidget {
-                background-color: #2C3E50;
-                color: white;
+                background-color: white;
+                border-radius: 8px;
             }
         """)
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(5, 2, 5, 2)
-        top_bar_layout.setSpacing(4)
+        top_bar_layout.setContentsMargins(8, 0, 8, 0)
+        top_bar_layout.setSpacing(8)
         
-        # ワンクリック取得ボタン（名称変更：顧客情報取得）
-        self.oneclick_btn = QPushButton("顧客情報取得")
-        self.oneclick_btn.setStyleSheet("""
-            QPushButton {
-                color: white;
-                border: 1px solid white;
-                padding: 2px 6px;
-                border-radius: 2px;
-                background-color: #27AE60;
-                min-height: 18px;
-                max-height: 22px;
-            }
-            QPushButton:hover {
-                background-color: #2ECC71;
-            }
-            QPushButton:pressed {
-                background-color: #27AE60;
-            }
-        """)
-        self.oneclick_btn.clicked.connect(self.fetch_cti_data)
-        self.oneclick_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        top_bar_layout.addWidget(self.oneclick_btn)
-        
-        # 既存のボタン
-        self.clear_btn = QPushButton("入力クリア")
-        self.cti_copy_btn = QPushButton("営コメ作成")
-        self.screenshot_btn = QPushButton("提供判定のスクリーンショット確認")
-        self.spreadsheet_btn = QPushButton("スプレッドシート転記（未実装）")
-        self.settings_btn = QPushButton("設定")
-        
-        # ボタンのスタイル設定
+        # ボタンのベーススタイル
         button_style = """
             QPushButton {
+                background-color: #1565C0;
                 color: white;
-                border: 1px solid white;
-                padding: 2px 6px;
+                border: none;
                 border-radius: 2px;
-                min-height: 18px;
-                max-height: 22px;
-                font-size: 9pt;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                min-height: 32px;
             }
             QPushButton:hover {
-                background-color: #34495E;
+                background-color: #0D47A1;
             }
             QPushButton:pressed {
-                background-color: #2C3E50;
+                background-color: #0A3D91;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
             }
         """
         
-        # 各ボタンのサイズポリシーを設定
-        buttons = [self.clear_btn, self.cti_copy_btn, 
+        # 各ボタンの作成と設定
+        self.oneclick_btn = QPushButton("顧客情報取得")
+        self.clear_btn = QPushButton("入力クリア")
+        self.cti_copy_btn = QPushButton("営コメ作成")
+        self.screenshot_btn = QPushButton("提供判定のスクリーンショット確認")
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
+        self.settings_btn = QPushButton("設定")
+        
+        # ボタンのスタイル設定
+        buttons = [self.oneclick_btn, self.clear_btn, self.cti_copy_btn,
                   self.screenshot_btn, self.spreadsheet_btn, self.settings_btn]
         
         for btn in buttons:
             btn.setStyleSheet(button_style)
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
-        # ボタンの接続
-        self.clear_btn.clicked.connect(self.clear_all_inputs)
-        self.cti_copy_btn.clicked.connect(self.copy_cti_to_clipboard)
-        self.screenshot_btn.clicked.connect(self.show_screenshot)
-        self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
-        self.settings_btn.clicked.connect(self.show_settings)
-        
-        # ボタンをレイアウトに追加
-        for btn in buttons:
             top_bar_layout.addWidget(btn)
         
         parent_layout.addWidget(top_bar)
+        
+        # ボタンの接続
+        self.oneclick_btn.clicked.connect(self.fetch_cti_data)
+        self.clear_btn.clicked.connect(self.clear_all_inputs)
+        self.cti_copy_btn.clicked.connect(self.copy_cti_to_clipboard)
+        self.screenshot_btn.clicked.connect(self.show_screenshot)
+        self.spreadsheet_btn.setEnabled(False)  # 未実装
+        self.settings_btn.clicked.connect(self.show_settings)
     
     def create_input_form(self, parent_layout):
         """入力フォームを作成"""
-        # 受注者入力項目セクション（新しく追加）
-        input_group = QGroupBox("受注者入力項目")
-        input_layout = QVBoxLayout()
-        
-        # 対応者名
-        input_layout.addWidget(QLabel("対応者名"))
-        self.operator_input = QLineEdit()
-        input_layout.addWidget(self.operator_input)
-        
-        # 出やすい時間帯
-        input_layout.addWidget(QLabel("出やすい時間帯"))
-        self.available_time_input = QLineEdit()
-        self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
-        input_layout.addWidget(self.available_time_input)
-        
-        # 契約者名
-        input_layout.addWidget(QLabel("契約者名"))
-        self.contractor_input = QLineEdit()
-        input_layout.addWidget(self.contractor_input)
-        
-        # フリガナ
-        furigana_layout = QHBoxLayout()
-        furigana_layout.addWidget(QLabel("フリガナ"))
-        self.furigana_mode_combo = CustomComboBox()
-        self.furigana_mode_combo.addItems(["自動", "手動"])
-        furigana_layout.addWidget(self.furigana_mode_combo)
-        input_layout.addLayout(furigana_layout)
-        self.furigana_input = QLineEdit()
-        input_layout.addWidget(self.furigana_input)
-        
-        # 生年月日
-        birth_layout = QVBoxLayout()
-        birth_layout.addWidget(QLabel("生年月日"))
-        
-        # 生年月日の入力部分を横並びにする
-        birth_input_layout = QHBoxLayout()
-        birth_input_layout.setContentsMargins(0, 0, 0, 0)  # マージンを0に設定
-        birth_input_layout.setSpacing(5)  # 間隔を5pxに設定
-        
-        # コンテナウィジェットを作成して固定幅を設定
-        birth_container = QWidget()
-        birth_container.setFixedWidth(320)  # 固定幅を280pxから320pxに増加
-        birth_container_layout = QHBoxLayout(birth_container)
-        birth_container_layout.setContentsMargins(0, 0, 0, 0)
-        birth_container_layout.setSpacing(8)  # 間隔を5pxから8pxに増加
-        
-        self.era_combo = CustomComboBox()
-        self.era_combo.addItems(["昭和", "平成", "西暦"])
-        self.era_combo.setFixedWidth(80)  # 幅を70pxから80pxに増加
-        birth_container_layout.addWidget(self.era_combo)
-        
-        # 年の入力部分用のコンテナ
-        year_container = QWidget()
-        year_layout = QHBoxLayout(year_container)
-        year_layout.setContentsMargins(0, 0, 0, 0)
-        year_layout.setSpacing(2)  # 年の数字と「年」の間隔を調整
-        
-        self.year_combo = CustomComboBox()
-        self.year_combo.addItems([str(i) for i in range(1, 65)])
-        self.year_combo.setEditable(True)
-        self.year_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.year_combo.lineEdit().setMaxLength(4)
-        self.year_combo.lineEdit().setValidator(QIntValidator(1, 9999))
-        self.year_combo.setFixedWidth(65)  # 幅を60pxから65pxに増加
-        year_layout.addWidget(self.year_combo)
-        
-        year_label = QLabel("年")
-        year_label.setFixedWidth(20)
-        year_layout.addWidget(year_label)
-        
-        birth_container_layout.addWidget(year_container)
-        
-        # 月の入力部分用のコンテナ
-        month_container = QWidget()
-        month_layout = QHBoxLayout(month_container)
-        month_layout.setContentsMargins(0, 0, 0, 0)
-        month_layout.setSpacing(2)
-        
-        self.month_combo = CustomComboBox()
-        self.month_combo.addItems([str(i) for i in range(1, 13)])
-        self.month_combo.setEditable(True)
-        self.month_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.month_combo.lineEdit().setMaxLength(2)
-        self.month_combo.lineEdit().setValidator(QIntValidator(1, 12))
-        self.month_combo.setFixedWidth(45)
-        month_layout.addWidget(self.month_combo)
-        
-        month_label = QLabel("月")
-        month_label.setFixedWidth(20)
-        month_layout.addWidget(month_label)
-        
-        birth_container_layout.addWidget(month_container)
-        
-        # 日の入力部分用のコンテナ
-        day_container = QWidget()
-        day_layout = QHBoxLayout(day_container)
-        day_layout.setContentsMargins(0, 0, 0, 0)
-        day_layout.setSpacing(2)
-        
-        self.day_combo = CustomComboBox()
-        self.day_combo.addItems([str(i) for i in range(1, 32)])
-        self.day_combo.setEditable(True)
-        self.day_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.day_combo.lineEdit().setMaxLength(2)
-        self.day_combo.lineEdit().setValidator(QIntValidator(1, 31))
-        self.day_combo.setFixedWidth(45)
-        day_layout.addWidget(self.day_combo)
-        
-        day_label = QLabel("日")
-        day_label.setFixedWidth(20)
-        day_layout.addWidget(day_label)
-        
-        birth_container_layout.addWidget(day_container)
-        
-        # コンテナをレイアウトに追加
-        birth_input_layout.addWidget(birth_container)
-        birth_input_layout.addStretch()  # 右側に余白を追加
-        
-        birth_layout.addLayout(birth_input_layout)
-        input_layout.addLayout(birth_layout)
-        
-        # 受注者名
-        input_layout.addWidget(QLabel("受注者名"))
-        self.order_person_input = QLineEdit()
-        input_layout.addWidget(self.order_person_input)
-        
-        # 料金認識を追加（移動）
-        input_layout.addWidget(QLabel("料金認識"))
-        self.fee_input = QLineEdit()
-        self.fee_input.setText("2500円～3000円")
-        input_layout.addWidget(self.fee_input)
-        
-        # ネット利用
-        input_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = CustomComboBox()
-        self.net_usage_combo.addItems(["なし", "あり"])
-        input_layout.addWidget(self.net_usage_combo)
-        
-        # 家族了承
-        input_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = CustomComboBox()
-        self.family_approval_combo.addItems(["ok", "なし"])
-        input_layout.addWidget(self.family_approval_combo)
-        
-        # 他番号
-        input_layout.addWidget(QLabel("他番号"))
-        self.other_number_input = QLineEdit()
-        self.other_number_input.setText("なし")
-        input_layout.addWidget(self.other_number_input)
-        
-        # 電話機
-        input_layout.addWidget(QLabel("電話機"))
-        self.phone_device_input = QLineEdit()
-        self.phone_device_input.setText("プッシュホン")
-        input_layout.addWidget(self.phone_device_input)
-        
-        # 禁止回線
-        input_layout.addWidget(QLabel("禁止回線"))
-        self.forbidden_line_input = QLineEdit()
-        self.forbidden_line_input.setText("なし")
-        input_layout.addWidget(self.forbidden_line_input)
-        
-        # ND
-        input_layout.addWidget(QLabel("ND"))
-        self.nd_input = QLineEdit()
-        input_layout.addWidget(self.nd_input)
-        
-        # リストとの関係性（表示を「名義人の○○」の形式に変更）
-        relationship_layout = QHBoxLayout()
-        relationship_layout.addWidget(QLabel("備考："))
-        self.relationship_input = QLineEdit()
-        self.relationship_input.setPlaceholderText("名義人の...")
-        relationship_layout.addWidget(self.relationship_input)
-        input_layout.addLayout(relationship_layout)
-        
-        input_group.setLayout(input_layout)
-        parent_layout.addWidget(input_group)
-        
-        # 住所情報セクション
-        address_group = QGroupBox("住所情報")
-        address_layout = QVBoxLayout()
-        
-        # 郵便番号
-        address_layout.addWidget(QLabel("郵便番号"))
-        self.postal_code_input = QLineEdit()
-        address_layout.addWidget(self.postal_code_input)
-        
-        # 住所
-        address_layout.addWidget(QLabel("住所"))
-        self.address_input = QLineEdit()
-        address_layout.addWidget(self.address_input)
-        
-        # 住所フリガナ
-        address_layout.addWidget(QLabel("住所フリガナ"))
-        self.address_furigana_input = QLineEdit()
-        address_layout.addWidget(self.address_furigana_input)
-        
-        # マップアイコンボタン
-        self.map_btn = QPushButton()
-        self.map_btn.setFixedSize(24, 24)
-        
-        # アプリケーションの実行ディレクトリからの絶対パスを設定
-        app_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.dirname(app_dir)  # uiフォルダの親ディレクトリ
-        map_icon_path = os.path.join(root_dir, "map.png")
-        
-        # アイコンが存在する場合のみ設定
-        if os.path.exists(map_icon_path):
-            self.map_btn.setIcon(QIcon(map_icon_path))
-        else:
-            # アイコンが見つからない場合は代替テキストを設定
-            self.map_btn.setText("🗺️")
-            logging.warning(f"マップアイコン画像が見つかりません: {map_icon_path}")
-            
-        self.map_btn.setToolTip("Googleマップで住所を検索")
-        self.map_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: transparent;
+        form_group = QGroupBox("受注者入力項目")
+        form_group.setStyleSheet("""
+            QGroupBox {
+                background-color: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                margin-top: 1.5em;
+                font-size: 12px;
             }
-            QPushButton:hover {
-                background-color: #f0f0f0;
-                border-radius: 12px;
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: #424242;
+                background-color: white;
             }
         """)
-        address_layout.addWidget(self.map_btn)
         
-        # 提供エリア検索ボタンを追加
-        self.area_search_btn = QPushButton("提供エリア検索")
-        self.area_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        form_layout = QVBoxLayout(form_group)
+        form_layout.setSpacing(4)
+        form_layout.setContentsMargins(12, 16, 12, 12)
+        
+        # 共通のスタイル設定
+        input_style = """
+            QLineEdit, QComboBox {
+                min-height: 30px;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 1px solid #1565C0;
+            }
+            QLineEdit:hover, QComboBox:hover {
+                border: 1px solid #1565C0;
+            }
+            QLineEdit:disabled, QComboBox:disabled {
+                background-color: #f5f5f5;
+            }
+            QComboBox::drop-down {
                 border: none;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                margin: 4px 2px;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: url(down_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+        """
+        
+        # グループボックスのスタイル
+        group_style = """
+            QGroupBox {
+                border: 1px solid #ccc;
                 border-radius: 4px;
+                margin-top: 1em;
+                padding-top: 1em;
+                font-weight: bold;
+                background-color: #f8f8f8;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px;
+                color: #333;
+            }
+        """
+        
+        # ボタンのスタイル
+        button_style = """
+            QPushButton {
+                min-height: 30px;
+                padding: 5px 15px;
+                border: 1px solid #1565C0;
+                border-radius: 2px;
+                background-color: #1565C0;
+                color: white;
+                font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #0D47A1;
             }
             QPushButton:pressed {
-                background-color: #3e8e41;
+                background-color: #0A3D91;
             }
-        """)
-        address_layout.addWidget(self.area_search_btn)
+            QPushButton:disabled {
+                background-color: #ccc;
+                border-color: #ccc;
+            }
+        """
         
-        # 提供エリア検索結果表示用のラベル
-        area_result_container = QWidget()
-        area_result_layout = QVBoxLayout(area_result_container)
-        area_result_layout.setContentsMargins(0, 0, 0, 0)
-        area_result_layout.setSpacing(2)
-
+        # 緑色のボタン（地図を開くボタン）のスタイル
+        green_button_style = """
+            QPushButton {
+                min-height: 30px;
+                padding: 5px 15px;
+                border: 1px solid #2E7D32;
+                border-radius: 2px;
+                background-color: #2E7D32;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1B5E20;
+            }
+            QPushButton:pressed {
+                background-color: #0A280E;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+                border-color: #ccc;
+            }
+        """
+        
+        # プレビューエリアのスタイル
+        preview_style = """
+            QTextEdit {
+                min-height: 200px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 2px;
+                background-color: white;
+                font-family: "MS Gothic", "Yu Gothic", sans-serif;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            QTextEdit:focus {
+                border: 1px solid #1565C0;
+            }
+        """
+        
+        # スクロールバーのスタイル
+        scrollbar_style = """
+            QScrollBar:vertical {
+                border: none;
+                background: #f0f0f0;
+                width: 10px;
+                margin: 0px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: #ccc;
+                min-height: 20px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #999;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """
+        
+        # 各入力フィールドの作成
+        self.operator_input = QLineEdit()  # 対応者名
+        self.available_time_input = QLineEdit()  # 出やすい時間帯
+        self.contractor_input = QLineEdit()  # 契約者名
+        self.furigana_mode_combo = CustomComboBox()  # カスタムコンボボックスを使用
+        self.furigana_mode_combo.addItems(["自動", "手動"])
+        self.furigana_mode_combo.setStyleSheet(input_style)
+        self.furigana_input = QLineEdit()
+        self.postal_code_input = QLineEdit()  # 郵便番号
+        self.address_input = QLineEdit()  # 住所
+        self.address_furigana_input = QLineEdit()  # 住所フリガナ
+        self.list_name_input = QLineEdit()  # リスト名
+        self.list_furigana_input = QLineEdit()  # リストフリガナ
+        self.list_phone_input = QLineEdit()  # リスト電話番号
+        self.list_postal_code_input = QLineEdit()  # リスト郵便番号
+        self.list_address_input = QLineEdit()  # リスト住所
+        self.list_address_furigana_input = QLineEdit()  # リスト住所フリガナ
+        self.order_person_input = QLineEdit()  # 受注者名
+        self.fee_input = QLineEdit("2500円")  # 料金認識（初期値を2500円に設定）
+        self.other_number_input = QLineEdit("なし")  # 他番号
+        self.phone_device_input = QLineEdit("プッシュホン")  # 電話機
+        self.forbidden_line_input = QLineEdit("なし")  # 禁止回線
+        self.relationship_input = QLineEdit()  # 続柄
+        self.nd_input = QLineEdit()  # ND
+        self.order_date_input = QLineEdit()  # 受付日
+        self.order_date_input.setText(datetime.datetime.now().strftime("%Y/%m/%d"))  # 現在の日付を設定
+        
+        # コンボボックスの作成（すべてカスタムコンボボックスを使用）
+        self.current_line_combo = CustomComboBox()
+        self.current_line_combo.addItems(["なし", "あり"])
+        
+        self.judgment_combo = CustomComboBox()
+        self.judgment_combo.addItems(["", "○", "×"])
+        
+        self.net_usage_combo = CustomComboBox()
+        self.net_usage_combo.addItems(["", "利用", "未利用"])
+        
+        self.family_approval_combo = CustomComboBox()
+        self.family_approval_combo.addItems(["ok", "ng"])
+        
+        # プログレスバーの作成
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        
+        # エリア検索ボタンの作成
+        self.area_search_btn = QPushButton("提供エリア検索")
+        self.area_search_btn.setStyleSheet(button_style)
+        
+        # 地図ボタンの作成
+        self.map_btn = QPushButton("地図を開く")
+        self.map_btn.setStyleSheet(green_button_style)
+        
+        # エリア結果ラベルの作成
         self.area_result_label = QLabel("提供エリア: 未検索")
         self.area_result_label.setStyleSheet("""
             QLabel {
                 font-size: 14px;
                 padding: 5px;
-                border: 1px solid #ddd;
+                border: 1px solid #95a5a6;
                 border-radius: 4px;
-                background-color: #f8f8f8;
+                background-color: #f8f9fa;
+                color: #95a5a6;
             }
         """)
-        area_result_layout.addWidget(self.area_result_label)
-
-        # プログレスバー（初期状態では非表示）
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # 不定のプログレスバー
-        self.progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: none;
-                background-color: #E3F2FD;
+        
+        # フィールドの配置（元の順番に戻す）
+        fields = [
+            # 基本情報
+            ("対応者名", self.operator_input),
+            ("出やすい時間帯", self.available_time_input),
+            ("契約者名", self.contractor_input),
+            ("フリガナ", self.furigana_input),
+            ("生年月日", self.create_date_input()),
+            
+            # 区切り線1
+            ("", QFrame()),
+            
+            # 住所情報
+            ("郵便番号", self.postal_code_input),
+            ("住所", self.address_input),
+            ("住所フリガナ", self.address_furigana_input),
+            
+            # 区切り線2
+            ("", QFrame()),
+            
+            # リスト情報
+            ("リスト名", self.list_name_input),
+            ("リストフリガナ", self.list_furigana_input),
+            ("リスト電話番号", self.list_phone_input),
+            ("リスト郵便番号", self.list_postal_code_input),
+            ("リスト住所", self.list_address_input),
+            ("リスト住所フリガナ", self.list_address_furigana_input),
+            
+            # エリア検索関連のウィジェット
+            ("", self.create_area_search_widget()),
+            
+            # 区切り線3
+            ("", QFrame()),
+            
+            # 受注情報
+            ("受注者名", self.order_person_input),
+            ("料金認識", self.fee_input),
+            ("他番号", self.other_number_input),
+            ("電話機", self.phone_device_input),
+            ("禁止回線", self.forbidden_line_input),
+            ("続柄", self.relationship_input),
+            ("ND", self.nd_input),
+            ("受付日", self.order_date_input),
+            
+            # 区切り線4
+            ("", QFrame()),
+            
+            # 判定情報
+            ("現回線", self.current_line_combo),
+            ("判定", self.judgment_combo),
+            ("ネット利用", self.net_usage_combo),
+            ("家族了承", self.family_approval_combo)
+        ]
+        
+        for label_text, widget in fields:
+            if isinstance(widget, QFrame):
+                # 区切り線のスタイル設定
+                widget.setFrameShape(QFrame.Shape.HLine)
+                widget.setFrameShadow(QFrame.Shadow.Sunken)
+                widget.setStyleSheet("""
+                    QFrame {
+                        background-color: #E0E0E0;
+                        margin: 16px 0;
+                        height: 2px;
+                    }
+                """)
+                form_layout.addWidget(widget)
+            else:
+                field_container = QWidget()
+                field_layout = QVBoxLayout(field_container)
+                field_layout.setSpacing(2)
+                field_layout.setContentsMargins(0, 0, 0, 4)
+                
+                if label_text:  # ラベルテキストがある場合のみラベルを追加
+                    label = QLabel(label_text)
+                    field_layout.addWidget(label)
+                
+                if isinstance(widget, QLineEdit):
+                    widget.setStyleSheet(input_style)
+                elif isinstance(widget, QComboBox):
+                    widget.setStyleSheet(input_style)
+                
+                field_layout.addWidget(widget)
+                form_layout.addWidget(field_container)
+        
+        parent_layout.addWidget(form_group)
+    
+    def create_date_input(self):
+        """生年月日入力用のウィジェットを作成"""
+        date_widget = QWidget()
+        date_layout = QHBoxLayout(date_widget)
+        date_layout.setSpacing(8)
+        date_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # スタイル設定
+        input_style = """
+            QLineEdit {
+                padding: 4px 8px;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
+                min-height: 24px;
+                min-width: 60px;
             }
-            QProgressBar::chunk {
-                background-color: #3498DB;
+            QLineEdit:focus {
+                border: 2px solid #1565C0;
             }
-        """)
-        self.progress_bar.hide()  # 初期状態では非表示
-        area_result_layout.addWidget(self.progress_bar)
-
-        address_layout.addWidget(area_result_container)
+        """
         
-        address_group.setLayout(address_layout)
-        parent_layout.addWidget(address_group)
+        combo_style = """
+            QComboBox {
+                padding: 4px 8px;
+                border: 1px solid #E0E0E0;
+                border-radius: 2px;
+                background-color: white;
+                font-size: 12px;
+                min-height: 24px;
+                min-width: 80px;
+            }
+            QComboBox:focus {
+                border: 2px solid #1565C0;
+            }
+        """
         
-        # リスト情報セクション
-        list_group = QGroupBox("リスト情報")
-        list_layout = QVBoxLayout()
+        # 年号選択（カスタムコンボボックスを使用）
+        self.era_combo = CustomComboBox()
+        self.era_combo.addItems(["昭和", "平成", "令和"])
+        self.era_combo.setStyleSheet(combo_style)
         
-        # リスト名
-        list_layout.addWidget(QLabel("リスト名"))
-        self.list_name_input = QLineEdit()
-        list_layout.addWidget(self.list_name_input)
+        # 年入力（手動入力可能なQLineEdit）
+        self.year_input = QLineEdit()
+        self.year_input.setStyleSheet(input_style)
+        self.year_input.setMaxLength(4)  # 最大4文字まで
+        self.year_input.setPlaceholderText("年")
         
-        # リストフリガナ
-        list_furigana_layout = QHBoxLayout()
-        list_furigana_layout.addWidget(QLabel("リストフリガナ"))
-        self.list_furigana_mode_combo = CustomComboBox()
-        self.list_furigana_mode_combo.addItems(["自動", "手動"])
-        list_furigana_layout.addWidget(self.list_furigana_mode_combo)
-        list_layout.addLayout(list_furigana_layout)
-        self.list_furigana_input = QLineEdit()
-        list_layout.addWidget(self.list_furigana_input)
+        # 月入力（手動入力可能なQLineEdit）
+        self.month_input = QLineEdit()
+        self.month_input.setStyleSheet(input_style)
+        self.month_input.setMaxLength(2)  # 最大2文字まで
+        self.month_input.setPlaceholderText("月")
         
-        # 電話番号
-        list_layout.addWidget(QLabel("電話番号"))
-        self.list_phone_input = QLineEdit()
-        list_layout.addWidget(self.list_phone_input)
+        # 日入力（手動入力可能なQLineEdit）
+        self.day_input = QLineEdit()
+        self.day_input.setStyleSheet(input_style)
+        self.day_input.setMaxLength(2)  # 最大2文字まで
+        self.day_input.setPlaceholderText("日")
         
-        # リスト郵便番号
-        list_layout.addWidget(QLabel("リスト郵便番号"))
-        self.list_postal_code_input = QLineEdit()
-        list_layout.addWidget(self.list_postal_code_input)
+        # ラベルのスタイル
+        label_style = "QLabel { color: #424242; font-size: 12px; }"
         
-        # リスト住所
-        list_layout.addWidget(QLabel("リスト住所"))
-        list_address_container = QHBoxLayout()
-        self.list_address_input = QLineEdit()
-        list_address_container.addWidget(self.list_address_input)
-        list_layout.addLayout(list_address_container)
+        # 各要素をレイアウトに追加
+        date_layout.addWidget(self.era_combo)
+        date_layout.addWidget(QLabel("年", styleSheet=label_style))
+        date_layout.addWidget(self.year_input)
+        date_layout.addWidget(QLabel("月", styleSheet=label_style))
+        date_layout.addWidget(self.month_input)
+        date_layout.addWidget(QLabel("日", styleSheet=label_style))
+        date_layout.addWidget(self.day_input)
         
-        # リスト住所フリガナモード
-        list_address_furigana_layout = QHBoxLayout()
-        list_address_furigana_layout.addWidget(QLabel("リスト住所フリガナ"))
-        self.list_address_furigana_mode_combo = CustomComboBox()
-        self.list_address_furigana_mode_combo.addItems(["自動", "手動"])
-        list_address_furigana_layout.addWidget(self.list_address_furigana_mode_combo)
-        list_layout.addLayout(list_address_furigana_layout)
-        self.list_address_furigana_input = QLineEdit()
-        list_layout.addWidget(self.list_address_furigana_input)
+        # 数字のみ入力可能なバリデーターを設定
+        validator = QIntValidator(1, 9999)  # 年のバリデーターを4桁に変更
+        self.year_input.setValidator(validator)
+        self.month_input.setValidator(QIntValidator(1, 12))
+        self.day_input.setValidator(QIntValidator(1, 31))
         
-        list_group.setLayout(list_layout)
-        parent_layout.addWidget(list_group)
-        
-        # 受注情報セクション
-        order_group = QGroupBox("受注情報")
-        order_layout = QVBoxLayout()
-        
-        # 現状回線
-        order_layout.addWidget(QLabel("現状回線"))
-        self.current_line_combo = CustomComboBox()
-        self.current_line_combo.addItems(["アナログ"])
-        order_layout.addWidget(self.current_line_combo)
-        
-        # 受注日（本日自動入力）
-        order_layout.addWidget(QLabel("受注日"))
-        self.order_date_input = QLineEdit()
-        # 0埋めなしの月/日フォーマットを生成
-        now = datetime.datetime.now()
-        month = str(now.month)  # 0埋めなしの月
-        day = str(now.day)      # 0埋めなしの日
-        self.order_date_input.setText(f"{month}/{day}")
-        self.order_date_input.setReadOnly(True)
-        order_layout.addWidget(self.order_date_input)
-        
-        # 提供判定
-        order_layout.addWidget(QLabel("提供判定"))
-        self.judgment_combo = CustomComboBox()
-        self.judgment_combo.addItems(["OK", "NG"])
-        order_layout.addWidget(self.judgment_combo)
-        
-        order_group.setLayout(order_layout)
-        parent_layout.addWidget(order_group)
+        return date_widget
     
     def create_preview_area(self, parent_layout):
         """プレビューエリアを作成"""
-        # プレビューラベル
-        preview_label = QLabel("CTIフォーマットプレビュー")
+        preview_widget = QWidget()
+        preview_widget.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 8px;
+            }
+        """)
+        preview_layout = QVBoxLayout(preview_widget)
+        preview_layout.setSpacing(8)
+        preview_layout.setContentsMargins(16, 16, 16, 16)
         
-        # プレビューテキストエリア
-        self.preview_text = QTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setStyleSheet("""
+        # プレビューエリアのスタイル
+        preview_style = """
             QTextEdit {
-                background-color: #f8f8f8;
-                color: #333333;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                padding: 8px;
-                font-family: 'MS Gothic', monospace;
+                min-height: 200px;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 2px;
+                background-color: white;
+                font-family: "MS Gothic", "Yu Gothic", sans-serif;
+                font-size: 12px;
+                line-height: 1.5;
+            }
+            QTextEdit:focus {
+                border: 1px solid #1565C0;
+            }
+        """
+        
+        # CTIフォーマットプレビュー
+        cti_label = QLabel("CTIフォーマットプレビュー")
+        cti_label.setStyleSheet("""
+            QLabel {
+                color: #1976D2;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 4px 0;
             }
         """)
         
-        parent_layout.addWidget(preview_label)
-        parent_layout.addWidget(self.preview_text)
+        self.preview_text = QTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setStyleSheet(preview_style)
+        
+        preview_layout.addWidget(cti_label)
+        preview_layout.addWidget(self.preview_text)
+        parent_layout.addWidget(preview_widget)
     
     def setup_signals(self):
         """シグナルの設定"""
@@ -662,15 +780,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
         self.era_combo.currentTextChanged.connect(self.update_year_combo)
         
+        # フリガナモードの切り替えシグナル
+        self.furigana_mode_combo.currentTextChanged.connect(self.on_furigana_mode_changed)
+        
         # 名前とフリガナのバリデーション用のシグナル
         self.contractor_input.textChanged.connect(self.validate_contractor_name)
         self.furigana_input.textChanged.connect(self.validate_furigana_input)
         self.list_name_input.textChanged.connect(self.validate_list_name)
         self.list_furigana_input.textChanged.connect(self.validate_list_furigana)
         
-        # フリガナ自動変換のシグナル
+        # フリガナ自動変換のシグナル（初期状態で接続）
         self.contractor_input.textChanged.connect(self.auto_generate_furigana)
         self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+        self.address_input.textChanged.connect(self.auto_generate_address_furigana)
+        self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
         
         # 入力時に背景色をリセットするシグナル
         self.operator_input.textChanged.connect(self.reset_background_color)
@@ -687,13 +810,35 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input.textChanged.connect(self.reset_background_color)
         self.fee_input.textChanged.connect(self.reset_background_color)
         self.relationship_input.textChanged.connect(self.reset_background_color)
-        self.nd_input.textChanged.connect(self.reset_background_color)  # NDの背景色リセット
+        self.nd_input.textChanged.connect(self.reset_background_color)
+        self.order_date_input.textChanged.connect(self.reset_background_color)
         
         # ボタンのシグナル接続
         self.area_search_btn.clicked.connect(self.search_service_area)
-        
-        # マップボタンのシグナル接続
         self.map_btn.clicked.connect(self.open_street_view)
+        
+        # プレビュー更新のシグナル
+        self.contractor_input.textChanged.connect(self.update_preview)
+        self.furigana_input.textChanged.connect(self.update_preview)
+        self.postal_code_input.textChanged.connect(self.update_preview)
+        self.address_input.textChanged.connect(self.update_preview)
+        self.list_name_input.textChanged.connect(self.update_preview)
+        self.list_furigana_input.textChanged.connect(self.update_preview)
+        self.list_phone_input.textChanged.connect(self.update_preview)
+        self.list_postal_code_input.textChanged.connect(self.update_preview)
+        self.list_address_input.textChanged.connect(self.update_preview)
+        self.order_person_input.textChanged.connect(self.update_preview)
+        self.fee_input.textChanged.connect(self.update_preview)
+        self.other_number_input.textChanged.connect(self.update_preview)
+        self.phone_device_input.textChanged.connect(self.update_preview)
+        self.forbidden_line_input.textChanged.connect(self.update_preview)
+        self.relationship_input.textChanged.connect(self.update_preview)
+        self.nd_input.textChanged.connect(self.update_preview)
+        self.order_date_input.textChanged.connect(self.update_preview)
+        self.current_line_combo.currentTextChanged.connect(self.update_preview)
+        self.judgment_combo.currentTextChanged.connect(self.update_preview)
+        self.net_usage_combo.currentTextChanged.connect(self.update_preview)
+        self.family_approval_combo.currentTextChanged.connect(self.update_preview)
     
     def show_settings(self):
         """設定ダイアログを表示"""
@@ -952,9 +1097,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.relationship_input.clear()
         # コンボボックスをデフォルト値に
         self.era_combo.setCurrentIndex(0)
-        self.year_combo.setCurrentIndex(0)
-        self.month_combo.setCurrentIndex(0)
-        self.day_combo.setCurrentIndex(0)
+        self.year_input.clear()
+        self.month_input.clear()
+        self.day_input.clear()
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
         self.net_usage_combo.setCurrentIndex(0)
@@ -1324,6 +1469,176 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             logging.error(f"スレッドのクリーンアップ中にエラー: {str(e)}")
             # エラーが発生しても、スレッドをNoneに設定して続行
             self.thread = None
+
+    def on_furigana_mode_changed(self, mode):
+        """
+        フリガナモードが変更された時の処理
+        
+        Args:
+            mode (str): 選択されたモード（"自動" or "手動"）
+        """
+        if mode == "自動":
+            # 自動モードの場合、現在の契約者名とリスト名からフリガナを生成
+            self.auto_generate_furigana(self.contractor_input.text())
+            self.auto_generate_list_furigana(self.list_name_input.text())
+            self.auto_generate_address_furigana(self.address_input.text())
+            self.auto_generate_list_address_furigana(self.list_address_input.text())
+            # 自動生成を有効化
+            self.contractor_input.textChanged.connect(self.auto_generate_furigana)
+            self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+            self.address_input.textChanged.connect(self.auto_generate_address_furigana)
+            self.list_address_input.textChanged.connect(self.auto_generate_list_address_furigana)
+        else:
+            # 手動モードの場合、自動生成を無効化
+            try:
+                self.contractor_input.textChanged.disconnect(self.auto_generate_furigana)
+            except:
+                pass
+            try:
+                self.list_name_input.textChanged.disconnect(self.auto_generate_list_furigana)
+            except:
+                pass
+            try:
+                self.address_input.textChanged.disconnect(self.auto_generate_address_furigana)
+            except:
+                pass
+            try:
+                self.list_address_input.textChanged.disconnect(self.auto_generate_list_address_furigana)
+            except:
+                pass
+
+    def auto_generate_furigana(self, text):
+        """
+        契約者名からフリガナを自動生成
+        
+        Args:
+            text (str): 契約者名
+        """
+        if self.furigana_mode_combo.currentText() == "自動":
+            try:
+                furigana = convert_to_furigana(text)
+                if furigana:
+                    self.furigana_input.setText(furigana)
+            except Exception as e:
+                logging.error(f"フリガナ自動生成エラー: {e}")
+
+    def auto_generate_list_furigana(self, text):
+        """
+        リスト名からフリガナを自動生成
+        
+        Args:
+            text (str): リスト名
+        """
+        if self.furigana_mode_combo.currentText() == "自動":
+            try:
+                furigana = convert_to_furigana(text)
+                if furigana:
+                    self.list_furigana_input.setText(furigana)
+            except Exception as e:
+                logging.error(f"リストフリガナ自動生成エラー: {e}")
+
+    def auto_generate_address_furigana(self, text):
+        """
+        住所からフリガナを自動生成
+        
+        Args:
+            text (str): 住所
+        """
+        if self.furigana_mode_combo.currentText() == "自動":
+            try:
+                furigana = convert_to_furigana(text)
+                if furigana:
+                    self.address_furigana_input.setText(furigana)
+            except Exception as e:
+                logging.error(f"住所フリガナ自動生成エラー: {e}")
+
+    def create_area_search_widget(self):
+        """エリア検索関連のウィジェットを作成"""
+        search_container = QWidget()
+        search_layout = QVBoxLayout(search_container)
+        search_layout.setSpacing(8)
+        search_layout.setContentsMargins(0, 8, 0, 0)
+        
+        # ボタンのスタイル
+        button_style = """
+            QPushButton {
+                min-height: 30px;
+                padding: 5px 15px;
+                border: 1px solid #1565C0;
+                border-radius: 2px;
+                background-color: #1565C0;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0D47A1;
+            }
+            QPushButton:pressed {
+                background-color: #0A3D91;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+                border-color: #ccc;
+            }
+        """
+        
+        # 緑色のボタン（地図を開くボタン）のスタイル
+        green_button_style = """
+            QPushButton {
+                min-height: 30px;
+                padding: 5px 15px;
+                border: 1px solid #2E7D32;
+                border-radius: 2px;
+                background-color: #2E7D32;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1B5E20;
+            }
+            QPushButton:pressed {
+                background-color: #0A280E;
+            }
+            QPushButton:disabled {
+                background-color: #ccc;
+                border-color: #ccc;
+            }
+        """
+        
+        # エリア検索ボタンの作成
+        self.area_search_btn = QPushButton("提供エリア検索")
+        self.area_search_btn.setStyleSheet(button_style)
+        
+        # 地図ボタンの作成
+        self.map_btn = QPushButton("地図を開く")
+        self.map_btn.setStyleSheet(green_button_style)
+        
+        # エリア結果ラベルの作成
+        self.area_result_label = QLabel("提供エリア: 未検索")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #95a5a6;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                color: #95a5a6;
+            }
+        """)
+        
+        # プログレスバーの作成
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        
+        button_container = QHBoxLayout()
+        button_container.addWidget(self.area_search_btn)
+        button_container.addWidget(self.map_btn)
+        
+        search_layout.addLayout(button_container)
+        search_layout.addWidget(self.progress_bar)
+        search_layout.addWidget(self.area_result_label)
+        
+        return search_container
 
 
 class ServiceAreaSearchWorker(QObject):
