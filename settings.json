@@ -10,6 +10,6 @@
         "page_load_timeout": 54,
         "script_timeout": 59
     },
-    "mode": "simple",
+    "mode": "easy",
     "show_mode_selection": false
 }
