@@ -73,7 +73,7 @@ class MainWindowFunctions:
         try:
             # 初期設定を設定
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
                 'font_size': 11,
                 'delay_seconds': 0,
                 'browser_settings': {
@@ -118,7 +118,7 @@ class MainWindowFunctions:
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n社番：{employee_number}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
+                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
                 'font_size': 11,
                 'delay_seconds': 0,
                 'browser_settings': {
@@ -222,7 +222,6 @@ class MainWindowFunctions:
             'available_time': self.available_time_input,  # 出やすい時間帯も必須項目に追加
             'fee': self.fee_input,  # 料金認識を追加
             'relationship': self.relationship_input,  # 名義人との関係性
-            'employee_number': self.employee_number_input,  # 社番を追加
             'nd': self.nd_input  # NDを追加
         }
         
@@ -259,7 +258,6 @@ class MainWindowFunctions:
                 'available_time': '出やすい時間帯',
                 'fee': '料金認識',  # 追加
                 'relationship': '備考：名義人の...',  # 名義人との関係性に変更
-                'employee_number': '社番',  # 社番を追加
                 'nd': 'ND'  # NDを追加
             }
             
@@ -327,7 +325,6 @@ class MainWindowFunctions:
             'fee': self.fee_input.text(),
             'net_usage': self.net_usage_combo.currentText(),
             'family_approval': self.family_approval_combo.currentText(),
-            'employee_number': self.employee_number_input.text(),  # 社番を追加
             'other_number': self.other_number_input.text(),  # 他番号を追加
             'phone_device': self.phone_device_input.text(),  # 電話機を追加
             'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
@@ -385,9 +382,6 @@ class MainWindowFunctions:
         self.list_address_input.clear()
         # 受注者名はクリアしない（保持する）
         # self.order_person_input.clear()
-        
-        # 社番はクリアしない（保持する）
-        # self.employee_number_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
         self.other_number_input.setText("なし")
@@ -903,7 +897,6 @@ class MainWindowFunctions:
                 'fee': self.fee_input.text(),
                 'net_usage': self.net_usage_combo.currentText(),
                 'family_approval': self.family_approval_combo.currentText(),
-                'employee_number': self.employee_number_input.text(),  # 社番を追加
                 'other_number': self.other_number_input.text(),  # 他番号を追加
                 'phone_device': self.phone_device_input.text(),  # 電話機を追加
                 'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
