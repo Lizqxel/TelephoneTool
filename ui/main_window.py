@@ -385,11 +385,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input = QLineEdit()
         input_layout.addWidget(self.order_person_input)
         
-        # 社番を追加
-        input_layout.addWidget(QLabel("社番"))
-        self.employee_number_input = QLineEdit()
-        input_layout.addWidget(self.employee_number_input)
-        
         # 料金認識を追加（移動）
         input_layout.addWidget(QLabel("料金認識"))
         self.fee_input = QLineEdit()
@@ -692,7 +687,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.order_person_input.textChanged.connect(self.reset_background_color)
         self.fee_input.textChanged.connect(self.reset_background_color)
         self.relationship_input.textChanged.connect(self.reset_background_color)
-        self.employee_number_input.textChanged.connect(self.reset_background_color)  # 社番の背景色リセット
         self.nd_input.textChanged.connect(self.reset_background_color)  # NDの背景色リセット
         
         # ボタンのシグナル接続
@@ -956,7 +950,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.forbidden_line_input.setText("なし")
         
         self.relationship_input.clear()
-        # 社番はクリアしない（保持する）
         # コンボボックスをデフォルト値に
         self.era_combo.setCurrentIndex(0)
         self.year_combo.setCurrentIndex(0)
