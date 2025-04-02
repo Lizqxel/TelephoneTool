@@ -541,6 +541,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 'judgment': 'OK'  # デフォルト値を設定
             }
             
+            # プレビューテキストを生成
+            preview_text = self.generate_preview_text()
+            if preview_text:
+                self.preview_text.setText(preview_text)
+            
             # 受注者入力項目ダイアログを表示
             dialog = OrdererInputDialog(self, self.orderer_data)
             
@@ -1832,15 +1837,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     now = datetime.datetime.now()
                     data['order_date'] = f"{now.month}/{now.day}"
                 
-                # 提供判定が設定されていない場合はJudgment_result_labelから取得
-                if not data.get('judgment') and hasattr(self, 'judgment_result_label'):
-                    judgment_text = self.judgment_result_label.text()
-                    if "提供可能" in judgment_text:
-                        data['judgment'] = "OK"
-                    elif "提供エリア外" in judgment_text:
-                        data['judgment'] = "NG"
-                else:
-                        data['judgment'] = "未検索"
+                # 提供判定が設定されていない場合はorder_dataから取得
+                if not data.get('judgment'):
+                    data['judgment'] = self.order_data.get('judgment', 'OK')  # デフォルトでOK
                 
                 logging.info(f"統合されたデータ: {data}")
                 
