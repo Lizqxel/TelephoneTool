@@ -57,27 +57,40 @@ class ServiceAreaSearchWorker(QThread):
         """スレッド実行時に呼び出される関数"""
         try:
             if not self._is_running:
+                logging.info("ServiceAreaSearchWorker: スレッドが停止状態のため実行を中止")
                 return
                 
+            logging.info("★★★ ServiceAreaSearchWorker: 提供エリア検索を開始します ★★★")
             # 提供エリア検索を実行
-            result = area_search.search_service_area(self.postal_code, self.address)
+            result = area_search.search_service_area(self.postal_code, self.address, show_popup=True)
             
             if not self._is_running:
+                logging.info("ServiceAreaSearchWorker: スレッドが停止状態のため結果を返しません")
                 return
                 
+            logging.info(f"★★★ ServiceAreaSearchWorker: 検索結果を返します: {result} ★★★")
             # 結果を信号で送信
             self.finished.emit(result)
+            logging.info("★★★ ServiceAreaSearchWorker: finishedシグナルを発火しました ★★★")
+            
+            # イベントループを確実に処理するために少し待機
+            self.msleep(100)
+            
         except Exception as e:
             if self._is_running:
+                logging.error(f"★★★ ServiceAreaSearchWorker: 検索中にエラーが発生: {e} ★★★")
                 # エラーが発生した場合はエラー情報を送信
                 error_result = {
                     "status": "error",
                     "message": str(e),
-                    "details": {"エラー": str(e)}
+                    "details": {"エラー": str(e)},
+                    "show_popup": True
                 }
                 self.finished.emit(error_result)
+                logging.info("★★★ ServiceAreaSearchWorker: エラー結果のfinishedシグナルを発火しました ★★★")
         finally:
             self._is_running = False
+            logging.info("★★★ ServiceAreaSearchWorker: スレッドの実行を終了します ★★★")
     
     def __del__(self):
         """デストラクタ - スレッド終了時の処理"""
@@ -539,42 +552,70 @@ ND：
     
     def search_service_area(self):
         """提供エリア検索を実行"""
-        # 郵便番号と住所を取得
-        postal_code = self.postal_code_input.text().strip()
-        address = self.address_input.text().strip()
-        
-        # 入力チェック
-        if not postal_code or not address:
-            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
-            return
-        
-        # 検索中の表示
-        self.area_result_label.setText("提供エリア: 検索中...")
-        self.area_result_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #3498DB;
-                border-radius: 4px;
-                background-color: #E3F2FD;
-                color: #3498DB;
-            }
-        """)
-        QApplication.processEvents()
-        
-        # 検索ボタンを無効化
-        if hasattr(self, 'area_search_btn'):
-            self.area_search_btn.setEnabled(False)
-            self.area_search_btn.setText("検索中...")
-        
-        # ワーカースレッドを作成して開始
-        self.search_worker = ServiceAreaSearchWorker(postal_code, address)
-        self.search_worker.finished.connect(self.on_search_completed)
-        self.search_worker.start()
+        try:
+            logging.info("★★★ 提供エリア検索を開始します ★★★")
+            # 郵便番号と住所を取得
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            
+            logging.info(f"★★★ 検索パラメータ: 郵便番号={postal_code}, 住所={address} ★★★")
+            
+            # 入力チェック
+            if not postal_code or not address:
+                logging.warning("★★★ 郵便番号または住所が未入力です ★★★")
+                QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
+                return
+            
+            # 検索中の表示
+            logging.info("★★★ 検索中の表示を更新します ★★★")
+            self.area_result_label.setText("提供エリア: 検索中...")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #3498DB;
+                    border-radius: 4px;
+                    background-color: #E3F2FD;
+                    color: #3498DB;
+                }
+            """)
+            QApplication.processEvents()
+            
+            # 検索ボタンを無効化
+            if hasattr(self, 'area_search_btn'):
+                self.area_search_btn.setEnabled(False)
+                self.area_search_btn.setText("検索中...")
+                logging.info("★★★ 検索ボタンを無効化しました ★★★")
+            
+            # 既存のワーカーが存在する場合は停止
+            if hasattr(self, 'search_worker') and self.search_worker:
+                logging.info("★★★ 既存のワーカーを停止します ★★★")
+                self.search_worker.stop()
+                self.search_worker.wait()
+            
+            # ワーカースレッドを作成して開始
+            logging.info("★★★ 新しいワーカースレッドを作成します ★★★")
+            self.search_worker = ServiceAreaSearchWorker(postal_code, address)
+            
+            # finishedシグナルの接続を確実に行う
+            try:
+                self.search_worker.finished.disconnect()
+            except:
+                pass  # 接続が存在しない場合は無視
+            self.search_worker.finished.connect(self.on_search_completed)
+            
+            logging.info("★★★ ServiceAreaSearchWorkerを開始します ★★★")
+            self.search_worker.start()
+            
+        except Exception as e:
+            logging.error(f"★★★ 提供エリア検索の開始中にエラーが発生: {e} ★★★")
+            QMessageBox.critical(self, "エラー", f"提供エリア検索の開始中にエラーが発生しました: {e}")
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
         try:
+            logging.info(f"★★★ on_search_completed呼び出し: {result} ★★★")
+            
             # 検索ボタンを有効化
             if hasattr(self, 'area_search_btn'):
                 self.area_search_btn.setEnabled(True)
@@ -582,49 +623,65 @@ ND：
             
             # 結果表示を更新
             status = result.get("status", "failure")
+            message = result.get("message", "判定失敗")
             
-            if status == "available":
-                # 提供可能の場合
-                self.area_result_label.setText("提供エリア: 提供可能")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #27AE60;
-                        border-radius: 4px;
-                        background-color: #E8F5E9;
-                        color: #27AE60;
-                    }
-                """)
-                self.judgment_combo.setCurrentText("○")
-            elif status == "unavailable":
-                # 未提供の場合
-                self.area_result_label.setText("提供エリア: 未提供")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #E74C3C;
-                        border-radius: 4px;
-                        background-color: #FFEBEE;
-                        color: #E74C3C;
-                    }
-                """)
-                self.judgment_combo.setCurrentText("×")
-            else:
-                # 判定失敗の場合
-                self.area_result_label.setText("提供エリア: 判定失敗")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #F39C12;
-                        border-radius: 4px;
-                        background-color: #FFF3E0;
-                        color: #F39C12;
-                    }
-                """)
-                self.judgment_combo.setCurrentText("")
+            logging.info(f"検索結果の処理: status={status}, message={message}")
+            
+            # メインウィンドウの提供判定結果ラベルを更新
+            if hasattr(self, 'area_result_label'):
+                logging.info("area_result_labelの更新を開始")
+                if status == "available":
+                    # 提供可能の場合
+                    self.area_result_label.setText("提供エリア: 提供可能")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #27AE60;
+                            border-radius: 4px;
+                            background-color: #E8F5E9;
+                            color: #27AE60;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("提供可能")
+                        logging.info("提供判定を「提供可能」に設定")
+                elif status == "unavailable":
+                    # 未提供の場合
+                    self.area_result_label.setText("提供エリア: 未提供")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #E74C3C;
+                            border-radius: 4px;
+                            background-color: #FFEBEE;
+                            color: #E74C3C;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("未提供")
+                        logging.info("提供判定を「未提供」に設定")
+                else:
+                    # 判定失敗の場合
+                    self.area_result_label.setText(f"提供エリア: {message}")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #F39C12;
+                            border-radius: 4px;
+                            background-color: #FFF3E0;
+                            color: #F39C12;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("検索失敗")
+                        logging.info("提供判定を「検索失敗」に設定")
+                logging.info("area_result_labelの更新が完了")
+                
+                # UIの更新を確実に実行
+                QApplication.processEvents()
             
             # 詳細情報がある場合は表示
             if "details" in result and result.get("show_popup", True):
@@ -650,37 +707,50 @@ ND：
                 # メインウィンドウの右側に配置し、画面外に出ないように調整
                 popup_x = min(main_geometry.x() + main_geometry.width() + 10,
                             QApplication.primaryScreen().geometry().width() - popup_width - 10)
-                popup_y = main_geometry.y() + (main_geometry.height() - popup_height) // 2
-                
-                # ポップアップの位置を設定
+                popup_y = min(main_geometry.y() + (main_geometry.height() - popup_height) // 2,
+                            QApplication.primaryScreen().geometry().height() - popup_height - 10)
                 popup.move(popup_x, popup_y)
                 
                 # ポップアップを表示
+                logging.info("詳細情報のポップアップを表示")
                 popup.exec()
             
-            # スクリーンショットパスを更新
-            if "screenshot" in result:
-                self.update_screenshot_button(result["screenshot"])
+            # プレビューテキストを更新
+            if hasattr(self, 'generate_preview_text'):
+                logging.info("プレビューテキストの更新を開始")
+                # 提供判定の結果を更新
+                if status == "available":
+                    self.judgment_combo.setCurrentText("提供可能")
+                elif status == "unavailable":
+                    self.judgment_combo.setCurrentText("未提供")
+                else:
+                    self.judgment_combo.setCurrentText("検索失敗")
                 
+                # プレビューテキストを生成
+                self.generate_preview_text()
+                
+                # プレビューテキストの更新を確実に実行
+                QApplication.processEvents()
+                
+                logging.info("プレビューテキストの更新が完了")
+            
+            logging.info(f"★★★ 提供判定結果の更新が完了しました: {message} ★★★")
+            
         except Exception as e:
-            logging.error(f"検索結果の処理中にエラーが発生: {e}")
-            QMessageBox.warning(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
-        finally:
-            # ワーカースレッドを停止（安全に処理）
-            try:
-                if hasattr(self, 'search_worker') and self.search_worker is not None:
-                    logging.info("ワーカースレッドの終了処理を開始します")
-                    self.search_worker.stop()
-                    # スレッドが終了するまで最大3秒待機
-                    if not self.search_worker.wait(3000):
-                        logging.warning("ワーカースレッドが3秒以内に終了しませんでした")
-                    # 参照をクリア
-                    self.search_worker = None
-                    # UIイベントを処理して、UIのフリーズを防止
-                    QApplication.processEvents()
-                    logging.info("ワーカースレッドの終了処理が完了しました")
-            except Exception as e:
-                logging.error(f"ワーカースレッドの終了処理中にエラーが発生: {e}")
+            logging.error(f"検索完了時の処理でエラー: {e}", exc_info=True)
+            if hasattr(self, 'area_result_label'):
+                self.area_result_label.setText("提供エリア: エラー")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #E74C3C;
+                        border-radius: 4px;
+                        background-color: #FFEBEE;
+                        color: #E74C3C;
+                    }
+                """)
+            QMessageBox.critical(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
     
     def update_screenshot_button(self, screenshot_path=None):
         """スクリーンショットボタンを更新"""
@@ -895,7 +965,7 @@ ND：
             
             # format_templateの確認
             if not hasattr(self, 'format_template') or not self.format_template:
-                logging.error("format_template属性が存在しないか空です")
+                logging.info("format_template属性が存在しないか空です")
                 if hasattr(self, 'settings') and 'format_template' in self.settings:
                     self.format_template = self.settings['format_template']
                     logging.info("format_templateを設定から読み込みました")
@@ -903,8 +973,6 @@ ND：
                     logging.error("format_templateを設定から読み込めません")
                     QMessageBox.warning(self, "エラー", "テンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
                     return None
-            
-            logging.info(f"format_templateの内容: {self.format_template[:100]}...")  # 最初の100文字だけログ出力
             
             # シンプルモードの場合
             if self.current_mode == 'simple':
@@ -939,17 +1007,11 @@ ND：
                     'remarks': ''  # 空の値を設定
                 }
                 
-                # 各フィールドの値をログ出力
-                for key, value in data.items():
-                    logging.info(f"フィールド {key}: {value}")
-                
                 # 生年月日の取得と確認
                 era = self.era_combo.currentText()
                 year = self.year_combo.currentText()
                 month = self.month_combo.currentText()
                 day = self.day_combo.currentText()
-                
-                logging.info(f"生年月日情報 - 元号: {era}, 年: {year}, 月: {month}, 日: {day}")
                 
                 # 生年月日の計算
                 birth_date = ""
@@ -961,7 +1023,6 @@ ND：
                             jp_year = int(year)
                             western_year = era_year_map[era] + jp_year
                             birth_date = f"{western_year}/{month}/{day}"
-                            logging.info(f"生年月日を変換: {birth_date}")
                     except ValueError as e:
                         logging.error(f"生年月日の変換に失敗: {e}")
                 
@@ -969,15 +1030,12 @@ ND：
                 
                 try:
                     # フォーマットテンプレートに値を埋め込む
-                    logging.info("テンプレートへの値の埋め込みを開始")
                     formatted_text = self.format_template.format(**data)
-                    logging.info("テンプレートへの値の埋め込みが成功")
                     
                     # GoogleマップのURLを追加
                     maps_url = self.get_google_maps_url()
                     if maps_url:
                         formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
-                        logging.info("GoogleマップのURLを追加")
                     
                     # プレビューに表示
                     self.preview_text.setText(formatted_text)
@@ -993,6 +1051,9 @@ ND：
                             font-family: 'MS Gothic', monospace;
                         }
                     """)
+                    
+                    # UIの更新を確実に実行
+                    QApplication.processEvents()
                     
                     return formatted_text
                     
@@ -1014,15 +1075,9 @@ ND：
                 orderer_data = getattr(self, 'orderer_data', {})
                 order_data = getattr(self, 'current_dialog', None)
                 
-                logging.info(f"住所データ: {address_data}")
-                logging.info(f"リストデータ: {list_data}")
-                logging.info(f"受注者データ: {orderer_data}")
-                
                 if order_data:
                     order_data = order_data.get_order_data()
-                    logging.info(f"受注データ: {order_data}")
                 else:
-                    logging.warning("受注データが取得できません")
                     order_data = {}
                 
                 # データを統合
@@ -1032,17 +1087,20 @@ ND：
                     **orderer_data,
                     **order_data,
                     'mobile': '',  # 空の値を設定
-                    'remarks': ''  # 空の値を設定
+                    'remarks': '',  # 空の値を設定
+                    'judgment': self.judgment_combo.currentText()  # 提供判定の結果を追加
                 }
-                logging.info(f"統合されたデータ: {data}")
                 
                 try:
                     # テンプレートの置換
                     formatted_text = self.format_template.format(**data)
-                    logging.info("テンプレートの置換が成功")
                     
                     # プレビューに表示
                     self.preview_text.setText(formatted_text)
+                    
+                    # UIの更新を確実に実行
+                    QApplication.processEvents()
+                    
                     return formatted_text
                 except Exception as e:
                     logging.error(f"テンプレートの置換に失敗: {e}")
