@@ -600,10 +600,30 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.search_thread.start()
             logging.info(f"提供エリア検索スレッドを開始しました: postal_code={postal_code}, address={address}")
             
+            # 提供判定サイトのポップアップ位置を設定
+            if hasattr(self.search_thread, 'browser'):
+                # 画面のサイズを取得
+                screen = QApplication.primaryScreen().geometry()
+                screen_width = screen.width()
+                screen_height = screen.height()
+                
+                # 提供判定サイトのサイズを想定（一般的なブラウザウィンドウサイズ）
+                browser_width = 800
+                browser_height = 600
+                
+                # 画面右下に配置
+                # 画面の下端から100px、右端から20pxの位置に配置
+                x = screen_width - browser_width - 20
+                y = screen_height - browser_height - 100
+                
+                # 位置を設定
+                self.search_thread.browser.move(x, y)
+                logging.info(f"提供判定サイトを画面右下に配置: x={x}, y={y}")
+            
         except Exception as e:
             logging.error(f"提供判定処理の開始中にエラー: {e}", exc_info=True)
             self.update_judgment_result("検索エラー")
-    
+
     def show_address_dialog(self):
         """住所情報ダイアログを表示"""
         try:
@@ -1805,7 +1825,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         data['judgment'] = "OK"
                     elif "提供エリア外" in judgment_text:
                         data['judgment'] = "NG"
-                    else:
+                else:
                         data['judgment'] = "未検索"
                 
                 logging.info(f"統合されたデータ: {data}")

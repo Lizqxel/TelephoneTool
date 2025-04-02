@@ -882,13 +882,14 @@ def search_service_area(postal_code, address):
                         result = found_pattern.copy()
                         result["screenshot"] = os.path.abspath(screenshot_path)
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
                         return result
                     else:
                         # 提供不可時のスクリーンショットを保存
                         screenshot_path = "debug_unavailable_confirmation.png"
                         driver.save_screenshot(screenshot_path)
                         logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
-                        return {
+                        result = {
                             "status": "failure",
                             "message": "判定失敗",
                             "details": {
@@ -899,6 +900,8 @@ def search_service_area(postal_code, address):
                             "screenshot": os.path.abspath(screenshot_path),
                             "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
+                        return result
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存

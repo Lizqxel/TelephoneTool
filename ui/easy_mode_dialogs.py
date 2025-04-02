@@ -8,13 +8,15 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
 from services.area_search import search_service_area as area_search_service
 import threading
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Slot
 
 # グローバル変数 - 提供判定の最終結果を保持
 # このグローバル変数は関数やメソッド間でエリア判定結果を共有するために使用されます
@@ -97,7 +99,7 @@ def search_service_area(postal_code, address):
 
 class ServiceAreaSearchThread(QThread):
     """提供エリア検索用のスレッド"""
-    finished = Signal(str)  # 検索結果を通知するシグナル
+    finished = Signal(dict)  # 検索結果を通知するシグナル
     error = Signal(str)     # エラーを通知するシグナル
     
     def __init__(self, postal_code, address, parent_window):
@@ -107,113 +109,34 @@ class ServiceAreaSearchThread(QThread):
         self.parent_window = parent_window
     
     def run(self):
+        """スレッドの実行"""
         try:
-            logging.info(f"提供エリア検索スレッドが実行開始: postal_code={self.postal_code}, address={self.address}")
-            
             # 提供エリア検索を実行
             result = area_search_service(self.postal_code, self.address)
+            logging.info(f"★★★ area_search_serviceの結果: {result} ★★★")
             
-            # 結果の処理
+            # area_search_serviceから返された結果をそのまま使用
             if isinstance(result, dict):
-                logging.info(f"検索結果（辞書型）: {result}")
-                
-                # ステータスに基づいて結果を文字列に変換
-                if result.get('status') == 'available':
-                    result_str = "提供可能"
-                    logging.info("提供可能エリアと判定されました")
-                elif result.get('status') == 'unavailable':
-                    result_str = "提供エリア外"
-                    logging.info("提供エリア外と判定されました")
-                else:
-                    result_str = "検索エラー"
-                    logging.info(f"検索エラーまたは不明な状態: {result.get('status')}")
-                
-                # シグナルで結果を通知
-                self.finished.emit(result_str)
-                
-                # 親ウィンドウに直接結果を通知（ダイアログが閉じられていても反映されるように）
-                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                    try:
-                        # QMetaObjectを使用して、UIスレッドで安全に実行
-                        QMetaObject.invokeMethod(
-                            self.parent_window,
-                            "update_judgment_result",
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(str, result_str)
-                        )
-                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
-                    except Exception as e:
-                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
-                
-            elif isinstance(result, str):
-                logging.info(f"検索結果（文字列）: {result}")
+                # 既に辞書型の場合はそのまま使用
                 self.finished.emit(result)
-                
-                # 親ウィンドウに直接結果を通知
-                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                    try:
-                        QMetaObject.invokeMethod(
-                            self.parent_window,
-                            "update_judgment_result",
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(str, result)
-                        )
-                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result}")
-                    except Exception as e:
-                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
-                
-            elif result is None:
-                logging.warning("検索結果が空（None）でした")
-                result_str = "検索エラー"
-                self.finished.emit(result_str)
-                
-                # 親ウィンドウに直接結果を通知
-                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                    try:
-                        QMetaObject.invokeMethod(
-                            self.parent_window,
-                            "update_judgment_result",
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(str, result_str)
-                        )
-                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
-                    except Exception as e:
-                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
-                
             else:
-                logging.warning(f"予期せぬ検索結果の型: {type(result)}")
-                result_str = "検索エラー"
-                self.finished.emit(result_str)
-                
-                # 親ウィンドウに直接結果を通知
-                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                    try:
-                        QMetaObject.invokeMethod(
-                            self.parent_window,
-                            "update_judgment_result",
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(str, result_str)
-                        )
-                        logging.info(f"親ウィンドウに判定結果を直接通知しました: {result_str}")
-                    except Exception as e:
-                        logging.error(f"親ウィンドウへの判定結果通知でエラー: {e}", exc_info=True)
+                # 文字列の場合は辞書型に変換
+                result_dict = {
+                    "status": "available" if "提供可能" in str(result) else "unavailable",
+                    "message": str(result),
+                    "show_popup": True
+                }
+                logging.info(f"★★★ 変換後の結果: {result_dict} ★★★")
+                self.finished.emit(result_dict)
                 
         except Exception as e:
-            logging.error(f"提供エリア検索中に例外が発生: {e}", exc_info=True)
-            self.error.emit(str(e))
-            
-            # エラー時も親ウィンドウに通知
-            if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                try:
-                    QMetaObject.invokeMethod(
-                        self.parent_window,
-                        "update_judgment_result",
-                        Qt.ConnectionType.QueuedConnection,
-                        Q_ARG(str, "検索エラー")
-                    )
-                    logging.info("親ウィンドウにエラーを直接通知しました")
-                except Exception as e:
-                    logging.error(f"親ウィンドウへのエラー通知でエラー: {e}", exc_info=True)
+            logging.error(f"提供エリア検索中にエラー: {e}", exc_info=True)
+            error_dict = {
+                "status": "failure",
+                "message": str(e),
+                "show_popup": True
+            }
+            self.finished.emit(error_dict)
             
     def stop(self):
         """スレッドを停止する"""
@@ -428,28 +351,38 @@ class AddressInfoDialog(QDialog):
                 }
             """)
             
-            # メインウィンドウへの参照を確保（ダイアログが閉じられても結果を表示できるように）
+            # 検索ボタンを無効化
+            self.judgment_btn.setEnabled(False)
+            self.judgment_btn.setText("検索中...")
+            
+            # メインウィンドウへの参照を確保
             main_window = self.parent_window
             
             # グローバル変数をリセット
+            global _last_search_result
             _last_search_result = "検索中..."
             logging.info(f"グローバル変数をリセットしました: {_last_search_result}")
             
             # 既存のスレッドを停止
-            if self.search_thread:
-                self.search_thread.stop()
-                # スレッドが終了するまで最大2秒だけ待機（UIをブロックしない）
-                if not self.search_thread.wait(2000):
-                    logging.warning("前回の検索スレッドが停止しませんでした。新しいスレッドを開始します。")
-                self.search_thread = None
+            if hasattr(self, 'search_thread') and self.search_thread is not None:
+                try:
+                    self.search_thread.finished.disconnect()
+                    self.search_thread.error.disconnect()
+                    self.search_thread.stop()
+                except Exception as e:
+                    logging.warning(f"既存のスレッド切断でエラー: {e}")
             
             # 検索スレッドの作成と開始
-            logging.info(f"新しい検索スレッドを作成します: postal_code={postal_code}, address={address}")
             self.search_thread = ServiceAreaSearchThread(postal_code, address, main_window)
             
-            # ダイアログ用のシグナル接続
-            self.search_thread.finished.connect(self.on_search_finished)
-            self.search_thread.error.connect(self.on_search_error)
+            # シグナルの接続を確認
+            if not self.search_thread.finished.receivers(self.on_search_finished):
+                self.search_thread.finished.connect(self.on_search_finished)
+                logging.info("finishedシグナルを接続しました")
+            
+            if not self.search_thread.error.receivers(self.on_search_error):
+                self.search_thread.error.connect(self.on_search_error)
+                logging.info("errorシグナルを接続しました")
             
             # メインウィンドウにも直接「検索中...」を通知
             if main_window and hasattr(main_window, 'update_judgment_result'):
@@ -458,150 +391,124 @@ class AddressInfoDialog(QDialog):
                     logging.info("メインウィンドウに「検索中...」状態を直接通知しました")
                 except Exception as e:
                     logging.error(f"メインウィンドウへの検索中状態通知でエラー: {e}")
-                
-            # スレッドを保持するために親ウィンドウのプロパティにスレッドを保存
-            if main_window:
-                # active_search_threadsがなければ作成
-                if not hasattr(main_window, 'active_search_threads'):
-                    main_window.active_search_threads = []
-                
-                # 古いスレッドをクリーンアップ
-                active_threads = []
-                for thread in main_window.active_search_threads:
-                    if thread.isRunning():
-                        active_threads.append(thread)
-                    else:
-                        logging.info("実行していない古いスレッドを削除します")
-                
-                main_window.active_search_threads = active_threads
-                
-                # スレッドをリストに追加
-                main_window.active_search_threads.append(self.search_thread)
-                logging.info(f"メインウィンドウのactive_search_threadsに追加しました（現在{len(main_window.active_search_threads)}個）")
             
             # スレッドを開始
             self.search_thread.start()
             logging.info(f"提供エリア検索スレッドを開始しました: postal_code={postal_code}, address={address}")
             
-            # UIが確実に更新されるようにイベントを処理
-            QApplication.processEvents()
-            
         except Exception as e:
-            logging.error(f"提供エリア検索の開始中にエラー: {e}", exc_info=True)
-            QMessageBox.critical(self, "エラー", f"提供エリアの検索中にエラーが発生しました: {e}")
+            logging.error(f"提供エリア検索の開始でエラー: {e}", exc_info=True)
+            self.judgment_result.setText("提供エリア: エラー")
+            self.judgment_result.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #f44336;
+                    border-radius: 4px;
+                    background-color: #FFEBEE;
+                    color: #B71C1C;
+                }
+            """)
+            QMessageBox.critical(self, "エラー", f"提供エリア検索の開始に失敗しました: {e}")
     
     def on_search_finished(self, result):
         """検索完了時の処理"""
         try:
-            logging.info(f"★★★ on_search_finished呼び出し: {result} ★★★")
-            self.judgment_result.setText(f"提供エリア: {result}")
+            logging.info(f"★★★ 検索完了: {result} ★★★")
             
-            # 判定結果に応じてスタイルを変更
-            if result == "検索中...":
-                style = """
+            # 結果表示を更新
+            status = result.get("status", "failure")
+            message = result.get("message", "判定失敗")
+            
+            # グローバル変数に結果を保存
+            global _last_search_result
+            
+            # 判定結果に応じてラベルを更新
+            if status == "available":
+                self.judgment_result.setText("提供エリア: 提供可能")
+                self.judgment_result.setStyleSheet("""
                     QLabel {
                         font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #FFA500;
-                        border-radius: 4px;
-                        background-color: #FFF3E0;
-                        color: #E65100;
-                    }
-                """
-            elif result == "検索エラー":
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #f44336;
-                        border-radius: 4px;
-                        background-color: #FFEBEE;
-                        color: #B71C1C;
-                    }
-                """
-            elif result == "提供エリア外":
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #FF9800;
-                        border-radius: 4px;
-                        background-color: #FFF3E0;
-                        color: #E65100;
-                    }
-                """
-            else:
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #4CAF50;
+                        padding: 10px;
+                        border: 1px solid #27AE60;
                         border-radius: 4px;
                         background-color: #E8F5E9;
-                        color: #2E7D32;
+                        color: #27AE60;
                     }
-                """
-                
-            self.judgment_result.setStyleSheet(style)
+                """)
+                _last_search_result = "提供可能"
+                logging.info("★★★ 提供可能と判定されました ★★★")
+            elif status == "unavailable":
+                self.judgment_result.setText("提供エリア: 未提供")
+                self.judgment_result.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 10px;
+                        border: 1px solid #E74C3C;
+                        border-radius: 4px;
+                        background-color: #FFEBEE;
+                        color: #E74C3C;
+                    }
+                """)
+                _last_search_result = "未提供"
+                logging.info("★★★ 未提供と判定されました ★★★")
+            else:
+                self.judgment_result.setText(f"提供エリア: {message}")
+                self.judgment_result.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 10px;
+                        border: 1px solid #F39C12;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #F39C12;
+                    }
+                """)
+                _last_search_result = "検索失敗"
+                logging.info("★★★ 検索失敗と判定されました ★★★")
             
-            # グローバル変数にも結果を保存
-            _last_search_result = result
-            logging.info(f"グローバル変数に結果を保存: {result}")
+            # UIの更新を確実に実行
+            QApplication.processEvents()
             
-            # 結果を保存データに追加
-            self.saved_data['judgment_result'] = result
+            # 検索ボタンを有効化
+            self.judgment_btn.setEnabled(True)
+            self.judgment_btn.setText("提供判定実行")
             
-            # 親ウィンドウにも結果を反映
-            if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
+            # 親ウィンドウのプレビューを更新
+            if hasattr(self.parent_window, 'generate_preview_text'):
                 try:
-                    logging.info(f"★★★ 親ウィンドウに結果を直接通知します: {result} ★★★")
-                    
-                    # 複数の方法で確実に通知
-                    # 1. 直接呼び出し
-                    self.parent_window.update_judgment_result(result)
-                    
-                    # 2. QMetaObjectを使用
-                    QMetaObject.invokeMethod(
-                        self.parent_window,
-                        "update_judgment_result",
-                        Qt.ConnectionType.QueuedConnection,
-                        Q_ARG(str, result)
-                    )
-                    
-                    # 3. タイマーで遅延実行
-                    QTimer.singleShot(200, lambda: self.delayed_update(result))
-                    
-                    logging.info("★★★ 親ウィンドウへの結果通知が完了しました ★★★")
+                    logging.info(f"★★★ 親ウィンドウのプレビューを更新します: {_last_search_result} ★★★")
+                    self.parent_window.judgment_combo.setCurrentText(_last_search_result)
+                    self.parent_window.generate_preview_text()
+                    logging.info("★★★ プレビューの更新が完了しました ★★★")
                 except Exception as e:
-                    logging.error(f"親ウィンドウへの結果通知でエラー: {e}", exc_info=True)
-                    
-            logging.info(f"★★★ 検索結果の処理が完了しました: {result} ★★★")
+                    logging.error(f"プレビュー更新でエラー: {e}", exc_info=True)
+            
+            # 詳細情報がある場合は表示
+            if "details" in result and result.get("show_popup", True):
+                details = result["details"]
+                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+                QMessageBox.information(self, "検索結果", details_text)
+            
+            # 最終的なUIの更新を確実に実行
+            QApplication.processEvents()
+            logging.info("★★★ 検索完了の処理が終了しました ★★★")
             
         except Exception as e:
-            logging.error(f"検索結果の処理中にエラー: {e}", exc_info=True)
-            try:
-                # グローバル変数にもエラーを保存（先にglobal宣言）
-                _last_search_result = "検索エラー"
-                
-                # エラー情報を保存データに追加
-                self.saved_data['judgment_result'] = "検索エラー"
-                
-                # 親ウィンドウにもエラーを反映
-                if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                    self.parent_window.update_judgment_result("検索エラー")
-            except Exception as inner_e:
-                logging.error(f"エラー処理中に別のエラーが発生: {inner_e}")
-                
-    def delayed_update(self, result):
-        """遅延して親ウィンドウに通知するヘルパーメソッド"""
-        try:
-            if self.parent_window and hasattr(self.parent_window, 'update_judgment_result'):
-                logging.info(f"遅延更新処理から親ウィンドウに通知: {result}")
-                self.parent_window.update_judgment_result(result)
-                QApplication.processEvents()  # UIの更新を確実に実行
-        except Exception as e:
-            logging.error(f"遅延更新処理でエラー: {e}")
-
+            logging.error(f"検索完了時の処理でエラー: {e}", exc_info=True)
+            self.judgment_result.setText("提供エリア: エラー")
+            self.judgment_result.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 10px;
+                    border: 1px solid #E74C3C;
+                    border-radius: 4px;
+                    background-color: #FFEBEE;
+                    color: #E74C3C;
+                }
+            """)
+            QMessageBox.critical(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
+    
     def on_search_error(self, error_message):
         """検索エラー時の処理"""
         self.judgment_result.setText("提供エリア: 検索エラー")
@@ -1435,7 +1342,7 @@ class OrdererInputDialog(QDialog):
                 logging.error("親ウィンドウへの参照が存在しません")
                 QMessageBox.warning(self, "警告", "親ウィンドウへの参照が失われました。")
                 self.accept()
-                
+
         except Exception as e:
             logging.error(f"作成ボタンのクリック処理中にエラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"作成処理中にエラーが発生しました: {e}")
@@ -1647,6 +1554,42 @@ class OrdererInputDialog(QDialog):
         
         except Exception as e:
             logging.error(f"フリガナ自動生成エラー: {str(e)}", exc_info=True)
+
+    def showEvent(self, event):
+        """ダイアログが表示される際のイベント"""
+        super().showEvent(event)
+        
+        # 画面のサイズを取得
+        screen = QApplication.primaryScreen().geometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+        
+        # ダイアログのサイズを取得
+        dialog_width = self.width()
+        dialog_height = self.height()
+        
+        # 提供判定サイトのサイズを想定（一般的なブラウザウィンドウサイズ）
+        browser_width = 800
+        browser_height = 600
+        
+        # 提供判定サイトの位置を計算（画面右下）
+        browser_x = screen_width - browser_width - 20
+        browser_y = screen_height - browser_height - 100
+        
+        # 受注者入力項目ダイアログを提供判定サイトの左側に配置
+        # 提供判定サイトの左端から20px、下端から100pxの位置に配置
+        x = browser_x - dialog_width - 20
+        y = browser_y + browser_height - dialog_height - 100
+        
+        # 画面の端に近すぎる場合は調整
+        if x < 0:
+            x = 20
+        if y < 0:
+            y = 20
+        
+        # 位置を設定
+        self.move(x, y)
+        logging.info(f"受注者入力項目ダイアログを配置: x={x}, y={y}")
 
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
