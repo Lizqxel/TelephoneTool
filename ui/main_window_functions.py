@@ -983,225 +983,52 @@ ND：
             logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
     
     def generate_preview_text(self):
-        """
-        プレビューテキストを生成
-        
-        Returns:
-            str: 生成されたプレビューテキスト
-        """
+        """プレビューテキストを生成する"""
         try:
             logging.info("プレビューテキストの生成を開始")
             logging.info(f"現在のモード: {self.current_mode}")
             
-            # format_templateの確認
-            if not hasattr(self, 'format_template') or not self.format_template:
-                logging.info("format_template属性が存在しないか空です")
-                if hasattr(self, 'settings') and 'format_template' in self.settings:
-                    self.format_template = self.settings['format_template']
-                    logging.info("format_templateを設定から読み込みました")
-                else:
-                    logging.error("format_templateを設定から読み込めません")
-                    QMessageBox.warning(self, "エラー", "テンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
-                    return None
+            # 必要なデータを収集
+            data = {}
             
-            # シンプルモードの場合
-            if self.current_mode == 'simple':
-                logging.info("シンプルモードでのプレビュー生成")
-                # 入力データの取得と確認
-                data = {
-                    'operator': self.operator_input.text(),
-                    'available_time': self.available_time_input.text(),
-                    'contractor': self.contractor_input.text(),
-                    'furigana': self.furigana_input.text(),
-                    'postal_code': self.postal_code_input.text(),
-                    'address': self.address_input.text(),
-                    'list_name': self.list_name_input.text(),
-                    'list_furigana': self.list_furigana_input.text(),
-                    'list_phone': self.list_phone_input.text(),
-                    'list_postal_code': self.list_postal_code_input.text(),
-                    'list_address': self.list_address_input.text(),
-                    'current_line': self.current_line_combo.currentText(),
-                    'order_date': self.order_date_input.text(),
-                    'order_person': self.order_person_input.text(),
-                    'judgment': self.judgment_combo.currentText(),
-                    'fee': self.fee_input.text(),
-                    'net_usage': self.net_usage_combo.currentText(),
-                    'family_approval': self.family_approval_combo.currentText(),
-                    'employee_number': self.employee_number_input.text(),
-                    'other_number': self.other_number_input.text(),
-                    'phone_device': self.phone_device_input.text(),
-                    'forbidden_line': self.forbidden_line_input.text(),
-                    'nd': self.nd_input.text(),
-                    'relationship': self.relationship_input.text(),
-                    'mobile': '',  # 空の値を設定
-                    'remarks': ''  # 空の値を設定
-                }
-                
-                # 生年月日の取得と確認
-                era = self.era_combo.currentText()
-                year = self.year_combo.currentText()
-                month = self.month_combo.currentText()
-                day = self.day_combo.currentText()
-                
-                # 生年月日の計算
-                birth_date = ""
-                if era and year and year != "年" and month and month != "月" and day and day != "日":
-                    try:
-                        # 和暦から西暦への変換
-                        era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
-                        if era in era_year_map:
-                            jp_year = int(year)
-                            western_year = era_year_map[era] + jp_year
-                            birth_date = f"{western_year}/{month}/{day}"
-                    except ValueError as e:
-                        logging.error(f"生年月日の変換に失敗: {e}")
-                
-                data['birth_date'] = birth_date
-                
-                try:
-                    # フォーマットテンプレートに値を埋め込む
-                    formatted_text = self.format_template.format(**data)
-                    
-                    # GoogleマップのURLを追加
-                    maps_url = self.get_google_maps_url()
-                    if maps_url:
-                        formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
-                    
-                    # プレビューに表示
-                    self.preview_text.setText(formatted_text)
-                    
-                    # プレビューテキストの色を確保
-                    self.preview_text.setStyleSheet("""
-                        QTextEdit {
-                            background-color: #f8f8f8;
-                            color: #333333;
-                            border: 1px solid #ddd;
-                            border-radius: 4px;
-                            padding: 8px;
-                            font-family: 'MS Gothic', monospace;
-                        }
-                    """)
-                    
-                    # UIの更新を確実に実行
-                    QApplication.processEvents()
-                    
-                    return formatted_text
-                    
-                except KeyError as e:
-                    logging.error(f"テンプレート書式エラー - 不明なプレースホルダー: {e}")
-                    QMessageBox.warning(self, "エラー", f"テンプレートに不明なプレースホルダーがあります: {e}")
-                    return None
-                except Exception as e:
-                    logging.error(f"テンプレート書式エラー - 予期しないエラー: {e}")
-                    QMessageBox.warning(self, "エラー", f"テンプレートの書式設定中にエラーが発生しました: {e}")
-                    return None
-            # 日付の計算
-            birth_date = ""
-            era = self.era_combo.currentText()
-            year = self.year_combo.currentText()
-            month = self.month_combo.currentText()
-            day = self.day_combo.currentText()
+            # 受注者データを取得
+            if hasattr(self, 'orderer_data') and self.orderer_data:
+                data.update(self.orderer_data)
             
-            if era and year and year != "年" and month and month != "月" and day and day != "日":
-                # 和暦から西暦への変換
-                era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
-                if era in era_year_map:
-                    try:
-                        jp_year = int(year)
-                        western_year = era_year_map[era] + jp_year
-                        birth_date = f"{western_year}/{month}/{day}"
-                    except ValueError:
-                        pass
+            # 住所データを取得
+            if hasattr(self, 'address_data') and self.address_data:
+                data.update(self.address_data)
             
-            # フォーマットデータの準備（generate_cti_formatと同じ処理）
-            format_data = {
-                'operator': self.operator_input.text(),
-                'mobile': "",  # 携帯電話番号を空に
-                'available_time': self.available_time_input.text(),  # 出やすい時間帯を追加
-                'contractor': self.contractor_input.text(),
-                'furigana': self.furigana_input.text(),
-                'birth_date': birth_date,
-                'postal_code': self.postal_code_input.text(),
-                'address': self.address_input.text(),
-                'list_name': self.list_name_input.text(),
-                'list_furigana': self.list_furigana_input.text(),
-                'list_phone': self.list_phone_input.text(),
-                'list_postal_code': self.list_postal_code_input.text(),
-                'list_address': self.list_address_input.text(),
-                'current_line': self.current_line_combo.currentText(),
-                'order_date': self.order_date_input.text(),
-                'order_person': self.order_person_input.text(),
-                'judgment': self.judgment_combo.currentText(),
-                'fee': self.fee_input.text(),
-                'net_usage': self.net_usage_combo.currentText(),
-                'family_approval': self.family_approval_combo.currentText(),
-                'other_number': self.other_number_input.text(),  # 他番号を追加
-                'phone_device': self.phone_device_input.text(),  # 電話機を追加
-                'forbidden_line': self.forbidden_line_input.text(),  # 禁止回線を追加
-                'nd': self.nd_input.text(),  # NDを追加
-                'relationship': self.relationship_input.text()  # 名義人との関係性
-            }
+            # リストデータを取得
+            if hasattr(self, 'list_data') and self.list_data:
+                data.update(self.list_data)
             
-            # フォーマットテンプレートに値を埋め込む
-            try:
-                formatted_text = self.format_template.format(**format_data)
-                
-                # GoogleマップのURLを追加
-                maps_url = self.get_google_maps_url()
-                if maps_url:
-                    formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
-                
-                return formatted_text
-            except KeyError as e:
-                logging.error(f"テンプレート書式エラー: {str(e)}")
+            # 受注データを取得
+            if hasattr(self, 'order_data') and self.order_data:
+                data.update(self.order_data)
+            
+            # テンプレートを取得
+            template = self.get_template()
+            if not template:
+                logging.error("テンプレートの取得に失敗")
                 return None
             
-            # 使いやすいモードの場合
-            else:
-                logging.info("使いやすいモードでのプレビュー生成")
-                # 各ダイアログのデータを取得
-                address_data = getattr(self, 'address_data', {})
-                list_data = getattr(self, 'list_data', {})
-                orderer_data = getattr(self, 'orderer_data', {})
-                order_data = getattr(self, 'current_dialog', None)
-                
-                if order_data:
-                    order_data = order_data.get_order_data()
+            # プレースホルダーを置換
+            preview_text = template
+            for key, value in data.items():
+                placeholder = "{" + key + "}"
+                if value is not None:
+                    preview_text = preview_text.replace(placeholder, str(value))
                 else:
-                    order_data = {}
-                
-                # データを統合
-                data = {
-                    **address_data,
-                    **list_data,
-                    **orderer_data,
-                    **order_data,
-                    'mobile': '',  # 空の値を設定
-                    'remarks': '',  # 空の値を設定
-                    'judgment': self.judgment_combo.currentText()  # 提供判定の結果を追加
-                }
-                
-                try:
-                    # テンプレートの置換
-                    formatted_text = self.format_template.format(**data)
-                    
-                    # プレビューに表示
-                    self.preview_text.setText(formatted_text)
-                    
-                    # UIの更新を確実に実行
-                    QApplication.processEvents()
-                    
-                    return formatted_text
-                except Exception as e:
-                    logging.error(f"テンプレートの置換に失敗: {e}")
-                    QMessageBox.warning(self, "エラー", f"テンプレートの置換に失敗しました: {e}")
-                    return None
+                    preview_text = preview_text.replace(placeholder, "")
+            
+            logging.info("プレビューテキストの生成が完了")
+            return preview_text
             
         except Exception as e:
             logging.error(f"プレビュー生成中にエラー: {e}", exc_info=True)
-            QMessageBox.warning(self, "エラー", f"プレビューの生成中にエラーが発生しました: {e}")
-            return None 
-
+            return None
+    
     def update_search_progress(self, message):
         """
         検索の進捗状況を更新する

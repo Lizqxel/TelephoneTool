@@ -150,8 +150,21 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         logging.info(f"現在のモード: {self.current_mode}")
         
         # ウィンドウの基本設定
-        self.setWindowTitle("電話ツール")
-        self.setMinimumSize(800, 600)
+        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
+        self.setGeometry(100, 100, 800, 600)
+        
+        # 生年月日入力用のコンボボックスを初期化
+        self.era_combo = QComboBox()
+        self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
+        
+        self.year_combo = QComboBox()
+        self.year_combo.addItems([str(i) for i in range(1, 151)])
+        
+        self.month_combo = QComboBox()
+        self.month_combo.addItems([str(i) for i in range(1, 13)])
+        
+        self.day_combo = QComboBox()
+        self.day_combo.addItems([str(i) for i in range(1, 32)])
         
         # メインウィジェットの設定
         main_widget = QWidget()
@@ -993,7 +1006,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         parent_layout.addWidget(top_bar)
     
     def create_input_form(self, parent_layout):
-        """入力フォームを作成"""
+        """入力フォームを作成します"""
         # 受注者入力項目セクション（新しく追加）
         input_group = QGroupBox("受注者入力項目")
         input_layout = QVBoxLayout()
@@ -1024,96 +1037,39 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.furigana_input = QLineEdit()
         input_layout.addWidget(self.furigana_input)
         
-        # 生年月日
-        birth_layout = QVBoxLayout()
-        birth_layout.addWidget(QLabel("生年月日"))
+        # 生年月日入力グループ
+        birth_date_group = QGroupBox("生年月日")
+        birth_date_layout = QHBoxLayout()
         
-        # 生年月日の入力部分を横並びにする
-        birth_input_layout = QHBoxLayout()
-        birth_input_layout.setContentsMargins(0, 0, 0, 0)  # マージンを0に設定
-        birth_input_layout.setSpacing(5)  # 間隔を5pxに設定
+        # 元号選択
+        self.era_combo = QComboBox()
+        self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
+        birth_date_layout.addWidget(QLabel("元号:"))
+        birth_date_layout.addWidget(self.era_combo)
         
-        # コンテナウィジェットを作成して固定幅を設定
-        birth_container = QWidget()
-        birth_container.setFixedWidth(320)  # 固定幅を280pxから320pxに増加
-        birth_container_layout = QHBoxLayout(birth_container)
-        birth_container_layout.setContentsMargins(0, 0, 0, 0)
-        birth_container_layout.setSpacing(8)  # 間隔を5pxから8pxに増加
+        # 年選択
+        self.year_combo = QComboBox()
+        self.year_combo.addItems([str(i) for i in range(1, 151)])
+        self.year_combo.setCurrentText("年")
+        birth_date_layout.addWidget(QLabel("年:"))
+        birth_date_layout.addWidget(self.year_combo)
         
-        self.era_combo = CustomComboBox()
-        self.era_combo.addItems(["昭和", "平成", "西暦"])
-        self.era_combo.setFixedWidth(80)  # 幅を70pxから80pxに増加
-        birth_container_layout.addWidget(self.era_combo)
-        
-        # 年の入力部分用のコンテナ
-        year_container = QWidget()
-        year_layout = QHBoxLayout(year_container)
-        year_layout.setContentsMargins(0, 0, 0, 0)
-        year_layout.setSpacing(2)  # 年の数字と「年」の間隔を調整
-        
-        self.year_combo = CustomComboBox()
-        self.year_combo.addItems([str(i) for i in range(1, 65)])
-        self.year_combo.setEditable(True)
-        self.year_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.year_combo.lineEdit().setMaxLength(4)
-        self.year_combo.lineEdit().setValidator(QIntValidator(1, 9999))
-        self.year_combo.setFixedWidth(65)  # 幅を60pxから65pxに増加
-        year_layout.addWidget(self.year_combo)
-        
-        year_label = QLabel("年")
-        year_label.setFixedWidth(20)
-        year_layout.addWidget(year_label)
-        
-        birth_container_layout.addWidget(year_container)
-        
-        # 月の入力部分用のコンテナ
-        month_container = QWidget()
-        month_layout = QHBoxLayout(month_container)
-        month_layout.setContentsMargins(0, 0, 0, 0)
-        month_layout.setSpacing(2)
-        
-        self.month_combo = CustomComboBox()
+        # 月選択
+        self.month_combo = QComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
-        self.month_combo.setEditable(True)
-        self.month_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.month_combo.lineEdit().setMaxLength(2)
-        self.month_combo.lineEdit().setValidator(QIntValidator(1, 12))
-        self.month_combo.setFixedWidth(45)
-        month_layout.addWidget(self.month_combo)
+        self.month_combo.setCurrentText("月")
+        birth_date_layout.addWidget(QLabel("月:"))
+        birth_date_layout.addWidget(self.month_combo)
         
-        month_label = QLabel("月")
-        month_label.setFixedWidth(20)
-        month_layout.addWidget(month_label)
-        
-        birth_container_layout.addWidget(month_container)
-        
-        # 日の入力部分用のコンテナ
-        day_container = QWidget()
-        day_layout = QHBoxLayout(day_container)
-        day_layout.setContentsMargins(0, 0, 0, 0)
-        day_layout.setSpacing(2)
-        
-        self.day_combo = CustomComboBox()
+        # 日選択
+        self.day_combo = QComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
-        self.day_combo.setEditable(True)
-        self.day_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.day_combo.lineEdit().setMaxLength(2)
-        self.day_combo.lineEdit().setValidator(QIntValidator(1, 31))
-        self.day_combo.setFixedWidth(45)
-        day_layout.addWidget(self.day_combo)
+        self.day_combo.setCurrentText("日")
+        birth_date_layout.addWidget(QLabel("日:"))
+        birth_date_layout.addWidget(self.day_combo)
         
-        day_label = QLabel("日")
-        day_label.setFixedWidth(20)
-        day_layout.addWidget(day_label)
-        
-        birth_container_layout.addWidget(day_container)
-        
-        # コンテナをレイアウトに追加
-        birth_input_layout.addWidget(birth_container)
-        birth_input_layout.addStretch()  # 右側に余白を追加
-        
-        birth_layout.addLayout(birth_input_layout)
-        input_layout.addLayout(birth_layout)
+        birth_date_group.setLayout(birth_date_layout)
+        input_layout.addWidget(birth_date_group)
         
         # 受注者名
         input_layout.addWidget(QLabel("受注者名"))
@@ -2128,6 +2084,21 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             logging.error(f"スレッドのクリーンアップ中にエラー: {str(e)}")
             # エラーが発生しても、スレッドをNoneに設定して続行
             self.thread = None
+
+    def get_template(self):
+        """フォーマットテンプレートを取得する"""
+        try:
+            if not hasattr(self, 'format_template') or not self.format_template:
+                if hasattr(self, 'settings') and 'format_template' in self.settings:
+                    self.format_template = self.settings['format_template']
+                else:
+                    logging.error("format_templateを設定から読み込めません")
+                    QMessageBox.warning(self, "エラー", "テンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
+                    return None
+            return self.format_template
+        except Exception as e:
+            logging.error(f"テンプレート取得中にエラー: {e}")
+            return None
 
 
 class ServiceAreaSearchWorker(QObject):
