@@ -9,7 +9,8 @@ import json
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
-                              QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget)
+                              QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget,
+                              QRadioButton)
 from PySide6.QtCore import Qt
 
 
@@ -161,6 +162,41 @@ ND：
         delay_group.setLayout(delay_layout)
         content_layout.addWidget(delay_group)
         
+        # モード選択グループ
+        mode_group = QGroupBox("モード選択")
+        mode_layout = QVBoxLayout()
+        
+        # モード選択の説明
+        mode_description = QLabel("アプリケーションの動作モードを切り替えます。")
+        mode_description.setWordWrap(True)
+        mode_layout.addWidget(mode_description)
+        
+        # モード選択レイアウト
+        mode_select_layout = QHBoxLayout()
+        
+        # 通常モードラジオボタン
+        self.simple_mode_radio = QRadioButton("通常モード")
+        self.simple_mode_radio.setToolTip("機能をすべて表示するモード")
+        mode_select_layout.addWidget(self.simple_mode_radio)
+        
+        # 誘導モードラジオボタン
+        self.easy_mode_radio = QRadioButton("誘導モード")
+        self.easy_mode_radio.setToolTip("ステップバイステップで入力を誘導するモード")
+        mode_select_layout.addWidget(self.easy_mode_radio)
+        
+        # 現在のモードを設定
+        if hasattr(parent, 'current_mode'):
+            if parent.current_mode == 'simple':
+                self.simple_mode_radio.setChecked(True)
+            else:
+                self.easy_mode_radio.setChecked(True)
+        else:
+            self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
+        
+        mode_layout.addLayout(mode_select_layout)
+        mode_group.setLayout(mode_layout)
+        content_layout.addWidget(mode_group)
+        
         # ブラウザ設定グループ
         browser_group = QGroupBox("ブラウザ設定")
         browser_layout = QVBoxLayout()
@@ -310,10 +346,17 @@ ND：
                     font_size = settings.get('font_size', self.default_font_size)
                     delay_seconds = settings.get('delay_seconds', self.default_delay)
                     browser_settings = settings.get('browser_settings', self.default_browser_settings)
+                    mode = settings.get('mode', 'simple')
                     
                     self.format_edit.setText(format_template)
                     self.font_size_slider.setValue(font_size)
                     self.delay_spin.setValue(delay_seconds)
+                    
+                    # モード設定の読み込み
+                    if mode == 'simple':
+                        self.simple_mode_radio.setChecked(True)
+                    else:
+                        self.easy_mode_radio.setChecked(True)
                     
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
@@ -326,17 +369,28 @@ ND：
                 self.format_edit.setText(self.default_format)
                 self.font_size_slider.setValue(self.default_font_size)
                 self.delay_spin.setValue(self.default_delay)
+                self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
                 self.reset_browser_settings()
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
             self.font_size_slider.setValue(self.default_font_size)
             self.delay_spin.setValue(self.default_delay)
+            self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
             self.reset_browser_settings()
     
     def save_settings(self):
         """設定をファイルに保存する"""
         try:
+            # 現在のモードを取得
+            if hasattr(self.parent(), 'current_mode'):
+                previous_mode = self.parent().current_mode
+            else:
+                previous_mode = 'simple'
+            
+            # 選択されたモードを取得
+            new_mode = 'simple' if self.simple_mode_radio.isChecked() else 'easy'
+            
             # ブラウザ設定を取得
             browser_settings = {
                 "headless": self.headless_checkbox.isChecked(),
@@ -351,10 +405,21 @@ ND：
                 'format_template': self.format_edit.toPlainText(),
                 'font_size': self.font_size_slider.value(),
                 'delay_seconds': self.delay_spin.value(),
-                'browser_settings': browser_settings
+                'browser_settings': browser_settings,
+                'mode': new_mode,
+                'show_mode_selection': False  # モード選択ダイアログを次回から表示しない
             }
+            
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
+            
+            # モードが変更された場合、UIを再構築（安全な方法で処理）
+            if previous_mode != new_mode and hasattr(self.parent(), 'current_mode'):
+                self.parent().current_mode = new_mode
+                # モード変更フラグを設定（ダイアログが閉じた後でUIを再構築するため）
+                self.parent().mode_changed = True
+                self.parent().new_mode = new_mode
+            
             return True
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"設定の保存に失敗しました: {str(e)}")
@@ -365,6 +430,7 @@ ND：
         self.format_edit.setText(self.default_format)
         self.font_size_slider.setValue(self.default_font_size)
         self.delay_spin.setValue(self.default_delay)
+        self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
         self.reset_browser_settings()
     
     def accept(self):
@@ -383,9 +449,14 @@ ND：
             "script_timeout": self.script_timeout_spin.value()
         }
         
+        # 選択されたモードを取得
+        mode = 'simple' if self.simple_mode_radio.isChecked() else 'easy'
+        
         return {
             'format_template': self.format_edit.toPlainText(),
             'font_size': self.font_size_slider.value(),
             'delay_seconds': self.delay_spin.value(),
-            'browser_settings': browser_settings
+            'browser_settings': browser_settings,
+            'mode': mode,
+            'show_mode_selection': False  # モード選択ダイアログを次回から表示しない
         } 
