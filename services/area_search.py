@@ -1102,6 +1102,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                         result = found_pattern.copy()
                         result["screenshot"] = screenshot_path
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
                         if progress_callback:
                             progress_callback(f"{result['message']}が確認されました")
                         return result
@@ -1123,6 +1124,8 @@ def search_service_area(postal_code, address, progress_callback=None):
                             "screenshot": screenshot_path,
                             "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
+                        return result
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存

@@ -36,6 +36,7 @@ debug_result_*.png
 debug_timeout_*.png
 debug_unavailable_*.png
 debug_general_*.png
+screenshots/
 
 # 仮想環境
 venv/
@@ -65,4 +66,15 @@ chrome_data/**/*
 **/CrashpadMetrics*.pma
 **/BrowserMetrics*.pma
 **/*.db
-**/*.db-journal 
+**/*.db-journal
+
+# Input data and screenshots
+input_data/
+screenshots/
+
+# Database
+*.db
+*.sqlite3
+
+# Local settings
+settings.json 

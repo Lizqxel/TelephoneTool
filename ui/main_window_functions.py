@@ -23,46 +23,82 @@ from utils.format_utils import (format_phone_number, format_phone_number_without
 from utils.furigana_utils import convert_to_furigana
 
 
-class ServiceAreaSearchWorker(QObject):
+class ServiceAreaSearchWorker(QThread):
     """
-    提供エリア検索を非同期で実行するワーカークラス
+    提供エリア検索を非同期で実行するワーカースレッド
+    
+    Attributes:
+        finished (Signal): 検索完了時に発火する信号
+        postal_code (str): 検索対象の郵便番号
+        address (str): 検索対象の住所
     """
-    finished = Signal(dict)  # 検索完了時に結果を通知するシグナル
-    progress = Signal(str)   # 進捗状況を通知するシグナル
-
+    finished = Signal(dict)
+    
     def __init__(self, postal_code, address):
         """
+        コンストラクタ
+        
         Args:
-            postal_code (str): 郵便番号
-            address (str): 住所
+            postal_code (str): 検索対象の郵便番号
+            address (str): 検索対象の住所
         """
         super().__init__()
         self.postal_code = postal_code
         self.address = address
-
+        self.driver = None
+        self._is_running = True
+    
+    def stop(self):
+        """スレッドを停止する"""
+        self._is_running = False
+        self.wait()  # スレッドが終了するまで待機
+    
     def run(self):
-        """
-        提供エリア検索を実行し、結果をシグナルで通知する
-        """
+        """スレッド実行時に呼び出される関数"""
         try:
-            # 進捗状況を通知するコールバック関数を定義
-            def progress_callback(message):
-                self.progress.emit(message)
-
-            # 検索を実行
-            result = area_search.search_service_area(
-                self.postal_code,
-                self.address,
-                progress_callback=progress_callback
-            )
+            if not self._is_running:
+                logging.info("ServiceAreaSearchWorker: スレッドが停止状態のため実行を中止")
+                return
+                
+            logging.info("★★★ ServiceAreaSearchWorker: 提供エリア検索を開始します ★★★")
+            # 提供エリア検索を実行
+            result = area_search.search_service_area(self.postal_code, self.address)
+            
+            if not self._is_running:
+                logging.info("ServiceAreaSearchWorker: スレッドが停止状態のため結果を返しません")
+                return
+                
+            logging.info(f"★★★ ServiceAreaSearchWorker: 検索結果を返します: {result} ★★★")
+            # 結果を信号で送信
             self.finished.emit(result)
+            logging.info("★★★ ServiceAreaSearchWorker: finishedシグナルを発火しました ★★★")
+            
+            # イベントループを確実に処理するために少し待機
+            self.msleep(100)
+            
         except Exception as e:
-            logging.error(f"検索処理中にエラーが発生: {str(e)}")
-            self.progress.emit("エラーが発生しました")
-            self.finished.emit({
-                "status": "error",
-                "message": f"検索処理中にエラーが発生: {str(e)}"
-            })
+            if self._is_running:
+                logging.error(f"★★★ ServiceAreaSearchWorker: 検索中にエラーが発生: {e} ★★★")
+                # エラーが発生した場合はエラー情報を送信
+                error_result = {
+                    "status": "error",
+                    "message": str(e),
+                    "details": {"エラー": str(e)},
+                    "show_popup": True
+                }
+                self.finished.emit(error_result)
+                logging.info("★★★ ServiceAreaSearchWorker: エラー結果のfinishedシグナルを発火しました ★★★")
+        finally:
+            self._is_running = False
+            logging.info("★★★ ServiceAreaSearchWorker: スレッドの実行を終了します ★★★")
+    
+    def __del__(self):
+        """デストラクタ - スレッド終了時の処理"""
+        try:
+            self.stop()
+            logging.info("ServiceAreaSearchWorkerが正常に終了しました")
+        except Exception as e:
+            logging.error(f"ServiceAreaSearchWorkerの終了中にエラーが発生: {e}")
 
 
 class MainWindowFunctions:
@@ -73,44 +109,65 @@ class MainWindowFunctions:
         try:
             # 初期設定を設定
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
-                'font_size': 11,
-                'delay_seconds': 0,
-                'browser_settings': {
-                    'headless': True,
-                    'disable_images': True,
-                    'show_popup': True,
-                    'auto_close': True,
-                    'page_load_timeout': 60,
-                    'script_timeout': 60
-                },
-                'update_settings': {
-                    'auto_check': True,
-                    'check_interval': 86400,
-                    'last_update_check': None,
-                    'skip_version': None,
-                    'update_channel': 'stable',
-                    'auto_download': False,
-                    'backup_before_update': True,
-                    'update_history': []
-                }
+                'format_template': "",
+                'font_size': 10  # デフォルトのフォントサイズ
             }
+            
+            # デフォルトのフォーマットテンプレート
+            default_template = """対応者（お客様の名前）：{operator}
+工事希望日
+★出やすい時間帯：{available_time} 携帯：{mobile}
+★電話取次：アナログ→光電話
+★電話OP：
+★無線
+契約者(書類名義)：{contractor}
+フリガナ：{furigana}
+生年月日：{birth_date}
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：なし
+電話機：プッシュ
+禁止回線：なし
+ND：
+
+備考：{remarks}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+※リスト名との関係性："""
             
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
-                    self.format_template = settings.get('format_template', "")
+                    # format_templateを直接self.format_templateに設定
+                    self.format_template = settings.get('format_template', default_template)
                     # settingsオブジェクトを更新
                     self.settings = settings
             else:
+                # デフォルトのフォーマットテンプレートを設定
+                self.format_template = default_template
                 # デフォルト設定をsettingsに保存
-                self.format_template = self.settings['format_template']
+                self.settings['format_template'] = self.format_template
                 
                 # デフォルト設定をファイルに保存
                 with open(self.settings_file, 'w', encoding='utf-8') as f:
                     json.dump(self.settings, f, ensure_ascii=False, indent=2)
                     
-            logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 11)}")
+            logging.info(f"設定を読み込みました: フォントサイズ={self.settings.get('font_size', 10)}")
+            logging.info(f"フォーマットテンプレート: {self.format_template}")
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -118,28 +175,10 @@ class MainWindowFunctions:
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
-                'format_template': "対応者（お客様の名前）：{operator}\n工事希望日\n★出やすい時間帯：{available_time} \n★電話取次：アナログ→光電話\n★電話OP：\n★無線\n契約者(書類名義)：{contractor}\nフリガナ：{furigana}\n生年月日：{birth_date}\n郵便番号：{postal_code}\n住所：{address}\nリスト名：{list_name}\nリスト名フリガナ：{list_furigana}\n電話番号：{list_phone}\nリスト郵便番号：{list_postal_code}\nリスト住所：{list_address}\n現状回線：{current_line}\n受注日：{order_date}\n受注者：{order_person}\n提供判定：{judgment}\n\n料金認識：{fee}\nネット利用：{net_usage}\n家族了承：{family_approval}\n\n他番号：{other_number}\n電話機：{phone_device}\n禁止回線：{forbidden_line}\nND：{nd}\n\n備考：名義人の{relationship}\nお客様が今使っている回線：アナログ\n案内料金：2500円",
-                'font_size': 11,
-                'delay_seconds': 0,
-                'browser_settings': {
-                    'headless': True,
-                    'disable_images': True,
-                    'show_popup': True,
-                    'auto_close': True,
-                    'page_load_timeout': 60,
-                    'script_timeout': 60
-                },
-                'update_settings': {
-                    'auto_check': True,
-                    'check_interval': 86400,
-                    'last_update_check': None,
-                    'skip_version': None,
-                    'update_channel': 'stable',
-                    'auto_download': False,
-                    'backup_before_update': True,
-                    'update_history': []
-                }
+                'format_template': default_template,
+                'font_size': 10
             }
+            self.format_template = default_template
             logging.info("エラーが発生したため、デフォルト設定を使用します")
     
     def format_phone_number(self):
@@ -507,25 +546,24 @@ class MainWindowFunctions:
             self.list_name_input.setText(text)
     
     def search_service_area(self):
-        """
-        提供エリア検索を実行する
-        """
+        """提供エリア検索を実行"""
         try:
-            # 入力値を取得
-            postal_code = self.postal_code_input.text()
-            address = self.address_input.text()
-
+            logging.info("★★★ 提供エリア検索を開始します ★★★")
+            # 郵便番号と住所を取得
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            
+            logging.info(f"★★★ 検索パラメータ: 郵便番号={postal_code}, 住所={address} ★★★")
+            
             # 入力チェック
             if not postal_code or not address:
+                logging.warning("★★★ 郵便番号または住所が未入力です ★★★")
                 QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
                 return
-
-            # 検索ボタンを無効化
-            self.area_search_btn.setEnabled(False)
-            self.area_search_btn.setText("検索中...")
-
-            # 検索ステータスを更新
-            self.area_result_label.setText("提供エリア: 検索を開始します...")
+            
+            # 検索中の表示
+            logging.info("★★★ 検索中の表示を更新します ★★★")
+            self.area_result_label.setText("提供エリア: 検索中...")
             self.area_result_label.setStyleSheet("""
                 QLabel {
                     font-size: 14px;
@@ -533,98 +571,180 @@ class MainWindowFunctions:
                     border: 1px solid #3498DB;
                     border-radius: 4px;
                     background-color: #E3F2FD;
-                    color: #2980B9;
+                    color: #3498DB;
                 }
             """)
-
-            # ワーカーを作成
-            self.worker = ServiceAreaSearchWorker(postal_code, address)
-            self.worker.finished.connect(self.on_search_completed)
-            self.worker.progress.connect(self.update_search_progress)
-
-            # スレッドを作成して検索を開始
-            self.thread = QThread()
-            self.worker.moveToThread(self.thread)
-            self.thread.started.connect(self.worker.run)
-            self.thread.start()
-
+            QApplication.processEvents()
+            
+            # 検索ボタンを無効化
+            if hasattr(self, 'area_search_btn'):
+                self.area_search_btn.setEnabled(False)
+                self.area_search_btn.setText("検索中...")
+                logging.info("★★★ 検索ボタンを無効化しました ★★★")
+            
+            # 既存のワーカーが存在する場合は停止
+            if hasattr(self, 'search_worker') and self.search_worker:
+                logging.info("★★★ 既存のワーカーを停止します ★★★")
+                self.search_worker.stop()
+                self.search_worker.wait()
+            
+            # ワーカースレッドを作成して開始
+            logging.info("★★★ 新しいワーカースレッドを作成します ★★★")
+            self.search_worker = ServiceAreaSearchWorker(postal_code, address)
+            
+            # finishedシグナルの接続を確実に行う
+            try:
+                self.search_worker.finished.disconnect()
+            except:
+                pass  # 接続が存在しない場合は無視
+            self.search_worker.finished.connect(self.on_search_completed)
+            
+            logging.info("★★★ ServiceAreaSearchWorkerを開始します ★★★")
+            self.search_worker.start()
+            
         except Exception as e:
-            logging.error(f"検索処理の開始時にエラー: {str(e)}")
-            self.area_result_label.setText("提供エリア: エラーが発生しました")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            self.area_search_btn.setEnabled(True)
-            self.area_search_btn.setText("検索")
+            logging.error(f"★★★ 提供エリア検索の開始中にエラーが発生: {e} ★★★")
+            QMessageBox.critical(self, "エラー", f"提供エリア検索の開始中にエラーが発生しました: {e}")
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
-        # 検索ボタンを有効化
-        self.area_search_btn.setEnabled(True)
-        self.area_search_btn.setText("検索")
-        
-        # 結果表示を更新
-        status = result.get("status", "failure")
-        
-        if status == "available":
-            # 提供可能の場合
-            self.area_result_label.setText("提供エリア: 提供可能")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #27AE60;
-                    border-radius: 4px;
-                    background-color: #E8F5E9;
-                    color: #27AE60;
-                }
-            """)
-            self.judgment_combo.setCurrentText("○")
-        elif status == "unavailable":
-            # 未提供の場合
-            self.area_result_label.setText("提供エリア: 未提供")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            self.judgment_combo.setCurrentText("×")
-        else:
-            # 判定失敗の場合
-            self.area_result_label.setText("提供エリア: 判定失敗")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
-            self.judgment_combo.setCurrentText("")
-        
-        # 詳細情報がある場合は表示
-        if "details" in result and result.get("show_popup", True):
-            details = result["details"]
-            details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
-            QMessageBox.information(self, "検索結果", details_text)
-        
-        # スクリーンショットパスを更新
-        if "screenshot" in result:
-            self.update_screenshot_button(result["screenshot"])
+        try:
+            logging.info(f"★★★ on_search_completed呼び出し: {result} ★★★")
+            
+            # 検索ボタンを有効化
+            self.area_search_btn.setEnabled(True)
+            self.area_search_btn.setText("検索")
+            
+            # 結果表示を更新
+            status = result.get("status", "failure")
+            message = result.get("message", "判定失敗")
+            
+            logging.info(f"検索結果の処理: status={status}, message={message}")
+            
+            # メインウィンドウの提供判定結果ラベルを更新
+            if hasattr(self, 'area_result_label'):
+                logging.info("area_result_labelの更新を開始")
+                if status == "available":
+                    # 提供可能の場合
+                    self.area_result_label.setText("提供エリア: 提供可能")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #27AE60;
+                            border-radius: 4px;
+                            background-color: #E8F5E9;
+                            color: #27AE60;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("提供可能")
+                        logging.info("提供判定を「提供可能」に設定")
+                elif status == "unavailable":
+                    # 未提供の場合
+                    self.area_result_label.setText("提供エリア: 未提供")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #E74C3C;
+                            border-radius: 4px;
+                            background-color: #FFEBEE;
+                            color: #E74C3C;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("未提供")
+                        logging.info("提供判定を「未提供」に設定")
+                else:
+                    # 判定失敗の場合
+                    self.area_result_label.setText(f"提供エリア: {message}")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #F39C12;
+                            border-radius: 4px;
+                            background-color: #FFF3E0;
+                            color: #F39C12;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("検索失敗")
+                        logging.info("提供判定を「検索失敗」に設定")
+                logging.info("area_result_labelの更新が完了")
+                
+                # UIの更新を確実に実行
+                QApplication.processEvents()
+            
+            # 詳細情報がある場合は表示
+            if "details" in result and result.get("show_popup", True):
+                details = result["details"]
+                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+                
+                # ポップアップウィンドウの作成
+                popup = QMessageBox(self)
+                popup.setWindowTitle("検索結果")
+                popup.setText(details_text)
+                popup.setIcon(QMessageBox.Icon.Information)
+                
+                # メインウィンドウの位置とサイズを取得
+                main_window = self.window()
+                main_geometry = main_window.geometry()
+                
+                # ポップアップウィンドウのサイズを設定（メインウィンドウの1/3程度）
+                popup_width = min(400, main_geometry.width() // 3)
+                popup_height = min(300, main_geometry.height() // 3)
+                popup.resize(popup_width, popup_height)
+                
+                # ポップアップの位置を計算
+                # メインウィンドウの右側に配置し、画面外に出ないように調整
+                popup_x = min(main_geometry.x() + main_geometry.width() + 10,
+                            QApplication.primaryScreen().geometry().width() - popup_width - 10)
+                popup_y = min(main_geometry.y() + (main_geometry.height() - popup_height) // 2,
+                            QApplication.primaryScreen().geometry().height() - popup_height - 10)
+                popup.move(popup_x, popup_y)
+                
+                # ポップアップを表示
+                logging.info("詳細情報のポップアップを表示")
+                popup.exec()
+            
+            # プレビューテキストを更新
+            if hasattr(self, 'generate_preview_text'):
+                logging.info("プレビューテキストの更新を開始")
+                # 提供判定の結果を更新
+                if status == "available":
+                    self.judgment_combo.setCurrentText("提供可能")
+                elif status == "unavailable":
+                    self.judgment_combo.setCurrentText("未提供")
+                else:
+                    self.judgment_combo.setCurrentText("検索失敗")
+                
+                # プレビューテキストを生成
+                self.generate_preview_text()
+                
+                # プレビューテキストの更新を確実に実行
+                QApplication.processEvents()
+                
+                logging.info("プレビューテキストの更新が完了")
+            
+            logging.info(f"★★★ 提供判定結果の更新が完了しました: {message} ★★★")
+            
+        except Exception as e:
+            logging.error(f"検索完了時の処理でエラー: {e}", exc_info=True)
+            if hasattr(self, 'area_result_label'):
+                self.area_result_label.setText("提供エリア: エラー")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #E74C3C;
+                        border-radius: 4px;
+                        background-color: #FFEBEE;
+                        color: #E74C3C;
+                    }
+                """)
+            QMessageBox.critical(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
     
     def update_screenshot_button(self, screenshot_path=None):
         """スクリーンショットボタンを更新"""
@@ -654,21 +774,41 @@ class MainWindowFunctions:
                 
             # QPixmapを使用して画像を表示
             from PySide6.QtGui import QPixmap
-            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout
+            from PySide6.QtWidgets import QLabel, QDialog, QVBoxLayout, QScrollArea, QDialogButtonBox
             
             dialog = QDialog(self)
             dialog.setWindowTitle("スクリーンショット - 提供判定結果")
             dialog.setMinimumSize(800, 600)
             layout = QVBoxLayout(dialog)
             
-            label = QLabel()
+            # スクロールエリアを作成して画像を含める
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            
+            # 画像ラベルを作成
+            image_label = QLabel()
             pixmap = QPixmap(screenshot_path)
-            label.setPixmap(pixmap)
-            label.setScaledContents(True)
-            layout.addWidget(label)
+            image_label.setPixmap(pixmap)
+            image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # スクロールエリアに画像ラベルを設定
+            scroll_area.setWidget(image_label)
+            layout.addWidget(scroll_area)
+            
+            # 閉じるボタンを追加
+            button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
             
             dialog.setLayout(layout)
+            
+            # イベント処理を確保するために非モーダルで表示
+            # 表示前にUIイベントを処理して、UIの応答性を確保
+            QApplication.processEvents()
             dialog.exec()
+            
+            # ダイアログ終了後もイベント処理
+            QApplication.processEvents()
             
         except Exception as e:
             logging.error(f"スクリーンショット表示エラー: {str(e)}")
@@ -844,19 +984,117 @@ class MainWindowFunctions:
     
     def generate_preview_text(self):
         """
-        プレビュー表示用のテキストを生成します。
-        入力値を使用して書式設定された営業コメントのプレビューを生成します。
+        プレビューテキストを生成
         
         Returns:
-            str: 書式設定されたテキスト、または失敗した場合はNone
+            str: 生成されたプレビューテキスト
         """
         try:
-            # 入力値の取得（空でも許可）
-            operator = self.operator_input.text()
-            contractor = self.contractor_input.text() 
-            address = self.address_input.text()
-            postal_code = self.postal_code_input.text()
+            logging.info("プレビューテキストの生成を開始")
+            logging.info(f"現在のモード: {self.current_mode}")
             
+            # format_templateの確認
+            if not hasattr(self, 'format_template') or not self.format_template:
+                logging.info("format_template属性が存在しないか空です")
+                if hasattr(self, 'settings') and 'format_template' in self.settings:
+                    self.format_template = self.settings['format_template']
+                    logging.info("format_templateを設定から読み込みました")
+                else:
+                    logging.error("format_templateを設定から読み込めません")
+                    QMessageBox.warning(self, "エラー", "テンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
+                    return None
+            
+            # シンプルモードの場合
+            if self.current_mode == 'simple':
+                logging.info("シンプルモードでのプレビュー生成")
+                # 入力データの取得と確認
+                data = {
+                    'operator': self.operator_input.text(),
+                    'available_time': self.available_time_input.text(),
+                    'contractor': self.contractor_input.text(),
+                    'furigana': self.furigana_input.text(),
+                    'postal_code': self.postal_code_input.text(),
+                    'address': self.address_input.text(),
+                    'list_name': self.list_name_input.text(),
+                    'list_furigana': self.list_furigana_input.text(),
+                    'list_phone': self.list_phone_input.text(),
+                    'list_postal_code': self.list_postal_code_input.text(),
+                    'list_address': self.list_address_input.text(),
+                    'current_line': self.current_line_combo.currentText(),
+                    'order_date': self.order_date_input.text(),
+                    'order_person': self.order_person_input.text(),
+                    'judgment': self.judgment_combo.currentText(),
+                    'fee': self.fee_input.text(),
+                    'net_usage': self.net_usage_combo.currentText(),
+                    'family_approval': self.family_approval_combo.currentText(),
+                    'employee_number': self.employee_number_input.text(),
+                    'other_number': self.other_number_input.text(),
+                    'phone_device': self.phone_device_input.text(),
+                    'forbidden_line': self.forbidden_line_input.text(),
+                    'nd': self.nd_input.text(),
+                    'relationship': self.relationship_input.text(),
+                    'mobile': '',  # 空の値を設定
+                    'remarks': ''  # 空の値を設定
+                }
+                
+                # 生年月日の取得と確認
+                era = self.era_combo.currentText()
+                year = self.year_combo.currentText()
+                month = self.month_combo.currentText()
+                day = self.day_combo.currentText()
+                
+                # 生年月日の計算
+                birth_date = ""
+                if era and year and year != "年" and month and month != "月" and day and day != "日":
+                    try:
+                        # 和暦から西暦への変換
+                        era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867}
+                        if era in era_year_map:
+                            jp_year = int(year)
+                            western_year = era_year_map[era] + jp_year
+                            birth_date = f"{western_year}/{month}/{day}"
+                    except ValueError as e:
+                        logging.error(f"生年月日の変換に失敗: {e}")
+                
+                data['birth_date'] = birth_date
+                
+                try:
+                    # フォーマットテンプレートに値を埋め込む
+                    formatted_text = self.format_template.format(**data)
+                    
+                    # GoogleマップのURLを追加
+                    maps_url = self.get_google_maps_url()
+                    if maps_url:
+                        formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+                    
+                    # プレビューに表示
+                    self.preview_text.setText(formatted_text)
+                    
+                    # プレビューテキストの色を確保
+                    self.preview_text.setStyleSheet("""
+                        QTextEdit {
+                            background-color: #f8f8f8;
+                            color: #333333;
+                            border: 1px solid #ddd;
+                            border-radius: 4px;
+                            padding: 8px;
+                            font-family: 'MS Gothic', monospace;
+                        }
+                    """)
+                    
+                    # UIの更新を確実に実行
+                    QApplication.processEvents()
+                    
+                    return formatted_text
+                    
+                except KeyError as e:
+                    logging.error(f"テンプレート書式エラー - 不明なプレースホルダー: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートに不明なプレースホルダーがあります: {e}")
+                    return None
+                except Exception as e:
+                    logging.error(f"テンプレート書式エラー - 予期しないエラー: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートの書式設定中にエラーが発生しました: {e}")
+                    return None
             # 日付の計算
             birth_date = ""
             era = self.era_combo.currentText()
@@ -918,8 +1156,50 @@ class MainWindowFunctions:
                 logging.error(f"テンプレート書式エラー: {str(e)}")
                 return None
             
+            # 使いやすいモードの場合
+            else:
+                logging.info("使いやすいモードでのプレビュー生成")
+                # 各ダイアログのデータを取得
+                address_data = getattr(self, 'address_data', {})
+                list_data = getattr(self, 'list_data', {})
+                orderer_data = getattr(self, 'orderer_data', {})
+                order_data = getattr(self, 'current_dialog', None)
+                
+                if order_data:
+                    order_data = order_data.get_order_data()
+                else:
+                    order_data = {}
+                
+                # データを統合
+                data = {
+                    **address_data,
+                    **list_data,
+                    **orderer_data,
+                    **order_data,
+                    'mobile': '',  # 空の値を設定
+                    'remarks': '',  # 空の値を設定
+                    'judgment': self.judgment_combo.currentText()  # 提供判定の結果を追加
+                }
+                
+                try:
+                    # テンプレートの置換
+                    formatted_text = self.format_template.format(**data)
+                    
+                    # プレビューに表示
+                    self.preview_text.setText(formatted_text)
+                    
+                    # UIの更新を確実に実行
+                    QApplication.processEvents()
+                    
+                    return formatted_text
+                except Exception as e:
+                    logging.error(f"テンプレートの置換に失敗: {e}")
+                    QMessageBox.warning(self, "エラー", f"テンプレートの置換に失敗しました: {e}")
+                    return None
+            
         except Exception as e:
-            logging.error(f"プレビュー生成中にエラー: {e}")
+            logging.error(f"プレビュー生成中にエラー: {e}", exc_info=True)
+            QMessageBox.warning(self, "エラー", f"プレビューの生成中にエラーが発生しました: {e}")
             return None 
 
     def update_search_progress(self, message):
