@@ -2,14 +2,13 @@
 住所情報入力ダイアログと関連コンポーネント
 
 このモジュールは、簡易モードの住所情報入力ダイアログを提供します。
-また、提供エリア検索用のスレッドも含まれています。
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl
+from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl, QObject
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
@@ -18,9 +17,10 @@ import threading
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Slot
 
-# グローバル変数 - 提供判定の最終結果を保持
-# このグローバル変数は関数やメソッド間でエリア判定結果を共有するために使用されます
-_last_search_result = "未検索"
+# ダイアログの戻り値定数
+DIALOG_BACK = -1
+DIALOG_NEXT = 1
+DIALOG_CANCEL = 0
 
 def convert_to_half_width(text):
     """
@@ -66,85 +66,6 @@ def convert_to_half_width(text):
     })
     
     return text.translate(trans_table)
-
-def search_service_area(postal_code, address):
-    """
-    提供エリアを検索する
-    
-    Args:
-        postal_code (str): 郵便番号
-        address (str): 住所
-        
-    Returns:
-        str: 提供エリア情報
-    """
-    try:
-        # 郵便番号と住所から提供エリアを判定
-        # ここでは簡単な例として、郵便番号の最初の3桁で判定
-        area_code = postal_code[:3]
-        
-        # 提供エリアの判定ロジック
-        if area_code in ['100', '101', '102', '103', '104', '105']:
-            return "東京23区内"
-        elif area_code in ['220', '221', '222', '223', '224', '225']:
-            return "横浜市内"
-        elif area_code in ['330', '331', '332', '333', '334', '335']:
-            return "さいたま市内"
-        else:
-            return "提供エリア外"
-            
-    except Exception as e:
-        logging.error(f"提供エリア検索中にエラー: {e}")
-        return None
-
-class ServiceAreaSearchThread(QThread):
-    """提供エリア検索用のスレッド"""
-    finished = Signal(dict)  # 検索結果を通知するシグナル
-    error = Signal(str)     # エラーを通知するシグナル
-    
-    def __init__(self, postal_code, address, parent_window):
-        super().__init__()
-        self.postal_code = postal_code
-        self.address = address
-        self.parent_window = parent_window
-    
-    def run(self):
-        """スレッドの実行"""
-        try:
-            # 提供エリア検索を実行
-            result = area_search_service(self.postal_code, self.address)
-            logging.info(f"★★★ area_search_serviceの結果: {result} ★★★")
-            
-            # area_search_serviceから返された結果をそのまま使用
-            if isinstance(result, dict):
-                # 既に辞書型の場合はそのまま使用
-                self.finished.emit(result)
-            else:
-                # 文字列の場合は辞書型に変換
-                result_dict = {
-                    "status": "available" if "提供可能" in str(result) else "unavailable",
-                    "message": str(result),
-                    "show_popup": True
-                }
-                logging.info(f"★★★ 変換後の結果: {result_dict} ★★★")
-                self.finished.emit(result_dict)
-                
-        except Exception as e:
-            logging.error(f"提供エリア検索中にエラー: {e}", exc_info=True)
-            error_dict = {
-                "status": "failure",
-                "message": str(e),
-                "show_popup": True
-            }
-            self.finished.emit(error_dict)
-            
-    def stop(self):
-        """スレッドを停止する"""
-        if self.isRunning():
-            logging.info("提供エリア検索スレッドの停止を要求")
-            self.terminate()
-            self.wait(500)  # 最大0.5秒待機
-            logging.info("提供エリア検索スレッドが停止しました")
 
 class NoWheelComboBox(QComboBox):
     """スクロールイベントを無視するQComboBox"""
@@ -331,102 +252,60 @@ class AddressInfoDialog(QDialog):
     def search_service_area(self):
         """提供エリアを検索"""
         try:
-            postal_code = self.postal_code_input.text()
-            address = self.address_input.text()
+            logging.info("★★★ 提供エリア検索を開始 ★★★")
             
-            if not postal_code or not address:
-                QMessageBox.warning(self, "警告", "郵便番号と住所を入力してください。")
-                return
-            
-            # ダイアログの表示を更新
+            # 検索中の表示に更新
             self.judgment_result.setText("提供エリア: 検索中...")
             self.judgment_result.setStyleSheet("""
                 QLabel {
                     font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #FFA500;
+                    padding: 10px;
+                    border: 1px solid #F39C12;
                     border-radius: 4px;
                     background-color: #FFF3E0;
-                    color: #E65100;
+                    color: #F39C12;
                 }
             """)
+            
+            # 親ウィンドウの判定結果も更新
+            if self.parent_window:
+                logging.info("★★★ 親ウィンドウの判定結果を更新: 検索中... ★★★")
+                self.parent_window.update_judgment_result("検索中...")
             
             # 検索ボタンを無効化
             self.judgment_btn.setEnabled(False)
             self.judgment_btn.setText("検索中...")
-            
-            # メインウィンドウへの参照を確保
-            main_window = self.parent_window
-            
-            # グローバル変数をリセット
-            global _last_search_result
-            _last_search_result = "検索中..."
-            logging.info(f"グローバル変数をリセットしました: {_last_search_result}")
-            
-            # 既存のスレッドを停止
-            if hasattr(self, 'search_thread') and self.search_thread is not None:
-                try:
-                    self.search_thread.finished.disconnect()
-                    self.search_thread.error.disconnect()
-                    self.search_thread.stop()
-                except Exception as e:
-                    logging.warning(f"既存のスレッド切断でエラー: {e}")
-            
-            # 検索スレッドの作成と開始
-            self.search_thread = ServiceAreaSearchThread(postal_code, address, main_window)
-            
-            # シグナルの接続を確認
-            if not self.search_thread.finished.receivers(self.on_search_finished):
-                self.search_thread.finished.connect(self.on_search_finished)
-                logging.info("finishedシグナルを接続しました")
-            
-            if not self.search_thread.error.receivers(self.on_search_error):
-                self.search_thread.error.connect(self.on_search_error)
-                logging.info("errorシグナルを接続しました")
-            
-            # メインウィンドウにも直接「検索中...」を通知
-            if main_window and hasattr(main_window, 'update_judgment_result'):
-                try:
-                    main_window.update_judgment_result("検索中...")
-                    logging.info("メインウィンドウに「検索中...」状態を直接通知しました")
-                except Exception as e:
-                    logging.error(f"メインウィンドウへの検索中状態通知でエラー: {e}")
-            
-            # スレッドを開始
-            self.search_thread.start()
-            logging.info(f"提供エリア検索スレッドを開始しました: postal_code={postal_code}, address={address}")
-            
+
+            # 提供エリアを検索
+            postal_code = self.postal_code_input.text()
+            address = self.address_input.text()
+            logging.info(f"★★★ 検索パラメータ: postal_code={postal_code}, address={address} ★★★")
+
+            # 検索を実行
+            result = area_search_service(postal_code, address)
+            logging.info(f"★★★ 検索結果: {result} ★★★")
+
+            # 検索結果を処理
+            self.on_search_finished(result)
+
         except Exception as e:
-            logging.error(f"提供エリア検索の開始でエラー: {e}", exc_info=True)
-            self.judgment_result.setText("提供エリア: エラー")
-            self.judgment_result.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #f44336;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #B71C1C;
-                }
-            """)
-            QMessageBox.critical(self, "エラー", f"提供エリア検索の開始に失敗しました: {e}")
-    
+            logging.error(f"★★★ 提供エリア検索の開始でエラー: {e} ★★★", exc_info=True)
+            self.on_search_error(str(e))
+
     def on_search_finished(self, result):
         """検索完了時の処理"""
         try:
             logging.info(f"★★★ 検索完了: {result} ★★★")
             
-            # 結果表示を更新
+            # 検索結果のステータスを取得
             status = result.get("status", "failure")
             message = result.get("message", "判定失敗")
+            logging.info(f"★★★ 検索結果のステータス: {status}, メッセージ: {message} ★★★")
             
-            # グローバル変数に結果を保存
-            global _last_search_result
-            
-            # 判定結果に応じてラベルを更新
+            # 判定結果テキストと表示スタイルを設定
             if status == "available":
-                self.judgment_result.setText("提供エリア: 提供可能")
-                self.judgment_result.setStyleSheet("""
+                result_text = "提供エリア: 提供可能"
+                style = """
                     QLabel {
                         font-size: 14px;
                         padding: 10px;
@@ -435,12 +314,10 @@ class AddressInfoDialog(QDialog):
                         background-color: #E8F5E9;
                         color: #27AE60;
                     }
-                """)
-                _last_search_result = "提供可能"
-                logging.info("★★★ 提供可能と判定されました ★★★")
+                """
             elif status == "unavailable":
-                self.judgment_result.setText("提供エリア: 未提供")
-                self.judgment_result.setStyleSheet("""
+                result_text = "提供エリア: 提供エリア外"
+                style = """
                     QLabel {
                         font-size: 14px;
                         padding: 10px;
@@ -449,66 +326,43 @@ class AddressInfoDialog(QDialog):
                         background-color: #FFEBEE;
                         color: #E74C3C;
                     }
-                """)
-                _last_search_result = "未提供"
-                logging.info("★★★ 未提供と判定されました ★★★")
+                """
             else:
-                self.judgment_result.setText(f"提供エリア: {message}")
-                self.judgment_result.setStyleSheet("""
+                result_text = "提供エリア: 判定失敗"
+                style = """
                     QLabel {
                         font-size: 14px;
                         padding: 10px;
-                        border: 1px solid #F39C12;
+                        border: 1px solid #95A5A6;
                         border-radius: 4px;
-                        background-color: #FFF3E0;
-                        color: #F39C12;
+                        background-color: #ECEFF1;
+                        color: #95A5A6;
                     }
-                """)
-                _last_search_result = "検索失敗"
-                logging.info("★★★ 検索失敗と判定されました ★★★")
-            
-            # UIの更新を確実に実行
-            QApplication.processEvents()
-            
+                """
+
+            # 判定結果ラベルを更新
+            self.judgment_result.setText(result_text)
+            self.judgment_result.setStyleSheet(style)
+            logging.info(f"★★★ 判定結果ラベルを更新: {result_text} ★★★")
+
+            # 親ウィンドウの判定結果も更新
+            if self.parent_window:
+                logging.info(f"★★★ 親ウィンドウの判定結果を更新: {result_text} ★★★")
+                self.parent_window.update_judgment_result(result_text)
+
             # 検索ボタンを有効化
             self.judgment_btn.setEnabled(True)
-            self.judgment_btn.setText("提供判定実行")
-            
-            # 親ウィンドウのプレビューを更新
-            if hasattr(self.parent_window, 'generate_preview_text'):
-                try:
-                    logging.info(f"★★★ 親ウィンドウのプレビューを更新します: {_last_search_result} ★★★")
-                    self.parent_window.judgment_combo.setCurrentText(_last_search_result)
-                    self.parent_window.generate_preview_text()
-                    logging.info("★★★ プレビューの更新が完了しました ★★★")
-                except Exception as e:
-                    logging.error(f"プレビュー更新でエラー: {e}", exc_info=True)
-            
+            self.judgment_btn.setText("検索")
+
             # 詳細情報がある場合は表示
-            if "details" in result and result.get("show_popup", True):
+            if "details" in result:
                 details = result["details"]
-                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
-                QMessageBox.information(self, "検索結果", details_text)
-            
-            # 最終的なUIの更新を確実に実行
-            QApplication.processEvents()
-            logging.info("★★★ 検索完了の処理が終了しました ★★★")
-            
+                logging.info(f"★★★ 詳細情報: {details} ★★★")
+
         except Exception as e:
-            logging.error(f"検索完了時の処理でエラー: {e}", exc_info=True)
-            self.judgment_result.setText("提供エリア: エラー")
-            self.judgment_result.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 10px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            QMessageBox.critical(self, "エラー", f"検索結果の処理中にエラーが発生しました: {e}")
-    
+            logging.error(f"★★★ 検索結果の処理でエラー: {e} ★★★", exc_info=True)
+            self.on_search_error(str(e))
+
     def on_search_error(self, error_message):
         """検索エラー時の処理"""
         self.judgment_result.setText("提供エリア: 検索エラー")
@@ -541,11 +395,6 @@ class AddressInfoDialog(QDialog):
         else:
             # キャンセルをキャンセル
             pass
-
-# ダイアログの結果コード
-DIALOG_BACK = 2  # 戻るボタン用
-DIALOG_NEXT = QDialog.DialogCode.Accepted  # 次へボタン用
-DIALOG_CANCEL = QDialog.DialogCode.Rejected  # 作成中止ボタン用
 
 class ListInfoDialog(QDialog):
     """リスト情報入力ダイアログ"""
