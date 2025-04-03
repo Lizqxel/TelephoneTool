@@ -19,6 +19,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+services\__pycache__
+utils\__pycache__
 
 # ログファイル
 *.log

@@ -61,6 +61,10 @@ class CustomComboBox(QComboBox):
         """ホイールイベントを無視"""
         event.ignore()
 
+class NoWheelComboBox(QComboBox):
+    """スクロールイベントを無視するQComboBox"""
+    def wheelEvent(self, event):
+        event.ignore()
 
 class MainWindow(QMainWindow, MainWindowFunctions):
     """メインウィンドウクラス"""
@@ -154,16 +158,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.setGeometry(100, 100, 800, 600)
         
         # 生年月日入力用のコンボボックスを初期化
-        self.era_combo = QComboBox()
+        self.era_combo = NoWheelComboBox()
         self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
         
-        self.year_combo = QComboBox()
+        self.year_combo = NoWheelComboBox()
         self.year_combo.addItems([str(i) for i in range(1, 151)])
         
-        self.month_combo = QComboBox()
+        self.month_combo = NoWheelComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
         
-        self.day_combo = QComboBox()
+        self.day_combo = NoWheelComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
         
         # メインウィジェットの設定
@@ -1056,31 +1060,27 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         birth_date_layout = QHBoxLayout()
         
         # 元号選択
-        self.era_combo = QComboBox()
+        self.era_combo = NoWheelComboBox()
         self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
-        birth_date_layout.addWidget(QLabel("元号:"))
         birth_date_layout.addWidget(self.era_combo)
         
         # 年選択
-        self.year_combo = QComboBox()
+        self.year_combo = NoWheelComboBox()
         self.year_combo.addItems([str(i) for i in range(1, 151)])
-        self.year_combo.setCurrentText("年")
-        birth_date_layout.addWidget(QLabel("年:"))
         birth_date_layout.addWidget(self.year_combo)
+        birth_date_layout.addWidget(QLabel("年"))
         
         # 月選択
-        self.month_combo = QComboBox()
+        self.month_combo = NoWheelComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
-        self.month_combo.setCurrentText("月")
-        birth_date_layout.addWidget(QLabel("月:"))
         birth_date_layout.addWidget(self.month_combo)
+        birth_date_layout.addWidget(QLabel("月"))
         
         # 日選択
-        self.day_combo = QComboBox()
+        self.day_combo = NoWheelComboBox()
         self.day_combo.addItems([str(i) for i in range(1, 32)])
-        self.day_combo.setCurrentText("日")
-        birth_date_layout.addWidget(QLabel("日:"))
         birth_date_layout.addWidget(self.day_combo)
+        birth_date_layout.addWidget(QLabel("日"))
         
         birth_date_group.setLayout(birth_date_layout)
         input_layout.addWidget(birth_date_group)
@@ -1395,6 +1395,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             # フリガナ自動変換のシグナル
             self.contractor_input.textChanged.connect(self.auto_generate_furigana)
             self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
+            self.address_input.textChanged.connect(self.auto_generate_address_furigana)
             
             # 入力時に背景色をリセットするシグナル
             self.operator_input.textChanged.connect(self.reset_background_color)
