@@ -9,13 +9,76 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl, QObject
-from PySide6.QtGui import QFont, QIntValidator
+from PySide6.QtGui import QFont, QIntValidator, QPalette, QColor
 import datetime
 import logging
-from services.area_search import search_service_area as area_search_service
+from services.area_search import search_service_area, normalize_address
 import threading
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Slot
+
+# 高齢者向けのスタイル設定
+LARGE_FONT = QFont("MS Gothic", 16)
+MEDIUM_FONT = QFont("MS Gothic", 14)
+SMALL_FONT = QFont("MS Gothic", 12)
+
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 16px;
+        border-radius: 8px;
+        min-width: 200px;
+    }
+    QPushButton:hover {
+        background-color: #45a049;
+    }
+    QPushButton:pressed {
+        background-color: #3e8e41;
+    }
+    QPushButton:disabled {
+        background-color: #cccccc;
+    }
+"""
+
+GROUP_BOX_STYLE = """
+    QGroupBox {
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #4CAF50;
+        border-radius: 8px;
+        margin-top: 1em;
+        padding-top: 1em;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 3px 0 3px;
+    }
+"""
+
+LABEL_STYLE = """
+    QLabel {
+        font-size: 16px;
+        color: #333333;
+        padding: 5px;
+    }
+"""
+
+INPUT_STYLE = """
+    QLineEdit, QComboBox {
+        font-size: 16px;
+        padding: 10px;
+        border: 2px solid #cccccc;
+        border-radius: 4px;
+        min-height: 40px;
+    }
+    QLineEdit:focus, QComboBox:focus {
+        border: 2px solid #4CAF50;
+    }
+"""
 
 # ダイアログの戻り値定数
 DIALOG_BACK = -1
@@ -86,7 +149,7 @@ class AddressInfoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("住所情報入力")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
         
         # 検索スレッドの初期化
         self.search_thread = None
@@ -97,28 +160,45 @@ class AddressInfoDialog(QDialog):
         
         # メインレイアウト
         layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # タイトル
         title_label = QLabel("住所情報の確認")
-        title_label.setFont(QFont("MS Gothic", 12, QFont.Bold))
+        title_label.setFont(LARGE_FONT)
+        title_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
         # 住所情報入力グループ
         address_group = QGroupBox("住所情報")
+        address_group.setStyleSheet(GROUP_BOX_STYLE)
         address_layout = QVBoxLayout()
+        address_layout.setSpacing(15)
         
         # 郵便番号
-        address_layout.addWidget(QLabel("郵便番号"))
+        postal_label = QLabel("郵便番号")
+        postal_label.setFont(MEDIUM_FONT)
+        postal_label.setStyleSheet(LABEL_STYLE)
+        address_layout.addWidget(postal_label)
+        
         self.postal_code_input = QLineEdit()
+        self.postal_code_input.setFont(MEDIUM_FONT)
+        self.postal_code_input.setStyleSheet(INPUT_STYLE)
         self.postal_code_input.setPlaceholderText("例：123-4567")
         if self.saved_data and 'postal_code' in self.saved_data:
             self.postal_code_input.setText(self.saved_data['postal_code'])
         address_layout.addWidget(self.postal_code_input)
         
         # 住所
-        address_layout.addWidget(QLabel("住所"))
+        address_label = QLabel("住所")
+        address_label.setFont(MEDIUM_FONT)
+        address_label.setStyleSheet(LABEL_STYLE)
+        address_layout.addWidget(address_label)
+        
         self.address_input = QLineEdit()
+        self.address_input.setFont(MEDIUM_FONT)
+        self.address_input.setStyleSheet(INPUT_STYLE)
         self.address_input.setPlaceholderText("例：東京都渋谷区...")
         if self.saved_data and 'address' in self.saved_data:
             self.address_input.setText(self.saved_data['address'])
@@ -129,33 +209,20 @@ class AddressInfoDialog(QDialog):
         
         # 提供判定ボタン
         self.judgment_btn = QPushButton("提供判定実行")
-        self.judgment_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 10px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
-        self.judgment_btn.clicked.connect(self.search_service_area)
-        layout.addWidget(self.judgment_btn)
+        self.judgment_btn.setFont(LARGE_FONT)
+        self.judgment_btn.setStyleSheet(BUTTON_STYLE)
+        self.judgment_btn.clicked.connect(self.search_area)
+        layout.addWidget(self.judgment_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
         # 提供判定結果表示ラベル
         self.judgment_result = QLabel("提供エリア: 未検索")
+        self.judgment_result.setFont(MEDIUM_FONT)
         self.judgment_result.setStyleSheet("""
             QLabel {
-                font-size: 14px;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                font-size: 16px;
+                padding: 15px;
+                border: 2px solid #dddddd;
+                border-radius: 8px;
                 background-color: #f8f9fa;
             }
         """)
@@ -163,38 +230,27 @@ class AddressInfoDialog(QDialog):
         
         # ボタンエリア
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(20)
         
         # 次へボタン
         self.next_btn = QPushButton("次へ")
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #1565C0;
-            }
-        """)
+        self.next_btn.setFont(LARGE_FONT)
+        self.next_btn.setStyleSheet(BUTTON_STYLE)
         self.next_btn.clicked.connect(self.on_next_clicked)
         button_layout.addWidget(self.next_btn)
         
         # 作成中止ボタン
         self.cancel_btn = QPushButton("作成中止")
+        self.cancel_btn.setFont(LARGE_FONT)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
                 color: white;
                 border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
+                padding: 15px 30px;
+                font-size: 16px;
+                border-radius: 8px;
+                min-width: 200px;
             }
             QPushButton:hover {
                 background-color: #d32f2f;
@@ -228,18 +284,20 @@ class AddressInfoDialog(QDialog):
             dict: 住所情報
         """
         try:
-            # 住所の全角ハイフンを半角に変換
-            address = self.address_input.text()
-            address = address.replace('－', '-')  # 全角ハイフンを半角に
-            address = address.replace('ー', '-')  # 長音記号を半角ハイフンに
-            address = address.replace('−', '-')  # 別種の全角ハイフンを半角に
-            address = address.replace('―', '-')  # ダッシュを半角ハイフンに
-            address = address.replace('‐', '-')  # 別種のハイフンを半角ハイフンに
+            # 入力値を取得
+            input_postal_code = self.postal_code_input.text()
+            input_address = self.address_input.text()
+            
+            # 全角文字を半角に変換
+            normalized_postal_code = normalize_address(input_postal_code)
+            normalized_address = normalize_address(input_address)
             
             # データを辞書形式で返す
             data = {
-                'postal_code': self.postal_code_input.text(),
-                'address': address
+                'postal_code': normalized_postal_code,
+                'address': normalized_address,
+                'original_postal_code': input_postal_code,  # 元の入力値も保持
+                'original_address': input_address
             }
             
             logging.info(f"住所データを取得: {data}")
@@ -249,48 +307,30 @@ class AddressInfoDialog(QDialog):
             logging.error(f"住所データの取得中にエラー: {e}")
             return {}
     
-    def search_service_area(self):
-        """提供エリアを検索"""
+    def search_area(self):
+        """
+        提供エリアを検索する
+        """
         try:
-            logging.info("★★★ 提供エリア検索を開始 ★★★")
+            # 住所データを取得
+            data = self.get_address_data()
+            if not data:
+                return
             
-            # 検索中の表示に更新
-            self.judgment_result.setText("提供エリア: 検索中...")
-            self.judgment_result.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 10px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
+            # 元の入力値を使用して検索
+            postal_code = data['original_postal_code']
+            address = data['original_address']
             
-            # 親ウィンドウの判定結果も更新
-            if self.parent_window:
-                logging.info("★★★ 親ウィンドウの判定結果を更新: 検索中... ★★★")
-                self.parent_window.update_judgment_result("検索中...")
-            
-            # 検索ボタンを無効化
-            self.judgment_btn.setEnabled(False)
-            self.judgment_btn.setText("検索中...")
-
-            # 提供エリアを検索
-            postal_code = self.postal_code_input.text()
-            address = self.address_input.text()
-            logging.info(f"★★★ 検索パラメータ: postal_code={postal_code}, address={address} ★★★")
-
             # 検索を実行
-            result = area_search_service(postal_code, address)
+            result = search_service_area(postal_code, address)
             logging.info(f"★★★ 検索結果: {result} ★★★")
-
-            # 検索結果を処理
-            self.on_search_finished(result)
-
+            
+            # 結果を表示
+            self.show_result(result)
+            
         except Exception as e:
-            logging.error(f"★★★ 提供エリア検索の開始でエラー: {e} ★★★", exc_info=True)
-            self.on_search_error(str(e))
+            logging.error(f"エリア検索中にエラー: {e}")
+            self.show_error("エリア検索中にエラーが発生しました。")
 
     def on_search_finished(self, result):
         """検索完了時の処理"""
@@ -726,6 +766,14 @@ class OrdererInputDialog(QDialog):
         # 保存データの初期化
         self.saved_data = orderer_data if orderer_data is not None else {}
         
+        # フリガナ自動生成用のタイマー
+        self.furigana_timer = QTimer()
+        self.furigana_timer.setSingleShot(True)
+        self.furigana_timer.timeout.connect(self.auto_generate_furigana)
+        
+        # 最後に変換した契約者名を保持
+        self.last_converted_name = ""
+        
         # メインレイアウト
         layout = QVBoxLayout()
         
@@ -769,22 +817,32 @@ class OrdererInputDialog(QDialog):
         
         # 受注者情報入力グループ
         orderer_group = QGroupBox("受注者情報")
+        orderer_group.setStyleSheet(GROUP_BOX_STYLE)
         orderer_layout = QVBoxLayout()
+        orderer_layout.setSpacing(15)
         
         # 対応者名
         orderer_layout.addWidget(QLabel("対応者名"))
         self.operator_input = QLineEdit()
+        self.operator_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.operator_input)
         
         # 出やすい時間帯
         orderer_layout.addWidget(QLabel("出やすい時間帯"))
         self.available_time_input = QLineEdit()
         self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
+        self.available_time_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.available_time_input)
         
         # 契約者名
         orderer_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
+        # リストから取得した顧客名を初期値として設定
+        if parent and hasattr(parent, 'list_data') and 'list_name' in parent.list_data:
+            self.contractor_input.setText(parent.list_data['list_name'])
+        self.contractor_input.textChanged.connect(self.check_input_fields)
+        # 契約者名の変更時にフリガナ自動生成を実行（タイマーを使用）
+        self.contractor_input.textChanged.connect(self.schedule_furigana_generation)
         orderer_layout.addWidget(self.contractor_input)
         
         # フリガナ
@@ -795,6 +853,7 @@ class OrdererInputDialog(QDialog):
         furigana_layout.addWidget(self.furigana_mode_combo)
         orderer_layout.addLayout(furigana_layout)
         self.furigana_input = QLineEdit()
+        self.furigana_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.furigana_input)
         
         # 生年月日
@@ -807,6 +866,7 @@ class OrdererInputDialog(QDialog):
         self.era_combo = NoWheelComboBox()
         self.era_combo.addItems(["昭和", "平成", "西暦"])
         self.era_combo.setFixedWidth(60)
+        self.era_combo.currentTextChanged.connect(self.check_input_fields)
         birth_input_layout.addWidget(self.era_combo)
         
         self.year_combo = NoWheelComboBox()
@@ -816,6 +876,7 @@ class OrdererInputDialog(QDialog):
         self.year_combo.lineEdit().setMaxLength(4)
         self.year_combo.lineEdit().setValidator(QIntValidator(1, 9999))
         self.year_combo.setFixedWidth(60)
+        self.year_combo.currentTextChanged.connect(self.check_input_fields)
         birth_input_layout.addWidget(self.year_combo)
         birth_input_layout.addWidget(QLabel("年"))
         
@@ -826,6 +887,7 @@ class OrdererInputDialog(QDialog):
         self.month_combo.lineEdit().setMaxLength(2)
         self.month_combo.lineEdit().setValidator(QIntValidator(1, 12))
         self.month_combo.setFixedWidth(40)
+        self.month_combo.currentTextChanged.connect(self.check_input_fields)
         birth_input_layout.addWidget(self.month_combo)
         birth_input_layout.addWidget(QLabel("月"))
         
@@ -836,6 +898,7 @@ class OrdererInputDialog(QDialog):
         self.day_combo.lineEdit().setMaxLength(2)
         self.day_combo.lineEdit().setValidator(QIntValidator(1, 31))
         self.day_combo.setFixedWidth(40)
+        self.day_combo.currentTextChanged.connect(self.check_input_fields)
         birth_input_layout.addWidget(self.day_combo)
         birth_input_layout.addWidget(QLabel("日"))
         
@@ -845,47 +908,55 @@ class OrdererInputDialog(QDialog):
         # 受注者名
         orderer_layout.addWidget(QLabel("受注者名"))
         self.order_person_input = QLineEdit()
+        self.order_person_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.order_person_input)
         
         # 料金認識
         orderer_layout.addWidget(QLabel("料金認識"))
         self.fee_input = QLineEdit()
         self.fee_input.setText("2500円～3000円")
+        self.fee_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.fee_input)
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = NoWheelComboBox()
-        self.net_usage_combo.addItems(["なし", "あり"])
-        orderer_layout.addWidget(self.net_usage_combo)
+        self.net_usage_input = QLineEdit()
+        self.net_usage_input.setText("なし")
+        self.net_usage_input.textChanged.connect(self.check_input_fields)
+        orderer_layout.addWidget(self.net_usage_input)
         
         # 家族了承
         orderer_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = NoWheelComboBox()
-        self.family_approval_combo.addItems(["ok", "なし"])
-        orderer_layout.addWidget(self.family_approval_combo)
+        self.family_approval_input = QLineEdit()
+        self.family_approval_input.setText("ok")
+        self.family_approval_input.textChanged.connect(self.check_input_fields)
+        orderer_layout.addWidget(self.family_approval_input)
         
         # 他番号
         orderer_layout.addWidget(QLabel("他番号"))
         self.other_number_input = QLineEdit()
         self.other_number_input.setText("なし")
+        self.other_number_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.other_number_input)
         
         # 電話機
         orderer_layout.addWidget(QLabel("電話機"))
         self.phone_device_input = QLineEdit()
         self.phone_device_input.setText("プッシュホン")
+        self.phone_device_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.phone_device_input)
         
         # 禁止回線
         orderer_layout.addWidget(QLabel("禁止回線"))
         self.forbidden_line_input = QLineEdit()
         self.forbidden_line_input.setText("なし")
+        self.forbidden_line_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.forbidden_line_input)
         
         # ND
         orderer_layout.addWidget(QLabel("ND"))
         self.nd_input = QLineEdit()
+        self.nd_input.textChanged.connect(self.check_input_fields)
         orderer_layout.addWidget(self.nd_input)
         
         # リストとの関係性
@@ -893,16 +964,11 @@ class OrdererInputDialog(QDialog):
         relationship_layout.addWidget(QLabel("備考："))
         self.relationship_input = QLineEdit()
         self.relationship_input.setPlaceholderText("名義人の...")
+        self.relationship_input.textChanged.connect(self.check_input_fields)
         relationship_layout.addWidget(self.relationship_input)
         orderer_layout.addLayout(relationship_layout)
         
-        # 提供判定エリア
-        judgment_layout = QHBoxLayout()
-        judgment_layout.addWidget(QLabel("提供判定："))
-        self.judgment_combo = NoWheelComboBox()
-        self.judgment_combo.addItems(["OK", "NG"])
-        judgment_layout.addWidget(self.judgment_combo)
-        orderer_layout.addLayout(judgment_layout)
+        # 提供判定エリアを削除
         
         orderer_group.setLayout(orderer_layout)
         scroll_layout.addWidget(orderer_group)
@@ -916,35 +982,23 @@ class OrdererInputDialog(QDialog):
         
         # 作成ボタン（旧「次へ」ボタンの代わり）
         self.create_btn = QPushButton("作成")
-        self.create_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
+        self.create_btn.setFont(LARGE_FONT)
+        self.create_btn.setStyleSheet(BUTTON_STYLE)
         self.create_btn.clicked.connect(self.on_create_clicked)
         button_layout.addWidget(self.create_btn)
         
         # 作成中止ボタン
         self.cancel_btn = QPushButton("作成中止")
+        self.cancel_btn.setFont(LARGE_FONT)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
                 color: white;
                 border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
+                padding: 15px 30px;
+                font-size: 16px;
+                border-radius: 8px;
+                min-width: 200px;
             }
             QPushButton:hover {
                 background-color: #d32f2f;
@@ -960,134 +1014,62 @@ class OrdererInputDialog(QDialog):
         
         self.setLayout(layout)
         
-        # エンターキーが押されたときに次の入力項目に移動するための設定
-        self.input_fields = [
-            self.operator_input, self.available_time_input, self.contractor_input,
-            self.furigana_input, self.order_person_input,
-            self.fee_input, self.other_number_input, self.phone_device_input,
-            self.forbidden_line_input, self.nd_input, self.relationship_input
-        ]
-        
-        # 各入力フィールドにイベントハンドラーを設定
-        for i, field in enumerate(self.input_fields):
-            if isinstance(field, QLineEdit):
-                field.installEventFilter(self)
-        
-        # データの設定
-        if self.saved_data:
-            if 'operator' in self.saved_data:
-                self.operator_input.setText(self.saved_data['operator'])
-            if 'available_time' in self.saved_data:
-                self.available_time_input.setText(self.saved_data['available_time'])
-            if 'contractor' in self.saved_data:
-                self.contractor_input.setText(self.saved_data['contractor'])
-            if 'furigana' in self.saved_data:
-                self.furigana_input.setText(self.saved_data['furigana'])
-            if 'order_person' in self.saved_data:
-                self.order_person_input.setText(self.saved_data['order_person'])
-            if 'fee' in self.saved_data:
-                self.fee_input.setText(self.saved_data['fee'])
-            if 'net_usage' in self.saved_data:
-                self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
-            if 'family_approval' in self.saved_data:
-                self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
-            if 'other_number' in self.saved_data:
-                self.other_number_input.setText(self.saved_data['other_number'])
-            if 'phone_device' in self.saved_data:
-                self.phone_device_input.setText(self.saved_data['phone_device'])
-            if 'forbidden_line' in self.saved_data:
-                self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
-            if 'nd' in self.saved_data:
-                self.nd_input.setText(self.saved_data['nd'])
-            if 'relationship' in self.saved_data:
-                self.relationship_input.setText(self.saved_data['relationship'])
-        
-        # フリガナ自動生成のシグナルを接続
-        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
-        self.furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_furigana())
-        
         # 初期表示時に一度だけ自動生成を実行
         QTimer.singleShot(100, self.auto_generate_furigana)
+        
+        # 対応者名にフォーカスを設定
+        self.operator_input.setFocus()
+        
+        # エンターキーで次の項目に移動するためのイベントフィルターを設定
+        self.input_fields = [
+            self.operator_input,
+            self.available_time_input,
+            self.contractor_input,
+            self.furigana_input,
+            self.order_person_input,
+            self.fee_input,
+            self.net_usage_input,
+            self.family_approval_input,
+            self.other_number_input,
+            self.phone_device_input,
+            self.forbidden_line_input,
+            self.nd_input,
+            self.relationship_input
+        ]
+        
+        for field in self.input_fields:
+            field.installEventFilter(self)
+        
+        # 初期表示時に未入力チェックを実行
+        QTimer.singleShot(100, self.check_input_fields)
     
-    def eventFilter(self, obj, event):
+    def check_input_fields(self):
         """
-        イベントフィルターを実装して、エンターキーの動作をカスタマイズする
+        入力フィールドの未入力状態をチェックし、背景色を変更する
+        """
+        # 必須入力フィールドのリスト
+        required_fields = [
+            self.operator_input,
+            self.available_time_input,
+            self.contractor_input,
+            self.furigana_input,
+            self.order_person_input,
+            self.fee_input,
+            self.net_usage_input,
+            self.family_approval_input,
+            self.other_number_input,
+            self.phone_device_input,
+            self.forbidden_line_input,
+            self.nd_input,
+            self.relationship_input
+        ]
         
-        Args:
-            obj: イベントの発生元オブジェクト
-            event: イベントオブジェクト
-            
-        Returns:
-            bool: イベント処理済みかどうか
-        """
-        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Return:
-            # Enterキーが押された場合
-            current_index = -1
-            for i, field in enumerate(self.input_fields):
-                if obj == field:
-                    current_index = i
-                    break
-            
-            if current_index != -1 and current_index < len(self.input_fields) - 1:
-                # 次の入力フィールドにフォーカスを移動
-                next_index = current_index + 1
-                next_field = self.input_fields[next_index]
-                next_field.setFocus()
-                
-                # スクロールエリアを取得
-                scroll_area = None
-                parent = next_field.parent()
-                while parent:
-                    if isinstance(parent, QScrollArea):
-                        scroll_area = parent
-                        break
-                    parent = parent.parent()
-                
-                # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
-                if scroll_area:
-                    # スクロールエリア内のビューポートの座標系に変換
-                    viewport = scroll_area.viewport()
-                    widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
-                    
-                    # 現在のスクロール位置を取得
-                    current_scroll_y = scroll_area.verticalScrollBar().value()
-                    
-                    # ビューポートの高さを取得
-                    viewport_height = viewport.height()
-                    
-                    # ウィジェットの位置と高さ
-                    widget_y = widget_pos.y()
-                    widget_height = next_field.height()
-                    
-                    # ウィジェットが完全に表示されているかチェック
-                    if widget_y < 0:
-                        # ウィジェットが上に隠れている場合、上にスクロール
-                        scroll_area.verticalScrollBar().setValue(current_scroll_y + widget_y)
-                    elif widget_y + widget_height > viewport_height:
-                        # ウィジェットが下に隠れている場合、下にスクロール
-                        scroll_area.verticalScrollBar().setValue(
-                            current_scroll_y + (widget_y + widget_height - viewport_height) + 10
-                        )
-                
-                return True
-                
-        # 標準のイベント処理を継続
-        return super().eventFilter(obj, event)
-        
-    def keyPressEvent(self, event):
-        """
-        キー押下イベントを処理する
-        
-        Args:
-            event: キーイベント
-        """
-        # Enterキーでダイアログを閉じないようにする
-        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            # Enterキーの標準動作を無効化
-            event.accept()
-        else:
-            # それ以外のキーは通常通り処理
-            super().keyPressEvent(event)
+        # 各フィールドの背景色を設定
+        for field in required_fields:
+            if not field.text().strip():
+                field.setStyleSheet("background-color: #FFEBEE;")  # 赤系の背景色
+            else:
+                field.setStyleSheet("")  # デフォルトの背景色
     
     def on_create_clicked(self):
         """作成ボタンがクリックされた時の処理"""
@@ -1114,7 +1096,7 @@ class OrdererInputDialog(QDialog):
                     # リスト名フリガナが空で、フリガナが入力されている場合はそれをセット
                     self.parent_window.list_data['list_furigana'] = self.saved_data['furigana']
             
-            # 受注情報を作成（現在の日付とユーザー選択の判定結果を使用）
+            # 受注情報を作成（現在の日付と初期設定の判定結果を使用）
             now = datetime.datetime.now()
             month = now.month  # 0埋めなしの月
             day = now.day      # 0埋めなしの日
@@ -1122,7 +1104,8 @@ class OrdererInputDialog(QDialog):
             order_data = {
                 'current_line': 'アナログ',  # デフォルト値
                 'order_date': f"{month}/{day}",
-                'judgment': self.judgment_combo.currentText()  # ユーザーが選択した判定結果
+                'judgment': 'OK',  # 初期設定でOKを設定
+                'remarks': self.saved_data.get('remarks', '')  # 備考を追加
             }
             
             # 親ウィンドウのプロパティに保存
@@ -1196,13 +1179,14 @@ class OrdererInputDialog(QDialog):
                 'birth_date': birth_date,  # 生年月日を設定
                 'order_person': self.order_person_input.text(),
                 'fee': self.fee_input.text(),
-                'net_usage': self.net_usage_combo.currentText(),
-                'family_approval': self.family_approval_combo.currentText(),
+                'net_usage': self.net_usage_input.text(),
+                'family_approval': self.family_approval_input.text(),
                 'other_number': self.other_number_input.text(),
                 'phone_device': self.phone_device_input.text(),
                 'forbidden_line': self.forbidden_line_input.text(),
                 'nd': self.nd_input.text(),
-                'relationship': self.relationship_input.text()
+                'relationship': self.relationship_input.text(),
+                'remarks': self.relationship_input.text()  # 備考としてリストとの関係性を設定
             }
             
             logging.info(f"受注者データを取得: {data}")
@@ -1269,11 +1253,11 @@ class OrdererInputDialog(QDialog):
             
             # ネット利用
             if data.get('net_usage'):
-                self.net_usage_combo.setCurrentText(data['net_usage'])
+                self.net_usage_input.setText(data['net_usage'])
             
             # 家族了承
             if data.get('family_approval'):
-                self.family_approval_combo.setCurrentText(data['family_approval'])
+                self.family_approval_input.setText(data['family_approval'])
             
             # 他番号
             if data.get('other_number'):
@@ -1324,8 +1308,18 @@ class OrdererInputDialog(QDialog):
             # キャンセルをキャンセル
             pass
 
+    def schedule_furigana_generation(self):
+        """
+        フリガナ自動生成をスケジュールする
+        """
+        # タイマーをリセットして再起動
+        self.furigana_timer.stop()
+        self.furigana_timer.start(500)  # 500ミリ秒後に実行
+
     def auto_generate_furigana(self):
-        """契約者名からフリガナを自動生成する"""
+        """
+        契約者名からフリガナを自動生成する
+        """
         try:
             # 自動モードの場合のみ処理
             if self.furigana_mode_combo.currentText() != "自動":
@@ -1338,12 +1332,11 @@ class OrdererInputDialog(QDialog):
                 logging.info("フリガナ自動生成: 契約者名が空のため生成をスキップします")
                 return
                 
-            # 既にフリガナが入力されている場合はスキップする特殊なケース
-            current_furigana = self.furigana_input.text()
-            if current_furigana and len(current_furigana) > 1 and name in self.saved_data.get('contractor', ''):
-                logging.info(f"フリガナ自動生成: 既にフリガナ({current_furigana})が設定されているためスキップします")
+            # 前回と同じ名前の場合はスキップ
+            if name == self.last_converted_name:
+                logging.info("フリガナ自動生成: 前回と同じ名前のため生成をスキップします")
                 return
-            
+                
             # フリガナ変換APIを使用
             logging.info(f"フリガナ自動生成: 変換を開始します（契約者名: {name}）")
             from utils.furigana_utils import convert_to_furigana
@@ -1354,6 +1347,8 @@ class OrdererInputDialog(QDialog):
                 self.furigana_input.blockSignals(True)
                 self.furigana_input.setText(furigana)
                 self.furigana_input.blockSignals(False)
+                # 変換した名前を保存
+                self.last_converted_name = name
                 logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
             else:
                 logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（契約者名: {name}）")
@@ -1396,6 +1391,152 @@ class OrdererInputDialog(QDialog):
         # 位置を設定
         self.move(x, y)
         logging.info(f"受注者入力項目ダイアログを配置: x={x}, y={y}")
+
+    def eventFilter(self, obj, event):
+        """
+        イベントフィルターを実装して、エンターキーと矢印キーの動作をカスタマイズする
+        
+        Args:
+            obj: イベントの発生元オブジェクト
+            event: イベントオブジェクト
+            
+        Returns:
+            bool: イベント処理済みかどうか
+        """
+        if event.type() == QEvent.Type.KeyPress:
+            # 現在の入力フィールドのインデックスを取得
+            current_index = -1
+            for i, field in enumerate(self.input_fields):
+                if obj == field:
+                    current_index = i
+                    break
+            
+            if current_index != -1:
+                if event.key() == Qt.Key.Key_Return:
+                    # Enterキーが押された場合
+                    if current_index < len(self.input_fields) - 1:
+                        # 次の入力フィールドにフォーカスを移動
+                        next_field = self.input_fields[current_index + 1]
+                        next_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = next_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = next_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                    elif obj == self.relationship_input:  # 最後の名義人入力エリアの場合
+                        # 営コメ作成ボタンをクリック
+                        self.on_create_clicked()
+                    
+                    return True
+                
+                elif event.key() == Qt.Key.Key_Up:
+                    # 上矢印キーが押された場合
+                    if current_index > 0:
+                        # 前の入力フィールドにフォーカスを移動
+                        prev_field = self.input_fields[current_index - 1]
+                        prev_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = prev_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、前のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = prev_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = prev_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                        
+                        return True
+                
+                elif event.key() == Qt.Key.Key_Down:
+                    # 下矢印キーが押された場合
+                    if current_index < len(self.input_fields) - 1:
+                        # 次の入力フィールドにフォーカスを移動
+                        next_field = self.input_fields[current_index + 1]
+                        next_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = next_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = next_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                        
+                        return True
+                
+        # 標準のイベント処理を継続
+        return super().eventFilter(obj, event)
 
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
@@ -1581,9 +1722,11 @@ class OrderInfoDialog(QDialog):
                 else:
                     logging.error("プレビューテキストの生成に失敗")
                     QMessageBox.warning(self, "警告", "営コメの作成に失敗しました。")
+                self.accept()
             else:
                 logging.error("親ウィンドウにgenerate_preview_textメソッドが存在しません")
                 QMessageBox.warning(self, "警告", "プレビュー機能が利用できません。")
+                self.accept()
         except Exception as e:
             logging.error(f"営コメ作成中にエラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"営コメの作成中にエラーが発生しました: {e}")

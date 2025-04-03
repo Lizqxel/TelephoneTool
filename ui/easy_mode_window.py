@@ -28,10 +28,10 @@ from PySide6.QtWidgets import (
     QMenu, QStatusBar, QProgressBar, QApplication, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QDialog, QFormLayout, QSpinBox, QCheckBox, QDialogButtonBox,
-    QGroupBox, QRadioButton, QButtonGroup
+    QGroupBox, QRadioButton, QButtonGroup, QFrame
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QAction, QIcon, QFont, QPixmap
+from PySide6.QtGui import QAction, QIcon, QFont, QPixmap, QPalette, QColor
 
 from .base_window import BaseWindow
 from .custom_widgets import CustomComboBox
@@ -40,6 +40,56 @@ from ..services.cti_service import CTIService
 from ..utils.logger import setup_logger
 from utils.settings import settings
 from version import check_version
+
+# 高齢者向けのスタイル設定
+LARGE_FONT = QFont("MS Gothic", 16)
+MEDIUM_FONT = QFont("MS Gothic", 14)
+SMALL_FONT = QFont("MS Gothic", 12)
+
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 16px;
+        border-radius: 8px;
+        min-width: 200px;
+    }
+    QPushButton:hover {
+        background-color: #45a049;
+    }
+    QPushButton:pressed {
+        background-color: #3e8e41;
+    }
+    QPushButton:disabled {
+        background-color: #cccccc;
+    }
+"""
+
+GROUP_BOX_STYLE = """
+    QGroupBox {
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #4CAF50;
+        border-radius: 8px;
+        margin-top: 1em;
+        padding-top: 1em;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 3px 0 3px;
+    }
+"""
+
+LABEL_STYLE = """
+    QLabel {
+        font-size: 16px;
+        color: #333333;
+        padding: 5px;
+    }
+"""
 
 class EasyModeWindow(BaseWindow):
     """イージーモードのメインウィンドウクラス"""
@@ -59,6 +109,8 @@ class EasyModeWindow(BaseWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
+        layout.setSpacing(20)  # ウィジェット間の間隔を広げる
+        layout.setContentsMargins(20, 20, 20, 20)  # マージンを設定
         
         # ガイド表示エリア
         guide_group = self.create_guide_group()
@@ -78,16 +130,21 @@ class EasyModeWindow(BaseWindow):
     def create_guide_group(self) -> QWidget:
         """ガイド表示グループの作成"""
         group = QGroupBox("操作ガイド")
+        group.setStyleSheet(GROUP_BOX_STYLE)
         layout = QVBoxLayout(group)
+        layout.setSpacing(15)
         
         # ステップ表示
         self.step_label = QLabel("ステップ1: 検索方法を選択してください")
-        self.step_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.step_label.setFont(LARGE_FONT)
+        self.step_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
         layout.addWidget(self.step_label)
         
         # ガイド説明
         self.guide_text = QLabel("")
+        self.guide_text.setFont(MEDIUM_FONT)
         self.guide_text.setWordWrap(True)
+        self.guide_text.setStyleSheet(LABEL_STYLE)
         layout.addWidget(self.guide_text)
         
         return group
@@ -95,16 +152,21 @@ class EasyModeWindow(BaseWindow):
     def create_operation_group(self) -> QWidget:
         """操作グループの作成"""
         group = QGroupBox("操作パネル")
+        group.setStyleSheet(GROUP_BOX_STYLE)
         layout = QVBoxLayout(group)
+        layout.setSpacing(20)
         
         # 検索方法選択
         search_method_group = QButtonGroup()
         self.area_radio = QRadioButton("地域から検索")
         self.phone_radio = QRadioButton("電話番号から検索")
+        self.area_radio.setFont(MEDIUM_FONT)
+        self.phone_radio.setFont(MEDIUM_FONT)
         search_method_group.addButton(self.area_radio)
         search_method_group.addButton(self.phone_radio)
         
         method_layout = QHBoxLayout()
+        method_layout.setSpacing(30)
         method_layout.addWidget(self.area_radio)
         method_layout.addWidget(self.phone_radio)
         layout.addLayout(method_layout)
@@ -119,7 +181,9 @@ class EasyModeWindow(BaseWindow):
         
         # 次へボタン
         self.next_button = QPushButton("次へ")
-        layout.addWidget(self.next_button)
+        self.next_button.setFont(LARGE_FONT)
+        self.next_button.setStyleSheet(BUTTON_STYLE)
+        layout.addWidget(self.next_button, alignment=Qt.AlignmentFlag.AlignCenter)
         
         return group
         
@@ -127,15 +191,20 @@ class EasyModeWindow(BaseWindow):
         """地域検索ウィジェットの作成"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
+        layout.setSpacing(20)
         
         # 都道府県選択
         self.prefecture_combo = CustomComboBox()
+        self.prefecture_combo.setFont(MEDIUM_FONT)
         self.prefecture_combo.addItem("都道府県を選択", "")
+        self.prefecture_combo.setMinimumHeight(40)
         layout.addWidget(self.prefecture_combo)
         
         # 市区町村選択
         self.city_combo = CustomComboBox()
+        self.city_combo.setFont(MEDIUM_FONT)
         self.city_combo.addItem("市区町村を選択", "")
+        self.city_combo.setMinimumHeight(40)
         layout.addWidget(self.city_combo)
         
         return widget
@@ -144,11 +213,14 @@ class EasyModeWindow(BaseWindow):
         """電話番号検索ウィジェットの作成"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
+        layout.setSpacing(20)
         
         # 電話番号入力
         self.phone_input = QLineEdit()
-        self.phone_input.setPlaceholderText("電話番号を入力")
+        self.phone_input.setFont(MEDIUM_FONT)
+        self.phone_input.setPlaceholderText("電話番号を入力（例：03-1234-5678）")
         self.phone_input.setMaxLength(10)
+        self.phone_input.setMinimumHeight(40)
         layout.addWidget(self.phone_input)
         
         return widget
@@ -156,10 +228,12 @@ class EasyModeWindow(BaseWindow):
     def create_result_group(self) -> QWidget:
         """検索結果表示グループの作成"""
         group = QGroupBox("検索結果")
+        group.setStyleSheet(GROUP_BOX_STYLE)
         layout = QVBoxLayout(group)
         
         # 結果テーブル
         self.result_table = QTableWidget()
+        self.result_table.setFont(MEDIUM_FONT)
         self.result_table.setColumnCount(4)
         self.result_table.setHorizontalHeaderLabels([
             "電話番号", "地域", "事業者", "備考"
@@ -167,6 +241,27 @@ class EasyModeWindow(BaseWindow):
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.result_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.result_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.result_table.setMinimumHeight(300)
+        self.result_table.setStyleSheet("""
+            QTableWidget {
+                font-size: 14px;
+                gridline-color: #dddddd;
+            }
+            QHeaderView::section {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QTableWidget::item {
+                padding: 8px;
+            }
+            QTableWidget::item:selected {
+                background-color: #e8f5e9;
+                color: black;
+            }
+        """)
         layout.addWidget(self.result_table)
         
         return group
