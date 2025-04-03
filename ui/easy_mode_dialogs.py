@@ -710,6 +710,14 @@ class OrdererInputDialog(QDialog):
         # 保存データの初期化
         self.saved_data = orderer_data if orderer_data is not None else {}
         
+        # フリガナ自動生成用のタイマー
+        self.furigana_timer = QTimer()
+        self.furigana_timer.setSingleShot(True)
+        self.furigana_timer.timeout.connect(self.auto_generate_furigana)
+        
+        # 最後に変換した契約者名を保持
+        self.last_converted_name = ""
+        
         # メインレイアウト
         layout = QVBoxLayout()
         
@@ -775,8 +783,8 @@ class OrdererInputDialog(QDialog):
         if parent and hasattr(parent, 'list_data') and 'list_name' in parent.list_data:
             self.contractor_input.setText(parent.list_data['list_name'])
         self.contractor_input.textChanged.connect(self.check_input_fields)
-        # 契約者名の変更時にフリガナ自動生成を実行
-        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
+        # 契約者名の変更時にフリガナ自動生成を実行（タイマーを使用）
+        self.contractor_input.textChanged.connect(self.schedule_furigana_generation)
         orderer_layout.addWidget(self.contractor_input)
         
         # フリガナ
@@ -1260,6 +1268,14 @@ class OrdererInputDialog(QDialog):
             # キャンセルをキャンセル
             pass
 
+    def schedule_furigana_generation(self):
+        """
+        フリガナ自動生成をスケジュールする
+        """
+        # タイマーをリセットして再起動
+        self.furigana_timer.stop()
+        self.furigana_timer.start(500)  # 500ミリ秒後に実行
+
     def auto_generate_furigana(self):
         """
         契約者名からフリガナを自動生成する
@@ -1276,6 +1292,11 @@ class OrdererInputDialog(QDialog):
                 logging.info("フリガナ自動生成: 契約者名が空のため生成をスキップします")
                 return
                 
+            # 前回と同じ名前の場合はスキップ
+            if name == self.last_converted_name:
+                logging.info("フリガナ自動生成: 前回と同じ名前のため生成をスキップします")
+                return
+                
             # フリガナ変換APIを使用
             logging.info(f"フリガナ自動生成: 変換を開始します（契約者名: {name}）")
             from utils.furigana_utils import convert_to_furigana
@@ -1286,6 +1307,8 @@ class OrdererInputDialog(QDialog):
                 self.furigana_input.blockSignals(True)
                 self.furigana_input.setText(furigana)
                 self.furigana_input.blockSignals(False)
+                # 変換した名前を保存
+                self.last_converted_name = name
                 logging.info(f"フリガナ自動生成: 成功 - {name} → {furigana}")
             else:
                 logging.warning(f"フリガナ自動生成: 変換APIから結果が返ってきませんでした（契約者名: {name}）")
