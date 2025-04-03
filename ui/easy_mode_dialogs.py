@@ -9,13 +9,76 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl, QObject
-from PySide6.QtGui import QFont, QIntValidator
+from PySide6.QtGui import QFont, QIntValidator, QPalette, QColor
 import datetime
 import logging
 from services.area_search import search_service_area, normalize_address
 import threading
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Slot
+
+# 高齢者向けのスタイル設定
+LARGE_FONT = QFont("MS Gothic", 16)
+MEDIUM_FONT = QFont("MS Gothic", 14)
+SMALL_FONT = QFont("MS Gothic", 12)
+
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        font-size: 16px;
+        border-radius: 8px;
+        min-width: 200px;
+    }
+    QPushButton:hover {
+        background-color: #45a049;
+    }
+    QPushButton:pressed {
+        background-color: #3e8e41;
+    }
+    QPushButton:disabled {
+        background-color: #cccccc;
+    }
+"""
+
+GROUP_BOX_STYLE = """
+    QGroupBox {
+        font-size: 16px;
+        font-weight: bold;
+        border: 2px solid #4CAF50;
+        border-radius: 8px;
+        margin-top: 1em;
+        padding-top: 1em;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        left: 10px;
+        padding: 0 3px 0 3px;
+    }
+"""
+
+LABEL_STYLE = """
+    QLabel {
+        font-size: 16px;
+        color: #333333;
+        padding: 5px;
+    }
+"""
+
+INPUT_STYLE = """
+    QLineEdit, QComboBox {
+        font-size: 16px;
+        padding: 10px;
+        border: 2px solid #cccccc;
+        border-radius: 4px;
+        min-height: 40px;
+    }
+    QLineEdit:focus, QComboBox:focus {
+        border: 2px solid #4CAF50;
+    }
+"""
 
 # ダイアログの戻り値定数
 DIALOG_BACK = -1
@@ -86,7 +149,7 @@ class AddressInfoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("住所情報入力")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(600)
         
         # 検索スレッドの初期化
         self.search_thread = None
@@ -97,28 +160,45 @@ class AddressInfoDialog(QDialog):
         
         # メインレイアウト
         layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # タイトル
         title_label = QLabel("住所情報の確認")
-        title_label.setFont(QFont("MS Gothic", 12, QFont.Bold))
+        title_label.setFont(LARGE_FONT)
+        title_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
         # 住所情報入力グループ
         address_group = QGroupBox("住所情報")
+        address_group.setStyleSheet(GROUP_BOX_STYLE)
         address_layout = QVBoxLayout()
+        address_layout.setSpacing(15)
         
         # 郵便番号
-        address_layout.addWidget(QLabel("郵便番号"))
+        postal_label = QLabel("郵便番号")
+        postal_label.setFont(MEDIUM_FONT)
+        postal_label.setStyleSheet(LABEL_STYLE)
+        address_layout.addWidget(postal_label)
+        
         self.postal_code_input = QLineEdit()
+        self.postal_code_input.setFont(MEDIUM_FONT)
+        self.postal_code_input.setStyleSheet(INPUT_STYLE)
         self.postal_code_input.setPlaceholderText("例：123-4567")
         if self.saved_data and 'postal_code' in self.saved_data:
             self.postal_code_input.setText(self.saved_data['postal_code'])
         address_layout.addWidget(self.postal_code_input)
         
         # 住所
-        address_layout.addWidget(QLabel("住所"))
+        address_label = QLabel("住所")
+        address_label.setFont(MEDIUM_FONT)
+        address_label.setStyleSheet(LABEL_STYLE)
+        address_layout.addWidget(address_label)
+        
         self.address_input = QLineEdit()
+        self.address_input.setFont(MEDIUM_FONT)
+        self.address_input.setStyleSheet(INPUT_STYLE)
         self.address_input.setPlaceholderText("例：東京都渋谷区...")
         if self.saved_data and 'address' in self.saved_data:
             self.address_input.setText(self.saved_data['address'])
@@ -129,33 +209,20 @@ class AddressInfoDialog(QDialog):
         
         # 提供判定ボタン
         self.judgment_btn = QPushButton("提供判定実行")
-        self.judgment_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 10px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
+        self.judgment_btn.setFont(LARGE_FONT)
+        self.judgment_btn.setStyleSheet(BUTTON_STYLE)
         self.judgment_btn.clicked.connect(self.search_area)
-        layout.addWidget(self.judgment_btn)
+        layout.addWidget(self.judgment_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
         # 提供判定結果表示ラベル
         self.judgment_result = QLabel("提供エリア: 未検索")
+        self.judgment_result.setFont(MEDIUM_FONT)
         self.judgment_result.setStyleSheet("""
             QLabel {
-                font-size: 14px;
-                padding: 10px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                font-size: 16px;
+                padding: 15px;
+                border: 2px solid #dddddd;
+                border-radius: 8px;
                 background-color: #f8f9fa;
             }
         """)
@@ -163,38 +230,27 @@ class AddressInfoDialog(QDialog):
         
         # ボタンエリア
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(20)
         
         # 次へボタン
         self.next_btn = QPushButton("次へ")
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #1565C0;
-            }
-        """)
+        self.next_btn.setFont(LARGE_FONT)
+        self.next_btn.setStyleSheet(BUTTON_STYLE)
         self.next_btn.clicked.connect(self.on_next_clicked)
         button_layout.addWidget(self.next_btn)
         
         # 作成中止ボタン
         self.cancel_btn = QPushButton("作成中止")
+        self.cancel_btn.setFont(LARGE_FONT)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
                 color: white;
                 border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
+                padding: 15px 30px;
+                font-size: 16px;
+                border-radius: 8px;
+                min-width: 200px;
             }
             QPushButton:hover {
                 background-color: #d32f2f;
@@ -761,7 +817,9 @@ class OrdererInputDialog(QDialog):
         
         # 受注者情報入力グループ
         orderer_group = QGroupBox("受注者情報")
+        orderer_group.setStyleSheet(GROUP_BOX_STYLE)
         orderer_layout = QVBoxLayout()
+        orderer_layout.setSpacing(15)
         
         # 対応者名
         orderer_layout.addWidget(QLabel("対応者名"))
@@ -924,35 +982,23 @@ class OrdererInputDialog(QDialog):
         
         # 作成ボタン（旧「次へ」ボタンの代わり）
         self.create_btn = QPushButton("作成")
-        self.create_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3e8e41;
-            }
-        """)
+        self.create_btn.setFont(LARGE_FONT)
+        self.create_btn.setStyleSheet(BUTTON_STYLE)
         self.create_btn.clicked.connect(self.on_create_clicked)
         button_layout.addWidget(self.create_btn)
         
         # 作成中止ボタン
         self.cancel_btn = QPushButton("作成中止")
+        self.cancel_btn.setFont(LARGE_FONT)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
                 color: white;
                 border: none;
-                padding: 10px 20px;
-                font-size: 14px;
-                border-radius: 4px;
+                padding: 15px 30px;
+                font-size: 16px;
+                border-radius: 8px;
+                min-width: 200px;
             }
             QPushButton:hover {
                 background-color: #d32f2f;
