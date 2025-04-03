@@ -38,8 +38,8 @@ from .custom_widgets import CustomComboBox
 from ..services.area_search_service import AreaSearchService
 from ..services.cti_service import CTIService
 from ..utils.logger import setup_logger
-from ..utils.settings import load_settings, save_settings
-from ..utils.version import check_version
+from utils.settings import settings
+from version import check_version
 
 class EasyModeWindow(BaseWindow):
     """イージーモードのメインウィンドウクラス"""
@@ -266,8 +266,8 @@ class EasyModeWindow(BaseWindow):
     def load_settings(self):
         """設定の読み込み"""
         try:
-            settings = load_settings()
-            # TODO: 設定の適用
+            # 設定の適用
+            self.settings = settings
         except Exception as e:
             logging.error(f"設定の読み込み中にエラーが発生しました: {str(e)}")
             QMessageBox.warning(self, "警告", "設定の読み込みに失敗しました。") 

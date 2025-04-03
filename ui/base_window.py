@@ -27,6 +27,7 @@ from services.area_search import search_service_area
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from typing import Dict, Any, List, Optional, Union, Tuple
+from ui.update_dialog import UpdateDialog
 
 class BaseWindow(QMainWindow):
     """ベースウィンドウクラス"""
