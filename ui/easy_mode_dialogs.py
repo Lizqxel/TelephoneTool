@@ -910,13 +910,7 @@ class OrdererInputDialog(QDialog):
         relationship_layout.addWidget(self.relationship_input)
         orderer_layout.addLayout(relationship_layout)
         
-        # 提供判定エリア
-        judgment_layout = QHBoxLayout()
-        judgment_layout.addWidget(QLabel("提供判定："))
-        self.judgment_combo = NoWheelComboBox()
-        self.judgment_combo.addItems(["OK", "NG"])
-        judgment_layout.addWidget(self.judgment_combo)
-        orderer_layout.addLayout(judgment_layout)
+        # 提供判定エリアを削除
         
         orderer_group.setLayout(orderer_layout)
         scroll_layout.addWidget(orderer_group)
@@ -1056,7 +1050,7 @@ class OrdererInputDialog(QDialog):
                     # リスト名フリガナが空で、フリガナが入力されている場合はそれをセット
                     self.parent_window.list_data['list_furigana'] = self.saved_data['furigana']
             
-            # 受注情報を作成（現在の日付とユーザー選択の判定結果を使用）
+            # 受注情報を作成（現在の日付と初期設定の判定結果を使用）
             now = datetime.datetime.now()
             month = now.month  # 0埋めなしの月
             day = now.day      # 0埋めなしの日
@@ -1064,7 +1058,7 @@ class OrdererInputDialog(QDialog):
             order_data = {
                 'current_line': 'アナログ',  # デフォルト値
                 'order_date': f"{month}/{day}",
-                'judgment': self.judgment_combo.currentText(),  # ユーザーが選択した判定結果
+                'judgment': 'OK',  # 初期設定でOKを設定
                 'remarks': self.saved_data.get('remarks', '')  # 備考を追加
             }
             
@@ -1354,7 +1348,7 @@ class OrdererInputDialog(QDialog):
 
     def eventFilter(self, obj, event):
         """
-        イベントフィルターを実装して、エンターキーの動作をカスタマイズする
+        イベントフィルターを実装して、エンターキーと矢印キーの動作をカスタマイズする
         
         Args:
             obj: イベントの発生元オブジェクト
@@ -1363,8 +1357,8 @@ class OrdererInputDialog(QDialog):
         Returns:
             bool: イベント処理済みかどうか
         """
-        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Return:
-            # Enterキーが押された場合
+        if event.type() == QEvent.Type.KeyPress:
+            # 現在の入力フィールドのインデックスを取得
             current_index = -1
             for i, field in enumerate(self.input_fields):
                 if obj == field:
@@ -1372,46 +1366,128 @@ class OrdererInputDialog(QDialog):
                     break
             
             if current_index != -1:
-                if current_index < len(self.input_fields) - 1:
-                    # 次の入力フィールドにフォーカスを移動
-                    next_field = self.input_fields[current_index + 1]
-                    next_field.setFocus()
+                if event.key() == Qt.Key.Key_Return:
+                    # Enterキーが押された場合
+                    if current_index < len(self.input_fields) - 1:
+                        # 次の入力フィールドにフォーカスを移動
+                        next_field = self.input_fields[current_index + 1]
+                        next_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = next_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = next_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                    elif obj == self.relationship_input:  # 最後の名義人入力エリアの場合
+                        # 営コメ作成ボタンをクリック
+                        self.on_create_clicked()
                     
-                    # スクロールエリアを取得
-                    scroll_area = None
-                    parent = next_field.parent()
-                    while parent:
-                        if isinstance(parent, QScrollArea):
-                            scroll_area = parent
-                            break
-                        parent = parent.parent()
-                    
-                    # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
-                    if scroll_area:
-                        # スクロールエリア内のビューポートの座標系に変換
-                        viewport = scroll_area.viewport()
-                        widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
-                        
-                        # 現在のスクロール位置を取得
-                        current_scroll_y = scroll_area.verticalScrollBar().value()
-                        
-                        # ビューポートの高さを取得
-                        viewport_height = viewport.height()
-                        
-                        # ウィジェットの位置と高さ
-                        widget_y = widget_pos.y()
-                        widget_height = next_field.height()
-                        
-                        # ウィジェットを中央に配置するためのスクロール位置を計算
-                        target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
-                        
-                        # スクロール位置を設定
-                        scroll_area.verticalScrollBar().setValue(target_scroll_y)
-                elif obj == self.relationship_input:  # 最後の名義人入力エリアの場合
-                    # 営コメ作成ボタンをクリック
-                    self.on_create_clicked()
+                    return True
                 
-                return True
+                elif event.key() == Qt.Key.Key_Up:
+                    # 上矢印キーが押された場合
+                    if current_index > 0:
+                        # 前の入力フィールドにフォーカスを移動
+                        prev_field = self.input_fields[current_index - 1]
+                        prev_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = prev_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、前のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = prev_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = prev_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                        
+                        return True
+                
+                elif event.key() == Qt.Key.Key_Down:
+                    # 下矢印キーが押された場合
+                    if current_index < len(self.input_fields) - 1:
+                        # 次の入力フィールドにフォーカスを移動
+                        next_field = self.input_fields[current_index + 1]
+                        next_field.setFocus()
+                        
+                        # スクロールエリアを取得
+                        scroll_area = None
+                        parent = next_field.parent()
+                        while parent:
+                            if isinstance(parent, QScrollArea):
+                                scroll_area = parent
+                                break
+                            parent = parent.parent()
+                        
+                        # スクロールエリアが存在する場合、次のフィールドが見えるようにスクロール
+                        if scroll_area:
+                            # スクロールエリア内のビューポートの座標系に変換
+                            viewport = scroll_area.viewport()
+                            widget_pos = next_field.mapTo(viewport, QPoint(0, 0))
+                            
+                            # 現在のスクロール位置を取得
+                            current_scroll_y = scroll_area.verticalScrollBar().value()
+                            
+                            # ビューポートの高さを取得
+                            viewport_height = viewport.height()
+                            
+                            # ウィジェットの位置と高さ
+                            widget_y = widget_pos.y()
+                            widget_height = next_field.height()
+                            
+                            # ウィジェットを中央に配置するためのスクロール位置を計算
+                            target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                            
+                            # スクロール位置を設定
+                            scroll_area.verticalScrollBar().setValue(target_scroll_y)
+                        
+                        return True
                 
         # 標準のイベント処理を継続
         return super().eventFilter(obj, event)
@@ -1600,6 +1676,7 @@ class OrderInfoDialog(QDialog):
                 else:
                     logging.error("プレビューテキストの生成に失敗")
                     QMessageBox.warning(self, "警告", "営コメの作成に失敗しました。")
+                self.accept()
             else:
                 logging.error("親ウィンドウにgenerate_preview_textメソッドが存在しません")
                 QMessageBox.warning(self, "警告", "プレビュー機能が利用できません。")
