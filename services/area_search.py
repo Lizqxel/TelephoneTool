@@ -35,17 +35,25 @@ def normalize_address(address):
     Returns:
         str: 正規化された住所文字列
     """
-    # 空白文字の正規化
-    address = address.replace('　', ' ').strip()
+    if not address:
+        return address
+        
+    # 全角数字を半角に変換
+    zen_to_han = str.maketrans({
+        '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+        '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+        '－': '-', 'ー': '-', '−': '-', '―': '-', '‐': '-',  # 全角ハイフン類を半角に
+        '　': ' '  # 全角スペースを半角に
+    })
     
-    # ハイフンの正規化
-    address = address.replace('−', '-').replace('ー', '-').replace('－', '-')
+    # 変換を実行
+    normalized = address.translate(zen_to_han)
     
-    # 数字の正規化（全角→半角）
-    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
-    address = address.translate(zen_to_han)
+    # 余分な空白を削除
+    normalized = ' '.join(normalized.split())
     
-    return address
+    logging.info(f"住所正規化 - 変換前: {address}, 変換後: {normalized}")
+    return normalized
 
 def split_address(address):
     """
@@ -541,7 +549,15 @@ def search_service_area(postal_code, address, progress_callback=None):
     """
     global global_driver
     
-    logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
+    # 郵便番号と住所の全角文字を半角に変換
+    original_postal_code = postal_code
+    original_address = address
+    
+    postal_code = normalize_address(postal_code)
+    address = normalize_address(address)
+    
+    logging.info(f"変換前 - 郵便番号: {original_postal_code}, 住所: {original_address}")
+    logging.info(f"変換後 - 郵便番号: {postal_code}, 住所: {address}")
     
     # 住所を分割
     if progress_callback:

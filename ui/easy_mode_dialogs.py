@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTim
 from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
-from services.area_search import search_service_area as area_search_service
+from services.area_search import search_service_area, normalize_address
 import threading
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Slot
@@ -145,7 +145,7 @@ class AddressInfoDialog(QDialog):
                 background-color: #3e8e41;
             }
         """)
-        self.judgment_btn.clicked.connect(self.search_service_area)
+        self.judgment_btn.clicked.connect(self.search_area)
         layout.addWidget(self.judgment_btn)
         
         # 提供判定結果表示ラベル
@@ -228,18 +228,20 @@ class AddressInfoDialog(QDialog):
             dict: 住所情報
         """
         try:
-            # 住所の全角ハイフンを半角に変換
-            address = self.address_input.text()
-            address = address.replace('－', '-')  # 全角ハイフンを半角に
-            address = address.replace('ー', '-')  # 長音記号を半角ハイフンに
-            address = address.replace('−', '-')  # 別種の全角ハイフンを半角に
-            address = address.replace('―', '-')  # ダッシュを半角ハイフンに
-            address = address.replace('‐', '-')  # 別種のハイフンを半角ハイフンに
+            # 入力値を取得
+            input_postal_code = self.postal_code_input.text()
+            input_address = self.address_input.text()
+            
+            # 全角文字を半角に変換
+            normalized_postal_code = normalize_address(input_postal_code)
+            normalized_address = normalize_address(input_address)
             
             # データを辞書形式で返す
             data = {
-                'postal_code': self.postal_code_input.text(),
-                'address': address
+                'postal_code': normalized_postal_code,
+                'address': normalized_address,
+                'original_postal_code': input_postal_code,  # 元の入力値も保持
+                'original_address': input_address
             }
             
             logging.info(f"住所データを取得: {data}")
@@ -249,48 +251,30 @@ class AddressInfoDialog(QDialog):
             logging.error(f"住所データの取得中にエラー: {e}")
             return {}
     
-    def search_service_area(self):
-        """提供エリアを検索"""
+    def search_area(self):
+        """
+        提供エリアを検索する
+        """
         try:
-            logging.info("★★★ 提供エリア検索を開始 ★★★")
+            # 住所データを取得
+            data = self.get_address_data()
+            if not data:
+                return
             
-            # 検索中の表示に更新
-            self.judgment_result.setText("提供エリア: 検索中...")
-            self.judgment_result.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 10px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
+            # 元の入力値を使用して検索
+            postal_code = data['original_postal_code']
+            address = data['original_address']
             
-            # 親ウィンドウの判定結果も更新
-            if self.parent_window:
-                logging.info("★★★ 親ウィンドウの判定結果を更新: 検索中... ★★★")
-                self.parent_window.update_judgment_result("検索中...")
-            
-            # 検索ボタンを無効化
-            self.judgment_btn.setEnabled(False)
-            self.judgment_btn.setText("検索中...")
-
-            # 提供エリアを検索
-            postal_code = self.postal_code_input.text()
-            address = self.address_input.text()
-            logging.info(f"★★★ 検索パラメータ: postal_code={postal_code}, address={address} ★★★")
-
             # 検索を実行
-            result = area_search_service(postal_code, address)
+            result = search_service_area(postal_code, address)
             logging.info(f"★★★ 検索結果: {result} ★★★")
-
-            # 検索結果を処理
-            self.on_search_finished(result)
-
+            
+            # 結果を表示
+            self.show_result(result)
+            
         except Exception as e:
-            logging.error(f"★★★ 提供エリア検索の開始でエラー: {e} ★★★", exc_info=True)
-            self.on_search_error(str(e))
+            logging.error(f"エリア検索中にエラー: {e}")
+            self.show_error("エリア検索中にエラーが発生しました。")
 
     def on_search_finished(self, result):
         """検索完了時の処理"""
