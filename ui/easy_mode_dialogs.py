@@ -769,6 +769,9 @@ class OrdererInputDialog(QDialog):
         # 契約者名
         orderer_layout.addWidget(QLabel("契約者名"))
         self.contractor_input = QLineEdit()
+        # リストから取得した顧客名を初期値として設定
+        if parent and hasattr(parent, 'list_data') and 'list_name' in parent.list_data:
+            self.contractor_input.setText(parent.list_data['list_name'])
         orderer_layout.addWidget(self.contractor_input)
         
         # フリガナ
@@ -839,15 +842,15 @@ class OrdererInputDialog(QDialog):
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
-        self.net_usage_combo = NoWheelComboBox()
-        self.net_usage_combo.addItems(["なし", "あり"])
-        orderer_layout.addWidget(self.net_usage_combo)
+        self.net_usage_input = QLineEdit()
+        self.net_usage_input.setText("なし")
+        orderer_layout.addWidget(self.net_usage_input)
         
         # 家族了承
         orderer_layout.addWidget(QLabel("家族了承"))
-        self.family_approval_combo = NoWheelComboBox()
-        self.family_approval_combo.addItems(["ok", "なし"])
-        orderer_layout.addWidget(self.family_approval_combo)
+        self.family_approval_input = QLineEdit()
+        self.family_approval_input.setText("ok")
+        orderer_layout.addWidget(self.family_approval_input)
         
         # 他番号
         orderer_layout.addWidget(QLabel("他番号"))
@@ -944,54 +947,31 @@ class OrdererInputDialog(QDialog):
         
         self.setLayout(layout)
         
-        # エンターキーが押されたときに次の入力項目に移動するための設定
-        self.input_fields = [
-            self.operator_input, self.available_time_input, self.contractor_input,
-            self.furigana_input, self.order_person_input,
-            self.fee_input, self.other_number_input, self.phone_device_input,
-            self.forbidden_line_input, self.nd_input, self.relationship_input
-        ]
-        
-        # 各入力フィールドにイベントハンドラーを設定
-        for i, field in enumerate(self.input_fields):
-            if isinstance(field, QLineEdit):
-                field.installEventFilter(self)
-        
-        # データの設定
-        if self.saved_data:
-            if 'operator' in self.saved_data:
-                self.operator_input.setText(self.saved_data['operator'])
-            if 'available_time' in self.saved_data:
-                self.available_time_input.setText(self.saved_data['available_time'])
-            if 'contractor' in self.saved_data:
-                self.contractor_input.setText(self.saved_data['contractor'])
-            if 'furigana' in self.saved_data:
-                self.furigana_input.setText(self.saved_data['furigana'])
-            if 'order_person' in self.saved_data:
-                self.order_person_input.setText(self.saved_data['order_person'])
-            if 'fee' in self.saved_data:
-                self.fee_input.setText(self.saved_data['fee'])
-            if 'net_usage' in self.saved_data:
-                self.net_usage_combo.setCurrentText(self.saved_data['net_usage'])
-            if 'family_approval' in self.saved_data:
-                self.family_approval_combo.setCurrentText(self.saved_data['family_approval'])
-            if 'other_number' in self.saved_data:
-                self.other_number_input.setText(self.saved_data['other_number'])
-            if 'phone_device' in self.saved_data:
-                self.phone_device_input.setText(self.saved_data['phone_device'])
-            if 'forbidden_line' in self.saved_data:
-                self.forbidden_line_input.setText(self.saved_data['forbidden_line'])
-            if 'nd' in self.saved_data:
-                self.nd_input.setText(self.saved_data['nd'])
-            if 'relationship' in self.saved_data:
-                self.relationship_input.setText(self.saved_data['relationship'])
-        
-        # フリガナ自動生成のシグナルを接続
-        self.contractor_input.textChanged.connect(self.auto_generate_furigana)
-        self.furigana_mode_combo.currentTextChanged.connect(lambda: self.auto_generate_furigana())
-        
         # 初期表示時に一度だけ自動生成を実行
         QTimer.singleShot(100, self.auto_generate_furigana)
+        
+        # 対応者名にフォーカスを設定
+        self.operator_input.setFocus()
+        
+        # エンターキーで次の項目に移動するためのイベントフィルターを設定
+        self.input_fields = [
+            self.operator_input,
+            self.available_time_input,
+            self.contractor_input,
+            self.furigana_input,
+            self.order_person_input,
+            self.fee_input,
+            self.net_usage_input,
+            self.family_approval_input,
+            self.other_number_input,
+            self.phone_device_input,
+            self.forbidden_line_input,
+            self.nd_input,
+            self.relationship_input
+        ]
+        
+        for field in self.input_fields:
+            field.installEventFilter(self)
     
     def eventFilter(self, obj, event):
         """
@@ -1014,8 +994,7 @@ class OrdererInputDialog(QDialog):
             
             if current_index != -1 and current_index < len(self.input_fields) - 1:
                 # 次の入力フィールドにフォーカスを移動
-                next_index = current_index + 1
-                next_field = self.input_fields[next_index]
+                next_field = self.input_fields[current_index + 1]
                 next_field.setFocus()
                 
                 # スクロールエリアを取得
@@ -1043,35 +1022,16 @@ class OrdererInputDialog(QDialog):
                     widget_y = widget_pos.y()
                     widget_height = next_field.height()
                     
-                    # ウィジェットが完全に表示されているかチェック
-                    if widget_y < 0:
-                        # ウィジェットが上に隠れている場合、上にスクロール
-                        scroll_area.verticalScrollBar().setValue(current_scroll_y + widget_y)
-                    elif widget_y + widget_height > viewport_height:
-                        # ウィジェットが下に隠れている場合、下にスクロール
-                        scroll_area.verticalScrollBar().setValue(
-                            current_scroll_y + (widget_y + widget_height - viewport_height) + 10
-                        )
+                    # ウィジェットを中央に配置するためのスクロール位置を計算
+                    target_scroll_y = current_scroll_y + widget_y - (viewport_height - widget_height) // 2
+                    
+                    # スクロール位置を設定
+                    scroll_area.verticalScrollBar().setValue(target_scroll_y)
                 
                 return True
                 
         # 標準のイベント処理を継続
         return super().eventFilter(obj, event)
-        
-    def keyPressEvent(self, event):
-        """
-        キー押下イベントを処理する
-        
-        Args:
-            event: キーイベント
-        """
-        # Enterキーでダイアログを閉じないようにする
-        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            # Enterキーの標準動作を無効化
-            event.accept()
-        else:
-            # それ以外のキーは通常通り処理
-            super().keyPressEvent(event)
     
     def on_create_clicked(self):
         """作成ボタンがクリックされた時の処理"""
@@ -1180,8 +1140,8 @@ class OrdererInputDialog(QDialog):
                 'birth_date': birth_date,  # 生年月日を設定
                 'order_person': self.order_person_input.text(),
                 'fee': self.fee_input.text(),
-                'net_usage': self.net_usage_combo.currentText(),
-                'family_approval': self.family_approval_combo.currentText(),
+                'net_usage': self.net_usage_input.text(),
+                'family_approval': self.family_approval_input.text(),
                 'other_number': self.other_number_input.text(),
                 'phone_device': self.phone_device_input.text(),
                 'forbidden_line': self.forbidden_line_input.text(),
@@ -1253,11 +1213,11 @@ class OrdererInputDialog(QDialog):
             
             # ネット利用
             if data.get('net_usage'):
-                self.net_usage_combo.setCurrentText(data['net_usage'])
+                self.net_usage_input.setText(data['net_usage'])
             
             # 家族了承
             if data.get('family_approval'):
-                self.family_approval_combo.setCurrentText(data['family_approval'])
+                self.family_approval_input.setText(data['family_approval'])
             
             # 他番号
             if data.get('other_number'):
