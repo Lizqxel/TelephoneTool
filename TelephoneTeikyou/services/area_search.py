@@ -35,17 +35,31 @@ def normalize_address(address):
     Returns:
         str: 正規化された住所文字列
     """
-    # 空白文字の正規化
-    address = address.replace('　', ' ').strip()
+    if not address:
+        logging.warning("空の住所が入力されました")
+        return address
+        
+    logging.info(f"=== 住所正規化開始 ===")
+    logging.info(f"入力値: {address}")
     
-    # ハイフンの正規化
-    address = address.replace('−', '-').replace('ー', '-').replace('－', '-')
+    # 全角数字を半角に変換
+    zen_to_han = str.maketrans({
+        '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+        '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+        '－': '-', 'ー': '-', '−': '-', '―': '-', '‐': '-',  # 全角ハイフン類を半角に
+        '　': ' '  # 全角スペースを半角に
+    })
     
-    # 数字の正規化（全角→半角）
-    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
-    address = address.translate(zen_to_han)
+    # 変換を実行
+    normalized = address.translate(zen_to_han)
+    logging.info(f"変換後（translate後）: {normalized}")
     
-    return address
+    # 余分な空白を削除
+    normalized = ' '.join(normalized.split())
+    logging.info(f"変換後（空白削除後）: {normalized}")
+    
+    logging.info(f"=== 住所正規化完了 ===")
+    return normalized
 
 def split_address(address):
     """
@@ -541,6 +555,21 @@ def search_service_area(postal_code, address, progress_callback=None):
     """
     global global_driver
     
+    # デバッグログ：入力値の確認
+    logging.info(f"=== 検索開始 ===")
+    logging.info(f"入力郵便番号（変換前）: {postal_code}")
+    logging.info(f"入力住所（変換前）: {address}")
+    
+    # 郵便番号と住所の正規化
+    try:
+        postal_code = normalize_address(postal_code)
+        address = normalize_address(address)
+        logging.info(f"正規化後郵便番号: {postal_code}")
+        logging.info(f"正規化後住所: {address}")
+    except Exception as e:
+        logging.error(f"正規化処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"住所の正規化に失敗しました: {str(e)}"}
+    
     logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
     
     # 住所を分割
@@ -549,6 +578,7 @@ def search_service_area(postal_code, address, progress_callback=None):
     
     address_parts = split_address(address)
     if not address_parts:
+        logging.error("住所の分割に失敗しました")
         return {"status": "error", "message": "住所の分割に失敗しました。"}
         
     # 基本住所を構築（番地と号を除く）
