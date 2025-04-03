@@ -25,8 +25,7 @@ from PySide6.QtWidgets import QApplication
 
 from version import VERSION, APP_NAME, GITHUB_OWNER, GITHUB_REPO, UPDATE_CHECK_INTERVAL
 from ui.update_progress_dialog import UpdateProgressDialog
-
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 class UpdateChecker:
     """アップデートチェックを行うクラス"""

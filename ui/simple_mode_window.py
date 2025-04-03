@@ -38,7 +38,7 @@ from ..services.area_search_service import AreaSearchService
 from ..services.cti_service import CTIService
 from ..utils.logger import setup_logger
 from ..utils.settings import load_settings, save_settings
-from ..utils.version import check_version
+from version import check_version
 
 class SimpleModeWindow(BaseWindow):
     """シンプルモードのメインウィンドウクラス"""

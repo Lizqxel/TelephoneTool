@@ -142,12 +142,11 @@ class MainWindowFunctions:
 他番号：なし
 電話機：プッシュ
 禁止回線：なし
-ND：
+ND：{nd}
 
-備考：{remarks}
+備考：名義人の{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
-※リスト名との関係性："""
+案内料金：2500円"""
             
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
