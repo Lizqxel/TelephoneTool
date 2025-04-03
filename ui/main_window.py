@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy, QProgressBar)
+                              QSizePolicy, QProgressBar, QListView)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
@@ -139,12 +139,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.setup_logging()
         
         # 設定ファイルのパスを設定
-        self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        if getattr(sys, 'frozen', False):
+            # exeファイルとして実行されている場合
+            self.settings_file = os.path.join(os.path.dirname(sys.executable), 'settings.json')
+        else:
+            # 通常のPythonスクリプトとして実行されている場合
+            self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        
         logging.info(f"設定ファイルのパス: {self.settings_file}")
         
         # 設定を読み込む
         self.settings = {}
         self.load_settings()
+        
+        # 設定ファイルが存在しない場合は新規作成
+        if not os.path.exists(self.settings_file):
+            logging.info("設定ファイルが存在しないため、新規作成します")
+            self.save_mode_settings('simple', True)
         
         # アクティブな検索スレッドを保持するリスト
         self.active_search_threads = []
@@ -177,8 +188,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # メインレイアウトの作成
         self.main_layout = QVBoxLayout(main_widget)
         
-        # モード選択ダイアログの表示（設定に関係なく常に表示）
-        self.show_mode_selection()
+        # モード選択ダイアログの表示（設定に基づいて表示を制御）
+        if self.settings.get('show_mode_selection', True):
+            self.show_mode_selection()
         
         # 選択されたモードに基づいてUIを初期化
         if self.current_mode == 'simple':
@@ -209,8 +221,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     else:
                         self.current_mode = settings.get('mode', 'simple')
             else:
-                # 設定ファイルが存在しない場合は、モード選択ダイアログを表示
+                # 設定ファイルが存在しない場合は、必ずモード選択ダイアログを表示
                 self.show_mode_selection_dialog()
+                # 設定ファイルを作成
+                self.save_mode_settings('simple', True)
         except Exception as e:
             logging.error(f"モード設定の読み込み中にエラーが発生しました: {e}")
             # エラーが発生した場合は、モード選択ダイアログを表示
@@ -232,6 +246,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                         return
             # 設定ファイルが存在しない場合、またはshow_mode_selectionがTrueの場合は表示
             self.show_mode_selection_dialog()
+            # 設定ファイルが存在しない場合は作成
+            if not os.path.exists(self.settings_file):
+                self.save_mode_settings('simple', True)
         except Exception as e:
             logging.error(f"モード設定の読み込み中にエラーが発生しました: {e}")
             # エラーが発生した場合は、モード選択ダイアログを表示
@@ -1431,25 +1448,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.load_settings()
             # フォントサイズを適用
             self.apply_font_size()
-            
-            # モード変更フラグがセットされている場合、UIを再構築
-            if hasattr(self, 'mode_changed') and self.mode_changed and hasattr(self, 'new_mode'):
-                self.mode_changed = False
-                new_mode = self.new_mode
-                self.new_mode = None
-                
-                # 新しいモードでUIを初期化
-                if new_mode == 'simple':
-                    self.init_simple_mode()
+            # ウィジェットを更新
+            self.update()
+            # 全てのウィジェットを再描画
+            for widget in self.findChildren(QWidget):
+                if isinstance(widget, QListView):
+                    widget.viewport().update()  # QListViewの場合はviewport()を更新
                 else:
-                    self.init_easy_mode()
-            else:
-                # ウィジェットを更新
-                self.update()
-                # 全てのウィジェットを再描画
-                for widget in self.findChildren(QWidget):
                     widget.update()
-            
             logging.info("設定を更新しました")
             
     def update_countdown(self):
@@ -1683,7 +1689,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""
+        # テキスト入力フィールドのクリア
         self.operator_input.clear()
+        # 携帯電話番号入力エリアの参照を削除
         self.available_time_input.clear()  # 出やすい時間帯をクリア
         self.contractor_input.clear()
         self.furigana_input.clear()
@@ -1695,7 +1703,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_phone_input.clear()
         self.list_postal_code_input.clear()
         self.list_address_input.clear()
-        self.list_address_furigana_input.clear()  # リスト住所フリガナをクリア
         # 受注者名はクリアしない（保持する）
         # self.order_person_input.clear()
         # 料金認識はクリアしない（保持する）
@@ -1706,6 +1713,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.phone_device_input.setText("プッシュホン")
         self.forbidden_line_input.setText("なし")
         
+        # NDと備考（名義人との関係性）をクリア
+        self.nd_input.clear()
         self.relationship_input.clear()
         # コンボボックスをデフォルト値に
         self.era_combo.setCurrentIndex(0)
@@ -1769,19 +1778,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         menubar.setCornerWidget(version_label, Qt.TopRightCorner)
         
     def show_update_dialog(self):
-        """アップデート設定ダイアログを表示する"""
+        """
+        アップデート設定ダイアログを表示する
+        """
         dialog = UpdateDialog(self)
         dialog.settings_file = self.settings_file  # 設定ファイルのパスを渡す
         dialog.exec()
         
     def show_about_dialog(self):
-        """バージョン情報ダイアログを表示する"""
+        """
+        バージョン情報ダイアログを表示する
+        """
         msg = f"{APP_NAME} v{VERSION}\n\n"
         msg += "ライセンス: MIT License"
         QMessageBox.information(self, "バージョン情報", msg)
 
     def check_for_updates(self):
-        """アップデートをチェック"""
+        """
+        アップデートをチェック
+        """
         try:
             # GitHubのAPIを使用して最新リリースを取得
             url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"

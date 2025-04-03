@@ -7,6 +7,8 @@
 
 import json
 import os
+import sys
+import logging
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
                               QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget,
@@ -28,8 +30,15 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("設定")
         self.setFixedSize(700, 600)  # ダイアログサイズを固定
         
-        # 設定ファイルのパス
-        self.settings_file = "settings.json"
+        # 設定ファイルのパスを絶対パスで設定
+        if getattr(sys, 'frozen', False):
+            # exeファイルとして実行されている場合
+            self.settings_file = os.path.join(os.path.dirname(sys.executable), 'settings.json')
+        else:
+            # 通常のPythonスクリプトとして実行されている場合
+            self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+        
+        logging.info(f"設定ファイルのパス: {self.settings_file}")
         
         # デフォルトのフォーマットテンプレート
         self.default_format = """対応者（お客様の名前）：{operator}
