@@ -10,7 +10,7 @@ import logging
 import json
 import os
 import re
-from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar
+from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar, QListView
 from PySide6.QtCore import QTimer, QThread, Signal, QObject
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QMessageBox, QApplication
@@ -116,7 +116,7 @@ class MainWindowFunctions:
             # デフォルトのフォーマットテンプレート
             default_template = """対応者（お客様の名前）：{operator}
 工事希望日
-★出やすい時間帯：{available_time} 携帯：{mobile}
+★出やすい時間帯：{available_time}
 ★電話取次：アナログ→光電話
 ★電話OP：
 ★無線
@@ -427,8 +427,9 @@ ND：{nd}
         self.phone_device_input.setText("プッシュホン")
         self.forbidden_line_input.setText("なし")
         
-        self.nd_input.clear()               # ND
-        self.relationship_input.clear()     # 名義人との関係性
+        # NDと備考（名義人との関係性）をクリア
+        self.nd_input.clear()
+        self.relationship_input.clear()
         
         # 提供エリア検索結果をリセット
         self.area_result_label.setText("提供エリア: 未検索")
@@ -486,7 +487,10 @@ ND：{nd}
             self.update()
             # 全てのウィジェットを再描画
             for widget in self.findChildren(QWidget):
-                widget.update()
+                if isinstance(widget, QListView):
+                    widget.viewport().update()  # QListViewの場合はviewport()を更新
+                else:
+                    widget.update()
             logging.info("設定を更新しました")
     
     def toggle_mobile_input(self, text):
