@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QSizePolicy, QProgressBar, QListView)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
@@ -1254,9 +1254,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)  # 0-100%の範囲に設定
         self.progress_bar.setValue(0)  # 初期値を0%に設定
-        self.progress_bar.setFixedHeight(10)  # 高さを10ピクセルに設定（以前は6ピクセル）
+        self.progress_bar.setFixedHeight(10)  # 高さを10ピクセルに設定
         self.progress_bar.setTextVisible(True)  # テキストを表示
         self.progress_bar.setFormat("%p%")  # パーセント表示
+        
+        # アニメーションの設定
+        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
+        self.progress_animation.setDuration(200)  # 200ミリ秒でアニメーション
+        self.progress_animation.setEasingCurve(QEasingCurve.InOutQuad)  # イージング効果を追加
+        
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
@@ -1269,9 +1275,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QProgressBar::chunk {
                 background-color: #3498DB;
                 border-radius: 5px;
+                width: 10px; /* チャンクの最小幅を設定 */
+                margin: 0px;
+            }
+            QProgressBar::chunk:hover {
+                background-color: #2980B9;
             }
         """)
-        self.progress_bar.hide()  # 初期状態では非表示
+
         area_result_layout.addWidget(self.progress_bar)
 
         address_layout.addWidget(area_result_container)
@@ -2146,30 +2157,28 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             QMessageBox.critical(self, "エラー", f"UIの再構築中にエラーが発生しました: {str(e)}")
 
     def update_search_progress(self, message):
-        """
-        検索の進捗状況を更新する
-        
-        Args:
-            message (str): 進捗メッセージ
-        """
-        # メッセージから進捗率を抽出（例: "検索中... (50%)"）
-        progress_match = re.search(r'(\d+)%', message)
-        if progress_match:
-            progress = int(progress_match.group(1))
-            self.progress_bar.setValue(progress)
-        
-        self.area_result_label.setText(f"提供エリア: {message}")
-        self.area_result_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #3498DB;
-                border-radius: 4px;
-                background-color: #E3F2FD;
-                color: #2980B9;
-            }
-        """)
-        QApplication.processEvents()
+        """検索の進捗状況を更新する"""
+        try:
+            # メッセージからパーセンテージを抽出
+            import re
+            match = re.search(r'\((\d+)%\)', message)
+            if match:
+                new_value = int(match.group(1))
+                current_value = self.progress_bar.value()
+                
+                # アニメーションの設定
+                self.progress_animation.setStartValue(current_value)
+                self.progress_animation.setEndValue(new_value)
+                self.progress_animation.start()
+                
+            # プログレスバーとメッセージを表示
+            self.progress_bar.setVisible(True)
+            self.area_result_label.setText(message)
+            self.area_result_label.setStyleSheet("color: #666666;")
+            
+        except Exception as e:
+            logging.error(f"進捗更新中にエラー: {str(e)}")
+            self.area_result_label.setText(message)
 
 
 class ServiceAreaSearchWorker(QObject):
