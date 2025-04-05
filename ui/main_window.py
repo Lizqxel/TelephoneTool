@@ -150,12 +150,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 設定を読み込む
         self.settings = {}
-        self.load_settings()
         
         # 設定ファイルが存在しない場合は新規作成
         if not os.path.exists(self.settings_file):
             logging.info("設定ファイルが存在しないため、新規作成します")
             self.save_mode_settings('simple', True)
+        
+        # 設定を読み込む
+        self.load_settings()
         
         # アクティブな検索スレッドを保持するリスト
         self.active_search_threads = []
@@ -2112,6 +2114,28 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         except Exception as e:
             logging.error(f"テンプレート取得中にエラー: {e}")
             return None
+
+    def reconstruct_ui(self):
+        """
+        モード切り替え時にUIを再構築する
+        """
+        try:
+            logging.info("UIの再構築を開始します")
+            
+            # 現在のモードに基づいてUIを再構築
+            if self.current_mode == 'simple':
+                self.init_simple_mode()
+            else:
+                self.init_easy_mode()
+            
+            # フォントサイズを再適用
+            font_size = self.settings.get('font_size', 10)
+            self.set_font_size(font_size)
+            
+            logging.info("UIの再構築が完了しました")
+        except Exception as e:
+            logging.error(f"UIの再構築中にエラーが発生しました: {e}")
+            QMessageBox.critical(self, "エラー", f"UIの再構築中にエラーが発生しました: {str(e)}")
 
 
 class ServiceAreaSearchWorker(QObject):
