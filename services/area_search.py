@@ -1,8 +1,19 @@
 """
-提供エリア検索サービス
+NTT西日本の提供エリア検索サービス
 
 このモジュールは、NTT西日本の提供エリア検索を
 自動化するための機能を提供します。
+
+主な機能：
+- 郵便番号による住所検索
+- 住所の自動選択
+- 番地・号の入力
+- 建物情報の選択
+- 提供エリア判定
+
+制限事項：
+- キャッシュ機能は使用しません
+- エラー発生時は詳細なログを出力します
 """
 
 import logging
@@ -19,9 +30,9 @@ from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from PIL import Image  # PILライブラリを追加
 
-from services.web_driver import create_driver
+from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
-from services.area_search_east import search_service_area as search_service_area_east
+from utils.address_utils import split_address, normalize_address
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
@@ -570,6 +581,8 @@ def search_service_area(postal_code, address, progress_callback=None):
     # 東日本か西日本かを判定
     if is_east_japan(address):
         logging.info("東日本の提供エリア検索を実行します")
+        # 東日本の検索機能を動的にインポート
+        from services.area_search_east import search_service_area as search_service_area_east
         return search_service_area_east(postal_code, address, progress_callback)
     else:
         logging.info("西日本の提供エリア検索を実行します")
