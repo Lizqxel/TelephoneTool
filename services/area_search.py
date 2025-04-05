@@ -21,9 +21,37 @@ from PIL import Image  # PILライブラリを追加
 
 from services.web_driver import create_driver
 from utils.string_utils import normalize_string, calculate_similarity
+from services.area_search_east import search_service_area as search_service_area_east
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
+
+def is_east_japan(address):
+    """
+    住所が東日本かどうかを判定する
+    
+    Args:
+        address (str): 判定する住所
+        
+    Returns:
+        bool: 東日本ならTrue、西日本ならFalse
+    """
+    # 東日本の都道府県リスト
+    east_japan_prefectures = [
+        "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+        "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+        "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+        "静岡県", "愛知県", "三重県"
+    ]
+    
+    # 住所から都道府県を抽出
+    prefecture_pattern = r'^(東京都|北海道|(?:京都|大阪)府|.+?県)'
+    prefecture_match = re.match(prefecture_pattern, address)
+    if not prefecture_match:
+        return False
+    
+    prefecture = prefecture_match.group(1)
+    return prefecture in east_japan_prefectures
 
 def normalize_address(address):
     """
@@ -529,6 +557,26 @@ def take_full_page_screenshot(driver, save_path):
 
 def search_service_area(postal_code, address, progress_callback=None):
     """
+    提供エリア検索を実行する関数
+    
+    Args:
+        postal_code (str): 郵便番号
+        address (str): 住所
+        progress_callback (callable): 進捗状況を通知するコールバック関数
+        
+    Returns:
+        dict: 検索結果を含む辞書
+    """
+    # 東日本か西日本かを判定
+    if is_east_japan(address):
+        logging.info("東日本の提供エリア検索を実行します")
+        return search_service_area_east(postal_code, address, progress_callback)
+    else:
+        logging.info("西日本の提供エリア検索を実行します")
+        return search_service_area_west(postal_code, address, progress_callback)
+
+def search_service_area_west(postal_code, address, progress_callback=None):
+    """
     NTT西日本の提供エリア検索を実行する関数
     
     Args:
@@ -541,8 +589,21 @@ def search_service_area(postal_code, address, progress_callback=None):
     """
     global global_driver
     
-    logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
+    # デバッグログ：入力値の確認
+    logging.info(f"=== 検索開始 ===")
+    logging.info(f"入力郵便番号（変換前）: {postal_code}")
+    logging.info(f"入力住所（変換前）: {address}")
     
+    # 郵便番号と住所の正規化
+    try:
+        postal_code = normalize_address(postal_code)
+        address = normalize_address(address)
+        logging.info(f"正規化後郵便番号: {postal_code}")
+        logging.info(f"正規化後住所: {address}")
+    except Exception as e:
+        logging.error(f"正規化処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"住所の正規化に失敗しました: {str(e)}"}
+
     # 住所を分割
     if progress_callback:
         progress_callback("住所情報を解析中...")
