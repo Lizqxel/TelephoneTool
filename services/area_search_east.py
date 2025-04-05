@@ -28,12 +28,134 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
+from bs4 import BeautifulSoup
+from datetime import datetime
 
 from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
+from utils.address_utils import normalize_address
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
+
+def split_address(address):
+    """
+    住所を分割して各要素を抽出する
+
+    Args:
+        address (str): 分割する住所
+        
+    Returns:
+        dict: 分割された住所の要素
+            - prefecture: 都道府県
+            - city: 市区町村
+            - town: 町名（大字・字を除く）
+            - block: 丁目
+            - number: 番地
+            - building_id: 建物ID
+    """
+    try:
+        # 住所を正規化
+        address = normalize_address(address)
+        logging.info(f"正規化後の住所: {address}")
+        
+        # 都道府県を抽出
+        prefecture_match = re.match(r'^(.+?[都道府県])', address)
+        prefecture = prefecture_match.group(1) if prefecture_match else None
+        block = None
+        number_part = None
+        town = ""
+        
+        if prefecture:
+            remaining_address = address[len(prefecture):].strip()
+            # 市区町村を抽出（郡がある場合も考慮）
+            city_match = re.match(r'^(.+?郡.+?[町村]|.+?[市区町村])', remaining_address)
+            city = city_match.group(1) if city_match else None
+            
+            if city:
+                # 残りの住所から基本住所と番地を分離
+                remaining = remaining_address[len(city):].strip()
+                
+                # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
+                special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
+                
+                if special_location_match:
+                    # 番地のみを抽出（甲乙丙丁は除外）
+                    number_part = special_location_match.group(3)
+                    # 基本住所は市区町村までとする
+                    town = ""
+                else:
+                    # 丁目を含む場合は、丁目の後ろの番地を抽出
+                    chome_match = re.search(r'(\d+)丁目', remaining)
+                    if chome_match:
+                        # 丁目より後ろの部分から番地を探す
+                        after_chome = remaining[remaining.find('丁目') + 2:].strip()
+                        # ハイフンを含む番地のパターンを優先的に検索
+                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
+                        if number_match:
+                            number_part = number_match.group(1)
+                            town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
+                        else:
+                            number_part = None
+                            town = remaining[:remaining.find('丁目')].strip()
+                        block = chome_match.group(1)
+                    else:
+                        # ハイフンが2つある場合は、最初の数字を丁目として扱う
+                        double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
+                        if double_hyphen_match:
+                            block = double_hyphen_match.group(1)
+                            number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
+                            town = remaining[:double_hyphen_match.start()].strip()
+                        else:
+                            # 通常の番地パターンを検索
+                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                            if number_match:
+                                number_part = number_match.group(1)
+                                town = remaining[:number_match.start()].strip()
+                            else:
+                                number_part = None
+                                town = remaining
+                
+                result = {
+                    'prefecture': prefecture,
+                    'city': city,
+                    'town': town if town else "",
+                    'block': block,
+                    'number': number_part,
+                    'building_id': None
+                }
+                
+                # 分割結果をログ出力
+                logging.info("住所分割結果:")
+                logging.info(f"  都道府県: {result['prefecture']}")
+                logging.info(f"  市区町村: {result['city']}")
+                logging.info(f"  町名: {result['town']}")
+                logging.info(f"  丁目: {result['block']}")
+                logging.info(f"  番地: {result['number']}")
+                
+                return result
+            
+            return {
+                'prefecture': prefecture,
+                'city': remaining_address if prefecture else None,
+                'town': "",
+                'block': None,
+                'number': None,
+                'building_id': None
+            }
+        
+        return {
+            'prefecture': None,
+            'city': None,
+            'town': "",
+            'block': None,
+            'number': None,
+            'building_id': None
+        }
+        
+    except Exception as e:
+        logging.error(f"住所の分割中にエラー: {str(e)}")
+        return None
 
 def normalize_address(address):
     """
@@ -56,75 +178,6 @@ def normalize_address(address):
     address = address.translate(zen_to_han)
     
     return address
-
-def split_address(address):
-    """
-    住所文字列を都道府県、市区町村、町名、番地に分割する
-    
-    Args:
-        address (str): 分割する住所文字列
-        
-    Returns:
-        dict: 分割された住所情報
-    """
-    try:
-        # 住所を正規化
-        address = normalize_address(address)
-        
-        # 都道府県を抽出
-        prefecture_pattern = r'^(東京都|北海道|(?:京都|大阪)府|.+?県)'
-        prefecture_match = re.match(prefecture_pattern, address)
-        if not prefecture_match:
-            raise ValueError("都道府県が見つかりません")
-        prefecture = prefecture_match.group(1)
-        
-        # 都道府県を除去
-        remaining = address[len(prefecture):]
-        
-        # 市区町村を抽出
-        city_pattern = r'^(.+?[市区町村])'
-        city_match = re.match(city_pattern, remaining)
-        if not city_match:
-            raise ValueError("市区町村が見つかりません")
-        city = city_match.group(1)
-        
-        # 市区町村を除去
-        remaining = remaining[len(city):]
-        
-        # 町名を抽出（丁目まで含む）
-        town_pattern = r'^(.+?(?:丁目)?)'
-        town_match = re.match(town_pattern, remaining)
-        if not town_match:
-            raise ValueError("町名が見つかりません")
-        town = town_match.group(1)
-        
-        # 町名を除去
-        remaining = remaining[len(town):]
-        
-        # 番地と号を抽出
-        number_pattern = r'^(\d+(?:-\d+)*)'
-        number_match = re.match(number_pattern, remaining)
-        number = number_match.group(1) if number_match else ""
-        
-        # 丁目を抽出
-        block_pattern = r'(\d+)丁目'
-        block_match = re.search(block_pattern, town)
-        block = block_match.group(1) if block_match else ""
-        
-        # 丁目を除去
-        if block:
-            town = re.sub(r'\d+丁目', '', town)
-        
-        return {
-            'prefecture': prefecture,
-            'city': city,
-            'town': town,
-            'block': block,
-            'number': number
-        }
-    except Exception as e:
-        logging.error(f"住所の分割中にエラー: {str(e)}")
-        return None
 
 def is_address_match(input_address, candidate_address):
     """
@@ -188,12 +241,36 @@ def find_best_address_match(input_address, candidates):
     best_candidate = None
     best_similarity = -1
     
+    # 入力住所を分割
+    input_parts = split_address(input_address)
+    if not input_parts:
+        logging.error("入力住所の分割に失敗しました")
+        return None, -1
+        
+    # 基本住所を構築（番地と号を除く）
+    base_input_address = f"{input_parts['prefecture']}{input_parts['city']}{input_parts['town']}"
+    if input_parts['block']:
+        base_input_address += f"{input_parts['block']}丁目"
+    
+    logging.info(f"基本住所（比較用）: {base_input_address}")
+    
     for candidate in candidates:
         try:
             candidate_text = candidate.text.strip()
-            _, similarity = is_address_match(input_address, candidate_text)
+            # 候補の住所も分割して基本住所を取得
+            candidate_parts = split_address(candidate_text)
+            if not candidate_parts:
+                continue
+                
+            base_candidate_address = f"{candidate_parts['prefecture']}{candidate_parts['city']}{candidate_parts['town']}"
+            if candidate_parts['block']:
+                base_candidate_address += f"{candidate_parts['block']}丁目"
             
-            logging.info(f"候補 '{candidate_text}' の類似度: {similarity}")
+            # 基本住所での比較
+            _, similarity = is_address_match(base_input_address, base_candidate_address)
+            
+            logging.info(f"候補 '{candidate_text}' の基本住所: {base_candidate_address}")
+            logging.info(f"基本住所での類似度: {similarity}")
             
             if similarity > best_similarity:
                 best_similarity = similarity
@@ -263,7 +340,20 @@ def search_service_area(postal_code, address, progress_callback=None):
     """
     global global_driver
     
-    logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
+    # デバッグログ：入力値の確認
+    logging.info(f"=== 検索開始 ===")
+    logging.info(f"入力郵便番号（変換前）: {postal_code}")
+    logging.info(f"入力住所（変換前）: {address}")
+    
+    # 郵便番号と住所の正規化
+    try:
+        postal_code = normalize_address(postal_code)
+        address = normalize_address(address)
+        logging.info(f"正規化後郵便番号: {postal_code}")
+        logging.info(f"正規化後住所: {address}")
+    except Exception as e:
+        logging.error(f"正規化処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"住所の正規化に失敗しました: {str(e)}"}
     
     # 住所を分割
     if progress_callback:
@@ -271,7 +361,15 @@ def search_service_area(postal_code, address, progress_callback=None):
     
     address_parts = split_address(address)
     if not address_parts:
+        logging.error("住所の分割に失敗しました")
         return {"status": "error", "message": "住所の分割に失敗しました。"}
+        
+    # 基本住所を構築（番地と号を除く）
+    base_address = f"{address_parts['prefecture']}{address_parts['city']}{address_parts['town']}"
+    if address_parts['block']:
+        base_address += f"{address_parts['block']}丁目"
+    
+    logging.info(f"住所分割結果 - 基本住所: {base_address}, 番地: {address_parts['number']}")
     
     # 郵便番号のフォーマットチェック
     postal_code_clean = postal_code.replace("-", "")
@@ -337,8 +435,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         driver.get("https://flets.com/app_new/cao/")
         logging.info("サイトにアクセスしました")
         
-        # ページのHTMLをログに出力
-        logging.info(f"初期ページのHTML:\n{driver.page_source}")
+
         
         # 郵便番号入力ページが表示されるのを待つ
         # 郵便番号入力フィールドが表示されるまで待機
@@ -347,8 +444,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         )
         logging.info("郵便番号入力ページが表示されました")
         
-        # ページのHTMLをログに出力
-        logging.info(f"郵便番号入力ページのHTML:\n{driver.page_source}")
+
         
         # 郵便番号入力フィールドを探す
         try:
@@ -399,15 +495,14 @@ def search_service_area(postal_code, address, progress_callback=None):
             
             # 住所候補リストが表示されるまで待機
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "addressList"))
+                EC.presence_of_element_located((By.CLASS_NAME, "btn_list"))
             )
             logging.info("住所候補リストが表示されました")
             
-            # ページのHTMLをログに出力
-            logging.info(f"住所候補リストページのHTML:\n{driver.page_source}")
+
             
             # 候補リストを取得
-            candidates = driver.find_elements(By.CSS_SELECTOR, ".addressList li")
+            candidates = driver.find_elements(By.CSS_SELECTOR, ".btn_list li.addressInfo")
             logging.info(f"{len(candidates)} 件の候補が見つかりました")
             
             # 候補の内容をログ出力
@@ -429,166 +524,41 @@ def search_service_area(postal_code, address, progress_callback=None):
                 selected_address = best_candidate.text.strip()
                 logging.info(f"選択された住所: '{selected_address}' (類似度: {similarity})")
                 
-                # 選択された住所でクリックを実行
                 try:
-                    WebDriverWait(driver, 3).until(EC.element_to_be_clickable(best_candidate))
-                    best_candidate.click()
-                    logging.info("住所を選択しました")
-                except Exception as click_error:
-                    logging.warning(f"通常のクリックに失敗: {str(click_error)}")
-                    try:
-                        driver.execute_script("arguments[0].click();", best_candidate)
-                        logging.info("JavaScriptでクリックしました")
-                    except Exception as js_error:
-                        logging.warning(f"JavaScriptのクリックに失敗: {str(js_error)}")
-                        ActionChains(driver).move_to_element(best_candidate).click().perform()
-                        logging.info("ActionChainsでクリックしました")
+                    # JavaScriptを使用してクリックを実行
+                    driver.execute_script("arguments[0].click();", best_candidate)
+                    logging.info("JavaScriptを使用して住所を選択しました")
+                    
+                    # クリック後の待機
+                    time.sleep(2)
+                    
+                    # 番地入力画面への遷移を待機
+                    WebDriverWait(driver, 15).until(
+                        EC.url_contains("/cao/InputAddressNum")
+                    )
+                    logging.info("番地入力画面への遷移を確認しました")
+                    
+                    # ページの読み込み完了を待機
+                    WebDriverWait(driver, 20).until(
+                        lambda d: d.execute_script('return document.readyState') == 'complete'
+                    )
+                    logging.info("番地入力ページの読み込みが完了しました")
+                    
+                    if progress_callback:
+                        progress_callback("番地を入力中...")
+                    
+                    # 番地入力画面の処理に進む
+                    result = handle_address_number_input(driver, address_parts, progress_callback)
+                    logging.info(f"番地入力処理の結果: {result}")
+                    return result
+                    
+                except Exception as e:
+                    logging.error(f"住所選択処理に失敗: {str(e)}")
+                    driver.save_screenshot("debug_address_select_error.png")
+                    raise
             else:
                 logging.error(f"適切な住所候補が見つかりませんでした。入力住所: {address}")
                 raise ValueError("適切な住所候補が見つかりませんでした")
-            
-            # 番地入力ページが表示されるのを待つ
-            WebDriverWait(driver, 10).until(
-                EC.url_contains("InputAddressNum")
-            )
-            logging.info("番地入力ページが表示されました")
-            
-            # ページのHTMLをログに出力
-            logging.info(f"番地入力ページのHTML:\n{driver.page_source}")
-            
-            # 番地の有無を確認
-            try:
-                no_number_button = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.ID, "noNumberButton"))
-                )
-                if no_number_button.is_displayed():
-                    logging.info("番地なしボタンが見つかりました")
-                    
-                    # 番地なしボタンをクリック
-                    no_number_button.click()
-                    logging.info("番地なしボタンをクリックしました")
-                    
-                    # 戸建てを選択
-                    house_type_button = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.ID, "houseTypeButton"))
-                    )
-                    house_type_button.click()
-                    logging.info("戸建てを選択しました")
-                    
-                    # 次へボタンをクリック
-                    next_button = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.ID, "nextButton"))
-                    )
-                    next_button.click()
-                    logging.info("次へボタンをクリックしました")
-            except Exception as e:
-                logging.info("番地なしボタンが見つからないため、番地入力を行います")
-                
-                # 番地を入力
-                if address_parts['number']:
-                    number_parts = address_parts['number'].split('-')
-                    
-                    # 番地1を入力
-                    try:
-                        number1_input = WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.NAME, "number1"))
-                        )
-                        number1_input.clear()
-                        number1_input.send_keys(number_parts[0])
-                        logging.info(f"番地1を入力: {number_parts[0]}")
-                    except Exception as e:
-                        logging.error(f"番地1の入力に失敗: {str(e)}")
-                        raise
-                    
-                    # 番地2を入力（存在する場合）
-                    if len(number_parts) > 1:
-                        try:
-                            number2_input = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.NAME, "number2"))
-                            )
-                            number2_input.clear()
-                            number2_input.send_keys(number_parts[1])
-                            logging.info(f"番地2を入力: {number_parts[1]}")
-                        except Exception as e:
-                            logging.error(f"番地2の入力に失敗: {str(e)}")
-                            raise
-                    
-                    # 番地3を入力（存在する場合）
-                    if len(number_parts) > 2:
-                        try:
-                            number3_input = WebDriverWait(driver, 5).until(
-                                EC.presence_of_element_located((By.NAME, "number3"))
-                            )
-                            number3_input.clear()
-                            number3_input.send_keys(number_parts[2])
-                            logging.info(f"番地3を入力: {number_parts[2]}")
-                        except Exception as e:
-                            logging.error(f"番地3の入力に失敗: {str(e)}")
-                            raise
-                
-                # 戸建てを選択
-                house_type_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.ID, "houseTypeButton"))
-                )
-                house_type_button.click()
-                logging.info("戸建てを選択しました")
-                
-                # 次へボタンをクリック
-                next_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.ID, "nextButton"))
-                )
-                next_button.click()
-                logging.info("次へボタンをクリックしました")
-            
-            # 建物選択ページが表示されるか確認
-            try:
-                WebDriverWait(driver, 5).until(
-                    EC.url_contains("SelectBuild1")
-                )
-                logging.info("建物選択ページが表示されました")
-                
-                # ページのHTMLをログに出力
-                logging.info(f"建物選択ページのHTML:\n{driver.page_source}")
-                
-                # 建物候補が表示されるのを待つ
-                WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "buildingList"))
-                )
-                
-                # 建物候補を取得
-                building_candidates = driver.find_elements(By.CSS_SELECTOR, ".buildingList li")
-                
-                if building_candidates:
-                    # 最初の建物を選択
-                    building_candidates[0].click()
-                    logging.info("建物を選択しました")
-                else:
-                    logging.info("建物候補が見つかりませんでした")
-            except TimeoutException:
-                logging.info("建物選択ページは表示されませんでした")
-            
-            # 結果ページが表示されるのを待つ
-            WebDriverWait(driver, 10).until(
-                EC.url_contains("ProvideResult")
-            )
-            logging.info("結果ページが表示されました")
-            
-            # ページのHTMLをログに出力
-            logging.info(f"結果ページのHTML:\n{driver.page_source}")
-            
-            # 結果を取得
-            try:
-                result_text = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "resultText"))
-                ).text
-                
-                if "提供エリアです" in result_text:
-                    return {"status": "success", "message": "提供エリアです"}
-                else:
-                    return {"status": "error", "message": "提供エリア外です"}
-            except Exception as e:
-                logging.error(f"結果の取得に失敗: {str(e)}")
-                return {"status": "error", "message": "結果の取得に失敗しました"}
             
         except Exception as e:
             logging.error(f"住所選択処理中にエラー: {str(e)}")
@@ -606,3 +576,358 @@ def search_service_area(postal_code, address, progress_callback=None):
                 logging.info("ブラウザを終了しました")
             except Exception as e:
                 logging.warning(f"ブラウザの終了中にエラー: {str(e)}") 
+
+def find_input_element(driver, attempt_count=0):
+    """
+    番地入力フォームを見つけるためのヘルパー関数
+    
+    Args:
+        driver: WebDriverインスタンス
+        attempt_count: 試行回数
+        
+    Returns:
+        element: 見つかった要素、見つからない場合はNone
+    """
+    try:
+        # iframeの確認
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        if iframes:
+            for iframe in iframes:
+                try:
+                    driver.switch_to.frame(iframe)
+                    element = driver.find_element(By.NAME, "banchi1to3manualAddressNum1")
+                    if element.is_displayed():
+                        return element
+                except:
+                    pass
+                finally:
+                    driver.switch_to.default_content()
+        
+        # 複数の方法で要素を探す
+        selectors = [
+            (By.NAME, "banchi1to3manualAddressNum1"),
+            (By.ID, "id_banchi1to3manualAddressNum1"),
+            (By.CSS_SELECTOR, "input[name='banchi1to3manualAddressNum1']"),
+            (By.CSS_SELECTOR, "input[type='tel'][name='banchi1to3manualAddressNum1']"),
+            (By.XPATH, "//input[@name='banchi1to3manualAddressNum1']"),
+            (By.XPATH, "//div[contains(@class, '_input')]//input[1]")
+        ]
+        
+        for by, selector in selectors:
+            try:
+                element = driver.find_element(by, selector)
+                if element.is_displayed():
+                    return element
+            except:
+                continue
+        
+        return None
+    except Exception as e:
+        logging.warning(f"要素検索中にエラー: {str(e)}")
+        return None
+
+def debug_page_state(driver, context=""):
+    """
+    ページの状態をデバッグ出力する
+    
+    Args:
+        driver: WebDriverインスタンス
+        context: デバッグコンテキストの説明
+    """
+    try:
+        logging.info(f"=== デバッグ情報（{context}）===")
+        logging.info(f"現在のURL: {driver.current_url}")
+        logging.info(f"ページタイトル: {driver.title}")
+        
+        # ページの読み込み状態
+        ready_state = driver.execute_script('return document.readyState')
+        logging.info(f"ページの読み込み状態: {ready_state}")
+        
+        # DOMの準備状態
+        is_dom_loaded = driver.execute_script('return document.readyState === "complete" || document.readyState === "interactive"')
+        logging.info(f"DOMの準備完了: {is_dom_loaded}")
+        
+        # iframeの確認
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        logging.info(f"iframe数: {len(iframes)}")
+        
+        # エラーメッセージの確認
+        error_elements = driver.find_elements(By.CLASS_NAME, "error")
+        if error_elements:
+            logging.info("エラーメッセージが見つかりました:")
+            for error in error_elements:
+                logging.info(f"エラー: {error.text}")
+        
+        # スクリーンショットを保存
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        screenshot_path = f"debug_screenshot_{context}_{timestamp}.png"
+        driver.save_screenshot(screenshot_path)
+        logging.info(f"スクリーンショットを保存: {screenshot_path}")
+        
+    except Exception as e:
+        logging.error(f"デバッグ情報の取得中にエラー: {str(e)}")
+
+def handle_address_number_input(driver, address_parts, progress_callback=None):
+    """
+    番地入力画面の処理を行う
+    
+    Args:
+        driver: WebDriverインスタンス
+        address_parts: 分割された住所情報
+        progress_callback: 進捗コールバック関数
+    """
+    try:
+        # ブラウザ設定を読み込む（show_popup用）
+        show_popup = True  # デフォルト値
+        try:
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                    browser_settings = settings.get("browser_settings", {})
+                    show_popup = browser_settings.get("show_popup", True)
+                    logging.info(f"ポップアップ表示設定を読み込みました: {show_popup}")
+        except Exception as e:
+            logging.warning(f"ブラウザ設定の読み込みに失敗しました: {str(e)}")
+
+        logging.info("=== 番地入力画面の処理開始 ===")
+        debug_page_state(driver, "番地入力画面_初期状態")
+
+        # ページ読み込み完了まで待機
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "id_form_main"))
+        )
+        debug_page_state(driver, "番地入力画面_読み込み完了後")
+        
+ 
+
+        # 番地がない場合のチェックボックス処理
+        if not address_parts.get('number'):
+            logging.info("番地が指定されていないため、「番地・号が無い」をチェック")
+            try:
+                checkbox = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "id_banchi1to3Fixed"))
+                )
+                if not checkbox.is_selected():
+                    driver.execute_script("arguments[0].click();", checkbox)
+                logging.info("「番地・号が無い」をチェックしました")
+                
+
+            except Exception as e:
+                logging.error(f"「番地・号が無い」チェックボックスの操作に失敗: {str(e)}")
+                debug_page_state(driver, "チェックボックス操作_失敗")
+                raise
+        else:
+            # 番地入力フィールドの処理
+            number_parts = address_parts['number'].split('-')
+            logging.info(f"入力する番地: {number_parts}")
+
+            try:
+                # 番地1の入力
+                number1_input = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.ID, "id_banchi1to3manualAddressNum1"))
+                )
+                # フォーカスを設定してからクリア
+                driver.execute_script("arguments[0].focus();", number1_input)
+                number1_input.clear()
+                number1_input.send_keys(number_parts[0])
+                logging.info(f"番地1を入力: {number_parts[0]}")
+
+                # 番地2の入力（存在する場合）
+                if len(number_parts) > 1:
+                    number2_input = driver.find_element(By.ID, "id_banchi1to3manualAddressNum2")
+                    driver.execute_script("arguments[0].focus();", number2_input)
+                    number2_input.clear()
+                    number2_input.send_keys(number_parts[1])
+                    logging.info(f"番地2を入力: {number_parts[1]}")
+
+                # 番地3の入力（存在する場合）
+                if len(number_parts) > 2:
+                    number3_input = driver.find_element(By.ID, "id_banchi1to3manualAddressNum3")
+                    driver.execute_script("arguments[0].focus();", number3_input)
+                    number3_input.clear()
+                    number3_input.send_keys(number_parts[2])
+                    logging.info(f"番地3を入力: {number_parts[2]}")
+                
+
+
+            except Exception as e:
+                logging.error(f"番地入力に失敗: {str(e)}")
+                debug_page_state(driver, "番地入力_失敗")
+                raise
+
+        # 住居タイプの選択（デフォルトで戸建てを選択）
+        try:
+            house_type = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, "id_buildType_1"))
+            )
+            if not house_type.is_selected():
+                driver.execute_script("arguments[0].click();", house_type)
+            logging.info("住居タイプ: 戸建てを選択")
+            
+
+
+            # 次へボタンをクリック
+            next_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.ID, "id_nextButton"))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", next_button)
+            time.sleep(1)  # スクロール完了を待つ
+            driver.execute_script("arguments[0].click();", next_button)
+            logging.info("次へボタンをクリックしました")
+
+
+
+        except Exception as e:
+            logging.error(f"住居タイプの選択または次へボタンのクリックに失敗: {str(e)}")
+            debug_page_state(driver, "住居タイプ選択_次へボタン_失敗")
+            raise
+
+        # 結果ページへの遷移を待機
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.url_contains("ProvideResult")
+            )
+            logging.info("結果ページへ遷移しました")
+            
+
+            
+            debug_page_state(driver, "結果ページ_表示")
+
+            # 結果テキストの取得を修正
+            try:
+                # まず、ローディング表示が消えるのを待つ
+                WebDriverWait(driver, 10).until_not(
+                    EC.presence_of_element_located((By.CLASS_NAME, "loading"))
+                )
+                
+                # 結果テキストを取得（複数の方法で試行）
+                result_text = None
+                
+                # 結果テキストの取得方法を追加
+                selectors = [
+                    (By.XPATH, "//div[contains(@class, 'main_wrap')]//h1/following-sibling::div"),
+                    (By.CLASS_NAME, "resultText"),
+                    (By.XPATH, "//div[contains(text(), 'フレッツ光') and contains(text(), 'エリア')]"),
+                    (By.XPATH, "//div[contains(@class, 'main_wrap')]//div[contains(text(), 'エリア')]"),
+                    (By.XPATH, "//h1[contains(text(), 'エリア')]"),
+                    (By.XPATH, "//div[contains(@class, 'result')]"),
+                    (By.XPATH, "//div[contains(@class, 'main_wrap')]//div[not(@class)]")
+                ]
+
+                for selector_type, selector in selectors:
+                    try:
+                        element = WebDriverWait(driver, 3).until(
+                            EC.presence_of_element_located((selector_type, selector))
+                        )
+                        if element and element.is_displayed():
+                            result_text = element.text.strip()
+                            logging.info(f"結果テキストを取得: {result_text} (セレクター: {selector})")
+                            if result_text:
+                                break
+                    except Exception as e:
+                        logging.debug(f"セレクター {selector} での検索に失敗: {str(e)}")
+                        continue
+
+                # 結果が見つからない場合、ページ全体のテキストから判定
+                if not result_text:
+                    logging.info("個別の要素での結果テキスト取得に失敗。ページ全体から検索を試みます。")
+                    page_text = driver.find_element(By.TAG_NAME, "body").text
+                    if "提供エリアです" in page_text:
+                        result_text = "提供エリアです"
+                        logging.info("ページテキストから「提供エリアです」を検出")
+                    elif "提供エリア外です" in page_text:
+                        result_text = "提供エリア外です"
+                        logging.info("ページテキストから「提供エリア外です」を検出")
+
+                logging.info(f"最終的な結果テキスト: {result_text}")
+
+                # スクリーンショットを保存
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                
+                if result_text:
+                    if "提供エリアです" in result_text or "の提供エリアです" in result_text:
+                        screenshot_path = f"debug_available_confirmation_{timestamp}.png"
+                        driver.save_screenshot(screenshot_path)
+                        return {
+                            "status": "available",
+                            "message": "提供可能",
+                            "details": {
+                                "判定結果": "OK",
+                                "提供エリア": "提供可能エリアです",
+                                "備考": "フレッツ光のサービスがご利用いただけます"
+                            },
+                            "screenshot": screenshot_path,
+                            "show_popup": show_popup
+                        }
+                    elif "提供エリア外です" in result_text or "エリア外" in result_text:
+                        screenshot_path = f"debug_not_provided_confirmation_{timestamp}.png"
+                        driver.save_screenshot(screenshot_path)
+                        return {
+                            "status": "unavailable",
+                            "message": "未提供",
+                            "details": {
+                                "判定結果": "NG",
+                                "提供エリア": "提供対象外エリアです",
+                                "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
+                            },
+                            "screenshot": screenshot_path,
+                            "show_popup": show_popup
+                        }
+                    else:
+                        screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
+                        driver.save_screenshot(screenshot_path)
+                        logging.warning(f"予期しない結果テキスト: {result_text}")
+                        return {
+                            "status": "failure",
+                            "message": "判定失敗",
+                            "details": {
+                                "判定結果": "判定失敗",
+                                "提供エリア": "調査が必要なエリアです",
+                                "備考": "住所を特定できないため、担当者がお調べします"
+                            },
+                            "screenshot": screenshot_path,
+                            "show_popup": show_popup
+                        }
+                else:
+
+                    
+                    screenshot_path = f"debug_error_confirmation_{timestamp}.png"
+                    driver.save_screenshot(screenshot_path)
+                    logging.error("結果テキストが取得できませんでした")
+                    return {
+                        "status": "failure",
+                        "message": "判定失敗",
+                        "details": {
+                            "判定結果": "判定失敗",
+                            "提供エリア": "判定できませんでした",
+                            "備考": "結果テキストが取得できませんでした"
+                        },
+                        "screenshot": screenshot_path,
+                        "show_popup": show_popup
+                    }
+
+            except Exception as e:
+                screenshot_path = f"debug_error_confirmation_{timestamp}.png"
+                driver.save_screenshot(screenshot_path)
+                logging.error(f"結果テキストの取得中にエラー: {str(e)}")
+                return {
+                    "status": "failure",
+                    "message": "判定失敗",
+                    "details": {
+                        "判定結果": "判定失敗",
+                        "提供エリア": "判定できませんでした",
+                        "備考": f"結果の判定に失敗しました: {str(e)}"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": show_popup
+                }
+
+        except Exception as e:
+            logging.error(f"結果の取得に失敗: {str(e)}")
+            debug_page_state(driver, "結果取得_失敗")
+            return {"status": "error", "message": "結果の取得に失敗しました"}
+
+    except Exception as e:
+        logging.error(f"番地入力画面の処理中にエラー: {str(e)}")
+        debug_page_state(driver, "エラー発生時の状態")
+        raise 
