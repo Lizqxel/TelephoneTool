@@ -422,12 +422,16 @@ ND：
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
             
-            # モードが変更された場合、UIを再構築（安全な方法で処理）
+            # モードが変更された場合、UIを再構築
             if previous_mode != new_mode and hasattr(self.parent(), 'current_mode'):
                 self.parent().current_mode = new_mode
-                # モード変更フラグを設定（ダイアログが閉じた後でUIを再構築するため）
+                # モード変更フラグを設定
                 self.parent().mode_changed = True
                 self.parent().new_mode = new_mode
+                
+                # 親ウィンドウのUIを再構築
+                if hasattr(self.parent(), 'reconstruct_ui'):
+                    self.parent().reconstruct_ui()
             
             return True
         except Exception as e:
