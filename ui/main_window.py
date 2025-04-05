@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QSizePolicy, QProgressBar, QListView)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
@@ -1252,18 +1252,37 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
         # プログレスバー（初期状態では非表示）
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # 不定のプログレスバー
-        self.progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
+        self.progress_bar.setRange(0, 100)  # 0-100%の範囲に設定
+        self.progress_bar.setValue(0)  # 初期値を0%に設定
+        self.progress_bar.setFixedHeight(10)  # 高さを10ピクセルに設定
+        self.progress_bar.setTextVisible(True)  # テキストを表示
+        self.progress_bar.setFormat("%p%")  # パーセント表示
+        
+        # アニメーションの設定
+        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
+        self.progress_animation.setDuration(200)  # 200ミリ秒でアニメーション
+        self.progress_animation.setEasingCurve(QEasingCurve.InOutQuad)  # イージング効果を追加
+        
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
                 background-color: #E3F2FD;
+                border-radius: 5px;
+                text-align: center;
+                font-size: 10px;
+                padding: 2px;
             }
             QProgressBar::chunk {
                 background-color: #3498DB;
+                border-radius: 5px;
+                width: 10px; /* チャンクの最小幅を設定 */
+                margin: 0px;
+            }
+            QProgressBar::chunk:hover {
+                background-color: #2980B9;
             }
         """)
-        self.progress_bar.hide()  # 初期状態では非表示
+
         area_result_layout.addWidget(self.progress_bar)
 
         address_layout.addWidget(area_result_container)
@@ -2137,6 +2156,30 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             logging.error(f"UIの再構築中にエラーが発生しました: {e}")
             QMessageBox.critical(self, "エラー", f"UIの再構築中にエラーが発生しました: {str(e)}")
 
+    def update_search_progress(self, message):
+        """検索の進捗状況を更新する"""
+        try:
+            # メッセージからパーセンテージを抽出
+            import re
+            match = re.search(r'\((\d+)%\)', message)
+            if match:
+                new_value = int(match.group(1))
+                current_value = self.progress_bar.value()
+                
+                # アニメーションの設定
+                self.progress_animation.setStartValue(current_value)
+                self.progress_animation.setEndValue(new_value)
+                self.progress_animation.start()
+                
+            # プログレスバーとメッセージを表示
+            self.progress_bar.setVisible(True)
+            self.area_result_label.setText(message)
+            self.area_result_label.setStyleSheet("color: #666666;")
+            
+        except Exception as e:
+            logging.error(f"進捗更新中にエラー: {str(e)}")
+            self.area_result_label.setText(message)
+
 
 class ServiceAreaSearchWorker(QObject):
     """
@@ -2150,43 +2193,100 @@ class ServiceAreaSearchWorker(QObject):
         self.postal_code = postal_code
         self.address = address
         self._is_cancelled = False
+        self._progress_steps = [
+            {"message": "住所情報を解析中...", "weight": 5},
+            {"message": "NTT西日本のサイトにアクセス中...", "weight": 10},
+            {"message": "郵便番号を入力中...", "weight": 15},
+            {"message": "住所を選択中...", "weight": 20},
+            {"message": "番地を入力中...", "weight": 20},
+            {"message": "号を入力中...", "weight": 20},
+            {"message": "提供可否を判定中...", "weight": 10}
+        ]
+        self._current_step = 0
+        self._total_weight = sum(step["weight"] for step in self._progress_steps)
+        self._accumulated_progress = 0
     
     def cancel(self):
-        """
-        検索をキャンセルする
-        """
+        """検索をキャンセルする"""
         self._is_cancelled = True
     
+    def _update_progress(self, message=None):
+        """
+        進捗状況を更新する
+        
+        Args:
+            message (str, optional): カスタムメッセージ。指定がない場合は定義済みメッセージを使用
+        """
+        try:
+            if message is None and self._current_step < len(self._progress_steps):
+                step_info = self._progress_steps[self._current_step]
+                message = step_info["message"]
+                # 現在のステップの重みに基づいて進捗を計算
+                self._accumulated_progress += step_info["weight"]
+            elif message:
+                # メッセージに含まれるパーセンテージを抽出
+                import re
+                percent_match = re.search(r'(\d+)%', message)
+                if percent_match:
+                    self._accumulated_progress = int(percent_match.group(1))
+                else:
+                    # メッセージにパーセンテージが含まれていない場合は、次のステップに進む
+                    if self._current_step < len(self._progress_steps):
+                        self._accumulated_progress += self._progress_steps[self._current_step]["weight"]
+            
+            # 進捗率を計算（最大95%まで）
+            progress_percent = min(int((self._accumulated_progress / self._total_weight) * 95), 95)
+            
+            # 進捗メッセージを生成
+            if "%" not in message:
+                message = f"{message} ({progress_percent}%)"
+            
+            self._current_step += 1
+            self.progress.emit(message)
+            
+        except Exception as e:
+            logging.error(f"進捗更新中にエラー: {e}")
+            self.progress.emit(f"{message} (進捗更新エラー)")
+    
     def run(self):
-        """
-        提供エリア検索を実行し、結果をシグナルで通知する
-        """
+        """提供エリア検索を実行し、結果をシグナルで通知する"""
         try:
             # 進捗状況を通知するコールバック関数を定義
             def progress_callback(message):
                 if self._is_cancelled:
                     raise CancellationError("検索がキャンセルされました")
-                self.progress.emit(message)
+                self._update_progress(message)
 
             # 検索を実行
+            self._update_progress()  # 初期進捗を表示
             result = search_service_area(
                 self.postal_code,
                 self.address,
                 progress_callback=progress_callback
             )
+            
             if self._is_cancelled:
                 raise CancellationError("検索がキャンセルされました")
+            
+            # 検索完了時に100%を表示
+            if result.get("status") == "available":
+                self.progress.emit("提供可能です (100%)")
+            elif result.get("status") == "unavailable":
+                self.progress.emit("提供不可です (100%)")
+            else:
+                self.progress.emit("検索が完了しました (100%)")
             self.finished.emit(result)
+            
         except CancellationError as e:
             logging.info("検索がキャンセルされました")
-            self.progress.emit("検索がキャンセルされました")
+            self.progress.emit("検索がキャンセルされました (0%)")
             self.finished.emit({
                 "status": "cancelled",
                 "message": "検索がキャンセルされました"
             })
         except Exception as e:
             logging.error(f"検索処理中にエラーが発生: {str(e)}")
-            self.progress.emit("エラーが発生しました")
+            self.progress.emit("エラーが発生しました (0%)")
             self.finished.emit({
                 "status": "error",
                 "message": f"検索処理中にエラーが発生: {str(e)}"
@@ -2244,71 +2344,45 @@ class CancellationError(Exception):
             # データの初期化
             data = {}
             
-            # 誘導モードの場合
-            if self.current_mode != 'simple':
-                logging.info("誘導モードでのプレビュー生成")
-                # 各ダイアログのデータを取得
-                address_data = getattr(self, 'address_data', {})
-                list_data = getattr(self, 'list_data', {})
-                orderer_data = getattr(self, 'orderer_data', {})
-                order_data = getattr(self, 'order_data', {})
-                
-                logging.info(f"住所データ: {address_data}")
-                logging.info(f"リストデータ: {list_data}")
-                logging.info(f"受注者データ: {orderer_data}")
-                logging.info(f"注文データ: {order_data}")
-                
-                # データを統合
-                data.update(address_data or {})
-                data.update(list_data or {})
-                data.update(orderer_data or {})
-                data.update(order_data or {})
-                
-                # デフォルト値の設定
-                if not data.get('current_line'):
-                    data['current_line'] = 'アナログ'
-                
-                if not data.get('order_date'):
-                    now = datetime.datetime.now()
-                    data['order_date'] = f"{now.month}/{now.day}"
-                
-                if not data.get('judgment'):
-                    data['judgment'] = order_data.get('judgment', 'OK') if order_data else 'OK'
+            # 各入力フィールドからデータを取得し、末尾のスペースを削除
+            if hasattr(self, 'operator_input'):
+                data['operator'] = self.operator_input.text().rstrip()
+            if hasattr(self, 'available_time_input'):
+                data['available_time'] = self.available_time_input.text().rstrip()
+            if hasattr(self, 'contractor_input'):
+                data['contractor'] = self.contractor_input.text().rstrip()
+            if hasattr(self, 'furigana_input'):
+                data['furigana'] = self.furigana_input.text().rstrip()
+            if hasattr(self, 'postal_code_input'):
+                data['postal_code'] = self.postal_code_input.text().rstrip()
+            if hasattr(self, 'address_input'):
+                data['address'] = self.address_input.text().rstrip()
+            if hasattr(self, 'list_name_input'):
+                data['list_name'] = self.list_name_input.text().rstrip()
+            if hasattr(self, 'list_furigana_input'):
+                data['list_furigana'] = self.list_furigana_input.text().rstrip()
+            if hasattr(self, 'list_phone_input'):
+                data['list_phone'] = self.list_phone_input.text().rstrip()
+            if hasattr(self, 'list_postal_code_input'):
+                data['list_postal_code'] = self.list_postal_code_input.text().rstrip()
+            if hasattr(self, 'list_address_input'):
+                data['list_address'] = self.list_address_input.text().rstrip()
+            if hasattr(self, 'order_person_input'):
+                data['order_person'] = self.order_person_input.text().rstrip()
+            if hasattr(self, 'fee_input'):
+                data['fee'] = self.fee_input.text().rstrip()
+            if hasattr(self, 'nd_input'):
+                data['nd'] = self.nd_input.text().rstrip()
+            if hasattr(self, 'relationship_input'):
+                data['relationship'] = self.relationship_input.text().rstrip()
             
-            # シンプルモードの場合
-            else:
-                logging.info("シンプルモードでのプレビュー生成")
-                # 入力フィールドからデータを取得
-                data = {
-                    'operator': self.operator_input.text(),
-                    'available_time': self.available_time_input.text(),
-                    'contractor': self.contractor_input.text(),
-                    'furigana': self.furigana_input.text(),
-                    'era': self.era_combo.currentText(),
-                    'year': self.year_combo.currentText(),
-                    'month': self.month_combo.currentText(),
-                    'day': self.day_combo.currentText(),
-                    'order_person': self.order_person_input.text(),
-                    'employee_number': '',  # 社番は空で初期化
-                    'fee': self.fee_input.text(),
-                    'net_usage': self.net_usage_combo.currentText(),
-                    'family_approval': self.family_approval_combo.currentText(),
-                    'other_number': self.other_number_input.text(),
-                    'phone_device': self.phone_device_input.text(),
-                    'forbidden_line': self.forbidden_line_input.text(),
-                    'nd': self.nd_input.text(),
-                    'relationship': self.relationship_input.text(),
-                    'postal_code': self.postal_code_input.text(),
-                    'address': self.address_input.text(),
-                    'list_name': self.list_name_input.text(),
-                    'list_furigana': self.list_furigana_input.text(),
-                    'list_phone': self.list_phone_input.text(),
-                    'list_postal_code': self.list_postal_code_input.text(),
-                    'list_address': self.list_address_input.text(),
-                    'current_line': self.current_line_combo.currentText(),
-                    'order_date': self.order_date_input.text(),
-                    'judgment': self.judgment_combo.currentText()
-                }
+            # コンボボックスからデータを取得
+            if hasattr(self, 'current_line_combo'):
+                data['current_line'] = self.current_line_combo.currentText().rstrip()
+            if hasattr(self, 'order_date_input'):
+                data['order_date'] = self.order_date_input.text().rstrip()
+            if hasattr(self, 'judgment_combo'):
+                data['judgment'] = self.judgment_combo.currentText().rstrip()
             
             # データが空の場合はエラー
             if not data:
