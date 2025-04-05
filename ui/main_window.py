@@ -1252,15 +1252,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
         # プログレスバー（初期状態では非表示）
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # 不定のプログレスバー
-        self.progress_bar.setFixedHeight(2)  # 高さを2ピクセルに設定
+        self.progress_bar.setRange(0, 100)  # 0-100%の範囲に設定
+        self.progress_bar.setValue(0)  # 初期値を0%に設定
+        self.progress_bar.setFixedHeight(10)  # 高さを10ピクセルに設定（以前は6ピクセル）
+        self.progress_bar.setTextVisible(True)  # テキストを表示
+        self.progress_bar.setFormat("%p%")  # パーセント表示
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 border: none;
                 background-color: #E3F2FD;
+                border-radius: 5px;
+                text-align: center;
+                font-size: 10px;
+                padding: 2px;
             }
             QProgressBar::chunk {
                 background-color: #3498DB;
+                border-radius: 5px;
             }
         """)
         self.progress_bar.hide()  # 初期状態では非表示
@@ -2137,6 +2145,32 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             logging.error(f"UIの再構築中にエラーが発生しました: {e}")
             QMessageBox.critical(self, "エラー", f"UIの再構築中にエラーが発生しました: {str(e)}")
 
+    def update_search_progress(self, message):
+        """
+        検索の進捗状況を更新する
+        
+        Args:
+            message (str): 進捗メッセージ
+        """
+        # メッセージから進捗率を抽出（例: "検索中... (50%)"）
+        progress_match = re.search(r'(\d+)%', message)
+        if progress_match:
+            progress = int(progress_match.group(1))
+            self.progress_bar.setValue(progress)
+        
+        self.area_result_label.setText(f"提供エリア: {message}")
+        self.area_result_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #3498DB;
+                border-radius: 4px;
+                background-color: #E3F2FD;
+                color: #2980B9;
+            }
+        """)
+        QApplication.processEvents()
+
 
 class ServiceAreaSearchWorker(QObject):
     """
@@ -2150,43 +2184,100 @@ class ServiceAreaSearchWorker(QObject):
         self.postal_code = postal_code
         self.address = address
         self._is_cancelled = False
+        self._progress_steps = [
+            {"message": "住所情報を解析中...", "weight": 5},
+            {"message": "NTT西日本のサイトにアクセス中...", "weight": 10},
+            {"message": "郵便番号を入力中...", "weight": 15},
+            {"message": "住所を選択中...", "weight": 20},
+            {"message": "番地を入力中...", "weight": 20},
+            {"message": "号を入力中...", "weight": 20},
+            {"message": "提供可否を判定中...", "weight": 10}
+        ]
+        self._current_step = 0
+        self._total_weight = sum(step["weight"] for step in self._progress_steps)
+        self._accumulated_progress = 0
     
     def cancel(self):
-        """
-        検索をキャンセルする
-        """
+        """検索をキャンセルする"""
         self._is_cancelled = True
     
+    def _update_progress(self, message=None):
+        """
+        進捗状況を更新する
+        
+        Args:
+            message (str, optional): カスタムメッセージ。指定がない場合は定義済みメッセージを使用
+        """
+        try:
+            if message is None and self._current_step < len(self._progress_steps):
+                step_info = self._progress_steps[self._current_step]
+                message = step_info["message"]
+                # 現在のステップの重みに基づいて進捗を計算
+                self._accumulated_progress += step_info["weight"]
+            elif message:
+                # メッセージに含まれるパーセンテージを抽出
+                import re
+                percent_match = re.search(r'(\d+)%', message)
+                if percent_match:
+                    self._accumulated_progress = int(percent_match.group(1))
+                else:
+                    # メッセージにパーセンテージが含まれていない場合は、次のステップに進む
+                    if self._current_step < len(self._progress_steps):
+                        self._accumulated_progress += self._progress_steps[self._current_step]["weight"]
+            
+            # 進捗率を計算（最大95%まで）
+            progress_percent = min(int((self._accumulated_progress / self._total_weight) * 95), 95)
+            
+            # 進捗メッセージを生成
+            if "%" not in message:
+                message = f"{message} ({progress_percent}%)"
+            
+            self._current_step += 1
+            self.progress.emit(message)
+            
+        except Exception as e:
+            logging.error(f"進捗更新中にエラー: {e}")
+            self.progress.emit(f"{message} (進捗更新エラー)")
+    
     def run(self):
-        """
-        提供エリア検索を実行し、結果をシグナルで通知する
-        """
+        """提供エリア検索を実行し、結果をシグナルで通知する"""
         try:
             # 進捗状況を通知するコールバック関数を定義
             def progress_callback(message):
                 if self._is_cancelled:
                     raise CancellationError("検索がキャンセルされました")
-                self.progress.emit(message)
+                self._update_progress(message)
 
             # 検索を実行
+            self._update_progress()  # 初期進捗を表示
             result = search_service_area(
                 self.postal_code,
                 self.address,
                 progress_callback=progress_callback
             )
+            
             if self._is_cancelled:
                 raise CancellationError("検索がキャンセルされました")
+            
+            # 検索完了時に100%を表示
+            if result.get("status") == "available":
+                self.progress.emit("提供可能です (100%)")
+            elif result.get("status") == "unavailable":
+                self.progress.emit("提供不可です (100%)")
+            else:
+                self.progress.emit("検索が完了しました (100%)")
             self.finished.emit(result)
+            
         except CancellationError as e:
             logging.info("検索がキャンセルされました")
-            self.progress.emit("検索がキャンセルされました")
+            self.progress.emit("検索がキャンセルされました (0%)")
             self.finished.emit({
                 "status": "cancelled",
                 "message": "検索がキャンセルされました"
             })
         except Exception as e:
             logging.error(f"検索処理中にエラーが発生: {str(e)}")
-            self.progress.emit("エラーが発生しました")
+            self.progress.emit("エラーが発生しました (0%)")
             self.finished.emit({
                 "status": "error",
                 "message": f"検索処理中にエラーが発生: {str(e)}"
