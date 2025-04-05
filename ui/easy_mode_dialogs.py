@@ -1080,6 +1080,11 @@ class OrdererInputDialog(QDialog):
             self.saved_data = self.get_orderer_data()
             logging.info(f"受注者データを取得: {self.saved_data}")
             
+            # 各フィールドの文末スペースを削除
+            for key in self.saved_data:
+                if isinstance(self.saved_data[key], str):
+                    self.saved_data[key] = self.saved_data[key].rstrip()
+            
             # 生年月日を正しいフォーマットに変換（YYYY/M/D形式）
             if 'birth_date' in self.saved_data:
                 birth_parts = self.saved_data['birth_date'].split('/')
