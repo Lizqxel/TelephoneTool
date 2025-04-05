@@ -658,12 +658,6 @@ def debug_page_state(driver, context=""):
             for error in error_elements:
                 logging.info(f"エラー: {error.text}")
         
-        # スクリーンショットを保存
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        screenshot_path = f"debug_screenshot_{context}_{timestamp}.png"
-        driver.save_screenshot(screenshot_path)
-        logging.info(f"スクリーンショットを保存: {screenshot_path}")
-        
     except Exception as e:
         logging.error(f"デバッグ情報の取得中にエラー: {str(e)}")
 
@@ -698,7 +692,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
         )
         debug_page_state(driver, "番地入力画面_読み込み完了後")
         
- 
+
 
         # 番地がない場合のチェックボックス処理
         if not address_parts.get('number'):
@@ -748,7 +742,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                     number3_input.send_keys(number_parts[2])
                     logging.info(f"番地3を入力: {number_parts[2]}")
                 
-
+      
 
             except Exception as e:
                 logging.error(f"番地入力に失敗: {str(e)}")
@@ -776,7 +770,6 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
             logging.info("次へボタンをクリックしました")
 
 
-
         except Exception as e:
             logging.error(f"住居タイプの選択または次へボタンのクリックに失敗: {str(e)}")
             debug_page_state(driver, "住居タイプ選択_次へボタン_失敗")
@@ -789,7 +782,6 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
             )
             logging.info("結果ページへ遷移しました")
             
-
             
             debug_page_state(driver, "結果ページ_表示")
 
@@ -841,7 +833,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
 
                 logging.info(f"最終的な結果テキスト: {result_text}")
 
-                # スクリーンショットを保存
+                # スクリーンショットを保存（結果確認時のみ）
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 
                 if result_text:
