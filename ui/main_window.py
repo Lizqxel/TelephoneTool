@@ -2244,71 +2244,45 @@ class CancellationError(Exception):
             # データの初期化
             data = {}
             
-            # 誘導モードの場合
-            if self.current_mode != 'simple':
-                logging.info("誘導モードでのプレビュー生成")
-                # 各ダイアログのデータを取得
-                address_data = getattr(self, 'address_data', {})
-                list_data = getattr(self, 'list_data', {})
-                orderer_data = getattr(self, 'orderer_data', {})
-                order_data = getattr(self, 'order_data', {})
-                
-                logging.info(f"住所データ: {address_data}")
-                logging.info(f"リストデータ: {list_data}")
-                logging.info(f"受注者データ: {orderer_data}")
-                logging.info(f"注文データ: {order_data}")
-                
-                # データを統合
-                data.update(address_data or {})
-                data.update(list_data or {})
-                data.update(orderer_data or {})
-                data.update(order_data or {})
-                
-                # デフォルト値の設定
-                if not data.get('current_line'):
-                    data['current_line'] = 'アナログ'
-                
-                if not data.get('order_date'):
-                    now = datetime.datetime.now()
-                    data['order_date'] = f"{now.month}/{now.day}"
-                
-                if not data.get('judgment'):
-                    data['judgment'] = order_data.get('judgment', 'OK') if order_data else 'OK'
+            # 各入力フィールドからデータを取得し、末尾のスペースを削除
+            if hasattr(self, 'operator_input'):
+                data['operator'] = self.operator_input.text().rstrip()
+            if hasattr(self, 'available_time_input'):
+                data['available_time'] = self.available_time_input.text().rstrip()
+            if hasattr(self, 'contractor_input'):
+                data['contractor'] = self.contractor_input.text().rstrip()
+            if hasattr(self, 'furigana_input'):
+                data['furigana'] = self.furigana_input.text().rstrip()
+            if hasattr(self, 'postal_code_input'):
+                data['postal_code'] = self.postal_code_input.text().rstrip()
+            if hasattr(self, 'address_input'):
+                data['address'] = self.address_input.text().rstrip()
+            if hasattr(self, 'list_name_input'):
+                data['list_name'] = self.list_name_input.text().rstrip()
+            if hasattr(self, 'list_furigana_input'):
+                data['list_furigana'] = self.list_furigana_input.text().rstrip()
+            if hasattr(self, 'list_phone_input'):
+                data['list_phone'] = self.list_phone_input.text().rstrip()
+            if hasattr(self, 'list_postal_code_input'):
+                data['list_postal_code'] = self.list_postal_code_input.text().rstrip()
+            if hasattr(self, 'list_address_input'):
+                data['list_address'] = self.list_address_input.text().rstrip()
+            if hasattr(self, 'order_person_input'):
+                data['order_person'] = self.order_person_input.text().rstrip()
+            if hasattr(self, 'fee_input'):
+                data['fee'] = self.fee_input.text().rstrip()
+            if hasattr(self, 'nd_input'):
+                data['nd'] = self.nd_input.text().rstrip()
+            if hasattr(self, 'relationship_input'):
+                data['relationship'] = self.relationship_input.text().rstrip()
             
-            # シンプルモードの場合
-            else:
-                logging.info("シンプルモードでのプレビュー生成")
-                # 入力フィールドからデータを取得
-                data = {
-                    'operator': self.operator_input.text(),
-                    'available_time': self.available_time_input.text(),
-                    'contractor': self.contractor_input.text(),
-                    'furigana': self.furigana_input.text(),
-                    'era': self.era_combo.currentText(),
-                    'year': self.year_combo.currentText(),
-                    'month': self.month_combo.currentText(),
-                    'day': self.day_combo.currentText(),
-                    'order_person': self.order_person_input.text(),
-                    'employee_number': '',  # 社番は空で初期化
-                    'fee': self.fee_input.text(),
-                    'net_usage': self.net_usage_combo.currentText(),
-                    'family_approval': self.family_approval_combo.currentText(),
-                    'other_number': self.other_number_input.text(),
-                    'phone_device': self.phone_device_input.text(),
-                    'forbidden_line': self.forbidden_line_input.text(),
-                    'nd': self.nd_input.text(),
-                    'relationship': self.relationship_input.text(),
-                    'postal_code': self.postal_code_input.text(),
-                    'address': self.address_input.text(),
-                    'list_name': self.list_name_input.text(),
-                    'list_furigana': self.list_furigana_input.text(),
-                    'list_phone': self.list_phone_input.text(),
-                    'list_postal_code': self.list_postal_code_input.text(),
-                    'list_address': self.list_address_input.text(),
-                    'current_line': self.current_line_combo.currentText(),
-                    'order_date': self.order_date_input.text(),
-                    'judgment': self.judgment_combo.currentText()
-                }
+            # コンボボックスからデータを取得
+            if hasattr(self, 'current_line_combo'):
+                data['current_line'] = self.current_line_combo.currentText().rstrip()
+            if hasattr(self, 'order_date_input'):
+                data['order_date'] = self.order_date_input.text().rstrip()
+            if hasattr(self, 'judgment_combo'):
+                data['judgment'] = self.judgment_combo.currentText().rstrip()
             
             # データが空の場合はエラー
             if not data:
