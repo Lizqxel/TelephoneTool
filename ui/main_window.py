@@ -2375,6 +2375,10 @@ class CancellationError(Exception):
                 data['nd'] = self.nd_input.text().rstrip()
             if hasattr(self, 'relationship_input'):
                 data['relationship'] = self.relationship_input.text().rstrip()
+            if hasattr(self, 'phone_device_input'):
+                data['phone_device'] = self.phone_device_input.text().rstrip()
+            if hasattr(self, 'forbidden_line_input'):
+                data['forbidden_line'] = self.forbidden_line_input.text().rstrip()
             
             # コンボボックスからデータを取得
             if hasattr(self, 'current_line_combo'):

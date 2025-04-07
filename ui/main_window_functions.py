@@ -139,9 +139,9 @@ class MainWindowFunctions:
 ネット利用：{net_usage}
 家族了承：{family_approval}
 
-他番号：なし
-電話機：プッシュ
-禁止回線：なし
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
 ND：{nd}
 
 備考：名義人の{relationship}
