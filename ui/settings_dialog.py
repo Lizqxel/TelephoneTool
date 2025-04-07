@@ -66,10 +66,10 @@ class SettingsDialog(QDialog):
 ネット利用：{net_usage}
 家族了承：{family_approval}
 
-他番号：なし
-電話機：プッシュ
-禁止回線：なし
-ND：
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
 
 備考：{remarks}
 お客様が今使っている回線：アナログ
@@ -280,7 +280,8 @@ ND：
                             "以下のプレースホルダーが使用可能です：\n"
                             "{operator}, {available_time}, {mobile}, {stakeholder}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
                             "{list_name}, {list_furigana}, {list_phone}, {list_postal_code}, {list_address}, "
-                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}, {relationship}")
+                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}, "
+                            "{other_number}, {phone_device}, {forbidden_line}, {nd}")
         description.setWordWrap(True)
         cti_format_layout.addWidget(description)
         
