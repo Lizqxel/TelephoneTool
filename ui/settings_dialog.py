@@ -71,7 +71,7 @@ class SettingsDialog(QDialog):
 禁止回線：{forbidden_line}
 ND：{nd}
 
-備考：{remarks}
+備考：{relationship}
 お客様が今使っている回線：アナログ
 案内料金：2500円
 ※リスト名との関係性："""
