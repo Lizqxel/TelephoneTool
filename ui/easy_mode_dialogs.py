@@ -866,7 +866,7 @@ class OrdererInputDialog(QDialog):
         self.era_combo = NoWheelComboBox()
         self.era_combo.addItems(["昭和", "平成", "西暦"])
         self.era_combo.setFixedWidth(60)
-        self.era_combo.currentTextChanged.connect(self.check_input_fields)
+        self.era_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_input_layout.addWidget(self.era_combo)
         
         self.year_combo = NoWheelComboBox()
@@ -876,7 +876,7 @@ class OrdererInputDialog(QDialog):
         self.year_combo.lineEdit().setMaxLength(4)
         self.year_combo.lineEdit().setValidator(QIntValidator(1, 9999))
         self.year_combo.setFixedWidth(60)
-        self.year_combo.currentTextChanged.connect(self.check_input_fields)
+        self.year_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_input_layout.addWidget(self.year_combo)
         birth_input_layout.addWidget(QLabel("年"))
         
@@ -887,7 +887,7 @@ class OrdererInputDialog(QDialog):
         self.month_combo.lineEdit().setMaxLength(2)
         self.month_combo.lineEdit().setValidator(QIntValidator(1, 12))
         self.month_combo.setFixedWidth(40)
-        self.month_combo.currentTextChanged.connect(self.check_input_fields)
+        self.month_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_input_layout.addWidget(self.month_combo)
         birth_input_layout.addWidget(QLabel("月"))
         
@@ -898,7 +898,7 @@ class OrdererInputDialog(QDialog):
         self.day_combo.lineEdit().setMaxLength(2)
         self.day_combo.lineEdit().setValidator(QIntValidator(1, 31))
         self.day_combo.setFixedWidth(40)
-        self.day_combo.currentTextChanged.connect(self.check_input_fields)
+        self.day_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_input_layout.addWidget(self.day_combo)
         birth_input_layout.addWidget(QLabel("日"))
         
@@ -913,10 +913,16 @@ class OrdererInputDialog(QDialog):
         
         # 料金認識
         orderer_layout.addWidget(QLabel("料金認識"))
+        fee_layout = QHBoxLayout()
+        self.fee_combo = NoWheelComboBox()
+        self.fee_combo.addItems(["2500円～3000円", "3500円～4000円"])
+        self.fee_combo.currentTextChanged.connect(self.on_fee_combo_changed)
+        fee_layout.addWidget(self.fee_combo)
         self.fee_input = QLineEdit()
-        self.fee_input.setText("2500円～3000円")
+        self.fee_input.setPlaceholderText("手動入力")
         self.fee_input.textChanged.connect(self.check_input_fields)
-        orderer_layout.addWidget(self.fee_input)
+        fee_layout.addWidget(self.fee_input)
+        orderer_layout.addLayout(fee_layout)
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
@@ -1542,6 +1548,69 @@ class OrdererInputDialog(QDialog):
                 
         # 標準のイベント処理を継続
         return super().eventFilter(obj, event)
+
+    def on_fee_combo_changed(self, text):
+        """
+        料金認識のコンボボックスが変更された時の処理
+        
+        Args:
+            text (str): 選択されたテキスト
+        """
+        self.fee_input.setText(text)
+        self.check_input_fields()
+
+    def check_birth_date_age(self):
+        """
+        生年月日から年齢を計算し、80歳以上の場合に赤く表示する
+        """
+        try:
+            # 現在の日付を取得
+            now = datetime.datetime.now()
+            current_year = now.year
+            current_month = now.month
+            current_day = now.day
+            
+            # 生年月日の情報を取得
+            era = self.era_combo.currentText()
+            year = int(self.year_combo.currentText())
+            month = int(self.month_combo.currentText())
+            day = int(self.day_combo.currentText())
+            
+            # 和暦を西暦に変換
+            if era == "昭和":
+                year = year + 1925
+            elif era == "平成":
+                year = year + 1988
+            # 西暦の場合はそのまま
+            
+            # 年齢を計算
+            age = current_year - year
+            
+            # 誕生日がまだ来ていない場合は年齢を1つ減らす
+            if (month > current_month) or (month == current_month and day > current_day):
+                age -= 1
+            
+            # 80歳以上かどうかをチェック
+            is_over_80 = age >= 80
+            
+            # 背景色を設定
+            if is_over_80:
+                style = "background-color: #FFEBEE;"  # 赤系の背景色
+            else:
+                style = ""  # デフォルトの背景色
+            
+            # 各コンボボックスにスタイルを適用
+            self.era_combo.setStyleSheet(style)
+            self.year_combo.setStyleSheet(style)
+            self.month_combo.setStyleSheet(style)
+            self.day_combo.setStyleSheet(style)
+            
+            # 80歳以上の場合にログを出力
+            if is_over_80:
+                logging.info(f"80歳以上の顧客が検出されました: {age}歳")
+            
+        except Exception as e:
+            logging.error(f"年齢チェック中にエラー: {e}")
 
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
