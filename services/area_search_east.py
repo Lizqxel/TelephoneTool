@@ -769,6 +769,41 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
             driver.execute_script("arguments[0].click();", next_button)
             logging.info("次へボタンをクリックしました")
 
+            # 建物選択画面が表示されたかチェック
+            try:
+                # 建物選択画面のURLを確認
+                WebDriverWait(driver, 10).until(
+                    lambda d: "SelectBuild1" in d.current_url
+                )
+                logging.info("建物選択画面が表示されました")
+
+                # 「該当する建物がない方」のリンクを探す
+                link_element = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '該当する建物がない方')]"))
+                )
+                logging.info("「該当する建物がない方」のリンクが見つかりました")
+
+                # リンクの位置までスクロール
+                driver.execute_script("arguments[0].scrollIntoView(true);", link_element)
+                time.sleep(1)  # スクロールの完了を待機
+
+                # 標準クリックを実行
+                link_element.click()
+                logging.info("リンクをクリックしました")
+
+                # 結果ページへの遷移を待機
+                WebDriverWait(driver, 45).until(
+                    EC.url_contains("ProvideResult")
+                )
+                logging.info("結果ページへ遷移しました")
+
+            except TimeoutException:
+                # 建物選択画面が表示されない場合は通常の結果ページへの遷移を待機
+                logging.info("建物選択画面はスキップされました")
+                WebDriverWait(driver, 10).until(
+                    EC.url_contains("ProvideResult")
+                )
+                logging.info("結果ページへ遷移しました")
 
         except Exception as e:
             logging.error(f"住居タイプの選択または次へボタンのクリックに失敗: {str(e)}")
