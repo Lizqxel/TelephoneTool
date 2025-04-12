@@ -1,8 +1,8 @@
 """
-文字列処理ユーティリティ
+文字列ユーティリティモジュール
 
-このモジュールは、住所や文字列の正規化などの
-ユーティリティ機能を提供します。
+このモジュールは、文字列の正規化や類似度計算などの
+ユーティリティ関数を提供します。
 """
 
 import re
@@ -20,28 +20,43 @@ def normalize_string(text):
     """
     if not text:
         return text
-        
-    # 全角数字を半角に変換
-    normalized = text
-    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
-    normalized = normalized.translate(zen_to_han)
     
-    # 漢数字を半角数字に変換
-    kanji_numbers = {
-        '一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
-        '六': '6', '七': '7', '八': '8', '九': '9', '十': '10'
-    }
-    for kanji, number in kanji_numbers.items():
-        normalized = normalized.replace(kanji, number)
+    # 全角スペースを半角に変換
+    normalized = text.replace('　', ' ')
     
-    # 全角ハイフンを半角に変換
-    normalized = normalized.replace('−', '-').replace('ー', '-').replace('－', '-')
-    
-    # すべてのスペース（全角・半角）を削除
-    normalized = normalized.replace('　', '').replace(' ', '')
+    # 都道府県名を一時的に保存
+    prefecture_match = re.match(r'^(.+?[都道府県])', normalized)
+    if prefecture_match:
+        prefecture = prefecture_match.group(1)
+        remaining = normalized[len(prefecture):]
+    else:
+        prefecture = ""
+        remaining = normalized
     
     # 「大字」「字」を削除
-    normalized = normalized.replace('大字', '').replace('字', '')
+    remaining = remaining.replace('大字', '').replace('字', '')
+    
+    # 全角数字を半角に変換
+    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
+    remaining = remaining.translate(zen_to_han)
+    
+    # 漢数字を半角数字に変換（都道府県名は除外）
+    kanji_to_number = {
+        '一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
+        '六': '6', '七': '7', '八': '8', '九': '9', '十': '10',
+        '壱': '1', '弐': '2', '参': '3', '肆': '4', '伍': '5',
+        '陸': '6', '漆': '7', '捌': '8', '玖': '9', '拾': '10'
+    }
+    
+    # 漢数字を数字に変換（都道府県名は除外）
+    for kanji, number in kanji_to_number.items():
+        remaining = remaining.replace(kanji, number)
+    
+    # 全角ハイフンを半角に変換
+    remaining = remaining.replace('−', '-').replace('ー', '-').replace('－', '-')
+    
+    # 結果を結合
+    normalized = prefecture + remaining
     
     # 余分な空白を削除
     normalized = normalized.strip()
@@ -49,132 +64,9 @@ def normalize_string(text):
     return normalized
 
 
-def normalize_address(address):
-    """
-    住所文字列を正規化する
-    
-    Args:
-        address (str): 正規化する住所文字列
-        
-    Returns:
-        str: 正規化された住所文字列
-    """
-    # 空白文字の正規化
-    address = address.replace('　', ' ').strip()
-    
-    # ハイフンの正規化
-    address = address.replace('−', '-').replace('ー', '-').replace('－', '-')
-    
-    # 数字の正規化（全角→半角）
-    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
-    address = address.translate(zen_to_han)
-    
-    return address
-
-
-def split_address(address):
-    """
-    住所を分割して各要素を抽出する
-
-    Args:
-        address (str): 分割する住所
-        
-    Returns:
-        dict: 分割された住所の要素
-            - prefecture: 都道府県
-            - city: 市区町村
-            - town: 町名（大字・字を除く）
-            - block: 丁目
-            - number: 番地
-            - building_id: 建物ID
-    """
-    try:
-        # 都道府県を抽出
-        prefecture_match = re.match(r'^(.+?[都道府県])', address)
-        prefecture = prefecture_match.group(1) if prefecture_match else None
-        block = None
-        number_part = None
-        town = ""
-        
-        if prefecture:
-            remaining_address = address[len(prefecture):].strip()
-            # 市区町村を抽出（郡がある場合も考慮）
-            city_match = re.match(r'^(.+?郡.+?[町村]|.+?[市区町村])', remaining_address)
-            city = city_match.group(1) if city_match else None
-            
-            if city:
-                # 残りの住所から基本住所と番地を分離
-                remaining = remaining_address[len(city):].strip()
-                
-                # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
-                special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
-                
-                if special_location_match:
-                    # 番地のみを抽出（甲乙丙丁は除外）
-                    number_part = special_location_match.group(3)
-                    # 基本住所は市区町村までとする
-                    town = ""
-                else:
-                    # 丁目を含む場合は、丁目の後ろの番地を抽出
-                    chome_match = re.search(r'(\d+)丁目', remaining)
-                    if chome_match:
-                        # 丁目より後ろの部分から番地を探す
-                        after_chome = remaining[remaining.find('丁目') + 2:].strip()
-                        # ハイフンを含む番地のパターンを優先的に検索
-                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
-                        if number_match:
-                            number_part = number_match.group(1)
-                            town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
-                        else:
-                            number_part = None
-                            town = remaining[:remaining.find('丁目')].strip()
-                        block = chome_match.group(1)
-                    else:
-                        # 通常の番地パターンを検索
-                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
-                        if number_match:
-                            number_part = number_match.group(1)
-                            town = remaining[:number_match.start()].strip()
-                        else:
-                            number_part = None
-                            town = remaining
-                
-                return {
-                    'prefecture': prefecture,
-                    'city': city,
-                    'town': town if town else "",
-                    'block': block,
-                    'number': number_part,
-                    'building_id': None
-                }
-            
-            return {
-                'prefecture': prefecture,
-                'city': remaining_address if prefecture else None,
-                'town': "",
-                'block': None,
-                'number': None,
-                'building_id': None
-            }
-        
-        return {
-            'prefecture': None,
-            'city': None,
-            'town': "",
-            'block': None,
-            'number': None,
-            'building_id': None
-        }
-        
-    except Exception as e:
-        import logging
-        logging.error(f"住所分割中にエラー: {str(e)}")
-        return None 
-
-
 def calculate_similarity(str1, str2):
     """
-    2つの文字列の類似度をレーベンシュタイン距離を使用して計算する
+    2つの文字列の類似度を計算する
     
     Args:
         str1 (str): 比較する文字列1
@@ -221,4 +113,84 @@ def calculate_similarity(str1, str2):
     distance = matrix[len1][len2]
     similarity = 1.0 - (distance / max_len)
     
-    return similarity 
+    return similarity
+
+
+def validate_name(text):
+    """
+    名前が有効かどうかを検証する関数
+    
+    Args:
+        text (str): 検証する名前
+        
+    Returns:
+        bool: 名前が有効な場合はTrue、無効な場合はFalse
+    """
+    if not text:
+        return True  # 空文字列は許可
+        
+    # 数字を含む場合は無効
+    if re.search(r'\d', text):
+        return False
+        
+    return True
+
+
+def validate_furigana(text):
+    """
+    フリガナが有効かどうかを検証する関数
+    
+    Args:
+        text (str): 検証するフリガナ
+        
+    Returns:
+        bool: フリガナが有効な場合はTrue、無効な場合はFalse
+    """
+    if not text:
+        return True  # 空文字列は許可
+        
+    # 数字を含む場合は無効
+    if re.search(r'\d', text):
+        return False
+        
+    # カタカナ、ひらがな、スペース以外の文字を含む場合は無効
+    if re.search(r'[^\u3040-\u309F\u30A0-\u30FF\s]', text):
+        return False
+        
+    return True
+
+
+def convert_to_half_width_except_space(text):
+    """
+    全角文字を半角に変換するが、スペースだけは全角のままにする関数
+    
+    Args:
+        text (str): 変換する文字列
+        
+    Returns:
+        str: 変換された文字列（スペースは全角のまま）
+    """
+    if not text:
+        return ""
+        
+    # 全角数字を半角に変換
+    text = text.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    
+    # 全角英字を半角に変換
+    text = text.translate(str.maketrans('ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ',
+                                      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'))
+    
+    # 全角記号を半角に変換（一対一対応するよう注意）
+    text = text.translate(str.maketrans('（）［］｛｝「」『』【】〔〕！＂＃＄％＆＇＊＋，．／：；＜＝＞？＠＼＾＿｀｜～',
+                                      '()[]{}""\'\'<>[]!"#$%&\'*+,./:;<=>?@\\^_`|~'))
+    
+    # すべての種類のハイフン、ダッシュを半角ハイフンに変換
+    text = text.replace('−', '-').replace('ー', '-').replace('－', '-')
+    text = text.replace('―', '-').replace('‐', '-').replace('‑', '-')
+    text = text.replace('‒', '-').replace('–', '-').replace('—', '-')
+    text = text.replace('﹘', '-').replace('⁃', '-').replace('⎯', '-')
+    text = text.replace('⏤', '-').replace('─', '-').replace('━', '-')
+    
+    # スペースは変換しない（全角スペースはそのまま）
+    
+    return text 
