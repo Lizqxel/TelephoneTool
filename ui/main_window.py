@@ -172,10 +172,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 生年月日入力用のコンボボックスを初期化
         self.era_combo = NoWheelComboBox()
-        self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
+        self.era_combo.addItems(["西暦", "平成", "昭和"])
         
         self.year_combo = NoWheelComboBox()
-        self.year_combo.addItems([str(i) for i in range(1, 151)])
+        self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
         
         self.month_combo = NoWheelComboBox()
         self.month_combo.addItems([str(i) for i in range(1, 13)])
@@ -1080,13 +1080,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 元号選択
         self.era_combo = NoWheelComboBox()
-        self.era_combo.addItems(["令和", "平成", "昭和", "大正", "明治"])
+        self.era_combo.addItems(["西暦", "平成", "昭和"])
         self.era_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.era_combo)
         
         # 年選択
         self.year_combo = NoWheelComboBox()
-        self.year_combo.addItems([str(i) for i in range(1, 151)])
+        self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
         self.year_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.year_combo)
         birth_date_layout.addWidget(QLabel("年"))
@@ -2223,12 +2223,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 year = year + 1925
             elif era == "平成":
                 year = year + 1988
-            elif era == "令和":
-                year = year + 2018
-            elif era == "大正":
-                year = year + 1911
-            elif era == "明治":
-                year = year + 1867
             # 西暦の場合はそのまま
             
             # 年齢を計算
