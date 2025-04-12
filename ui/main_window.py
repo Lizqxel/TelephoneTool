@@ -1285,9 +1285,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         order_layout.addRow(QLabel("出やすい時間帯:"), self.preferred_time)
         
         # 契約者名
-        self.contractor_name = QLineEdit()
-        self.contractor_name.setStyleSheet(input_style)
-        order_layout.addRow(QLabel("契約者名:"), self.contractor_name)
+        self.contractor_input = QLineEdit()
+        self.contractor_input.setStyleSheet(input_style)
+        order_layout.addRow(QLabel("契約者名:"), self.contractor_input)
         
         # フリガナ
         self.furigana = QLineEdit()
@@ -1867,7 +1867,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 入力フィールドをクリア
         self.operator_name.clear()
         self.preferred_time.clear()
-        self.contractor_name.clear()
+        self.contractor_input.clear()
         self.furigana.clear()
         self.postal_code_input.clear()
         self.address_input.clear()
