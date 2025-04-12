@@ -1111,9 +1111,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 料金認識を追加（移動）
         input_layout.addWidget(QLabel("料金認識"))
+        fee_layout = QHBoxLayout()
+        self.fee_combo = NoWheelComboBox()
+        self.fee_combo.addItems(["2500円～3000円", "3500円～4000円"])
+        self.fee_combo.currentTextChanged.connect(self.on_fee_combo_changed)
+        fee_layout.addWidget(self.fee_combo)
         self.fee_input = QLineEdit()
-        self.fee_input.setText("2500円～3000円")
-        input_layout.addWidget(self.fee_input)
+        self.fee_input.setPlaceholderText("手動入力")
+        self.fee_input.textChanged.connect(self.reset_background_color)
+        fee_layout.addWidget(self.fee_input)
+        input_layout.addLayout(fee_layout)
         
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
@@ -2179,6 +2186,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         except Exception as e:
             logging.error(f"進捗更新中にエラー: {str(e)}")
             self.area_result_label.setText(message)
+
+    def on_fee_combo_changed(self, text):
+        """
+        料金認識のコンボボックスが変更された時の処理
+        
+        Args:
+            text (str): 選択されたテキスト
+        """
+        self.fee_input.setText(text)
+        self.reset_background_color()
 
 
 class ServiceAreaSearchWorker(QObject):
