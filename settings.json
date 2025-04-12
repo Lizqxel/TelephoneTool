@@ -3,10 +3,10 @@
   "font_size": 9,
   "delay_seconds": 0,
   "browser_settings": {
-    "headless": false,
+    "headless": true,
     "disable_images": true,
     "show_popup": true,
-    "auto_close": false,
+    "auto_close": true,
     "page_load_timeout": 30,
     "script_timeout": 30
   },
