@@ -224,7 +224,7 @@ ND：{nd}
         elif text == "平成":
             self.year_combo.addItems([str(i) for i in range(1, 32)])  # 平成1年～31年
         else:  # 西暦
-            self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
+            self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])  # 1926年（昭和元年）から現在まで
     
     def copy_cti_to_clipboard(self):
         """
@@ -319,7 +319,7 @@ ND：{nd}
         
         if era and year and month and day:
             # 和暦から西暦への変換
-            era_year_map = {"令和": 2018, "平成": 1988, "昭和": 1925, "大正": 1911, "明治": 1867, "西暦": 0}
+            era_year_map = {"平成": 1988, "昭和": 1925, "西暦": 0}
             if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
                 try:
                     jp_year = int(year)
