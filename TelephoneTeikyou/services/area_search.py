@@ -1,8 +1,19 @@
 """
-提供エリア検索サービス
+NTT西日本の提供エリア検索サービス
 
 このモジュールは、NTT西日本の提供エリア検索を
 自動化するための機能を提供します。
+
+主な機能：
+- 郵便番号による住所検索
+- 住所の自動選択
+- 番地・号の入力
+- 建物情報の選択
+- 提供エリア判定
+
+制限事項：
+- キャッシュ機能は使用しません
+- エラー発生時は詳細なログを出力します
 """
 
 import logging
@@ -19,11 +30,38 @@ from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from PIL import Image  # PILライブラリを追加
 
-from services.web_driver import create_driver
+from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
+from utils.address_utils import split_address, normalize_address
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
+
+def is_east_japan(address):
+    """
+    住所が東日本かどうかを判定する
+    
+    Args:
+        address (str): 判定する住所
+        
+    Returns:
+        bool: 東日本ならTrue、西日本ならFalse
+    """
+    # 東日本の都道府県リスト
+    east_japan_prefectures = [
+        "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+        "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+        "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県"
+    ]
+    
+    # 住所から都道府県を抽出
+    prefecture_pattern = r'^(東京都|北海道|(?:京都|大阪)府|.+?県)'
+    prefecture_match = re.match(prefecture_pattern, address)
+    if not prefecture_match:
+        return False
+    
+    prefecture = prefecture_match.group(1)
+    return prefecture in east_japan_prefectures
 
 def normalize_address(address):
     """
@@ -35,31 +73,17 @@ def normalize_address(address):
     Returns:
         str: 正規化された住所文字列
     """
-    if not address:
-        logging.warning("空の住所が入力されました")
-        return address
-        
-    logging.info(f"=== 住所正規化開始 ===")
-    logging.info(f"入力値: {address}")
+    # 空白文字の正規化
+    address = address.replace('　', ' ').strip()
     
-    # 全角数字を半角に変換
-    zen_to_han = str.maketrans({
-        '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
-        '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-        '－': '-', 'ー': '-', '−': '-', '―': '-', '‐': '-',  # 全角ハイフン類を半角に
-        '　': ' '  # 全角スペースを半角に
-    })
+    # ハイフンの正規化
+    address = address.replace('−', '-').replace('ー', '-').replace('－', '-')
     
-    # 変換を実行
-    normalized = address.translate(zen_to_han)
-    logging.info(f"変換後（translate後）: {normalized}")
+    # 数字の正規化（全角→半角）
+    zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
+    address = address.translate(zen_to_han)
     
-    # 余分な空白を削除
-    normalized = ' '.join(normalized.split())
-    logging.info(f"変換後（空白削除後）: {normalized}")
-    
-    logging.info(f"=== 住所正規化完了 ===")
-    return normalized
+    return address
 
 def split_address(address):
     """
@@ -543,6 +567,28 @@ def take_full_page_screenshot(driver, save_path):
 
 def search_service_area(postal_code, address, progress_callback=None):
     """
+    提供エリア検索を実行する関数
+    
+    Args:
+        postal_code (str): 郵便番号
+        address (str): 住所
+        progress_callback (callable): 進捗状況を通知するコールバック関数
+        
+    Returns:
+        dict: 検索結果を含む辞書
+    """
+    # 東日本か西日本かを判定
+    if is_east_japan(address):
+        logging.info("東日本の提供エリア検索を実行します")
+        # 東日本の検索機能を動的にインポート
+        from services.area_search_east import search_service_area as search_service_area_east
+        return search_service_area_east(postal_code, address, progress_callback)
+    else:
+        logging.info("西日本の提供エリア検索を実行します")
+        return search_service_area_west(postal_code, address, progress_callback)
+
+def search_service_area_west(postal_code, address, progress_callback=None):
+    """
     NTT西日本の提供エリア検索を実行する関数
     
     Args:
@@ -569,16 +615,13 @@ def search_service_area(postal_code, address, progress_callback=None):
     except Exception as e:
         logging.error(f"正規化処理中にエラー: {str(e)}")
         return {"status": "error", "message": f"住所の正規化に失敗しました: {str(e)}"}
-    
-    logging.info(f"郵便番号 {postal_code}、住所 {address} の処理を開始します")
-    
+
     # 住所を分割
     if progress_callback:
         progress_callback("住所情報を解析中...")
     
     address_parts = split_address(address)
     if not address_parts:
-        logging.error("住所の分割に失敗しました")
         return {"status": "error", "message": "住所の分割に失敗しました。"}
         
     # 基本住所を構築（番地と号を除く）
@@ -1132,6 +1175,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                         result = found_pattern.copy()
                         result["screenshot"] = screenshot_path
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
                         if progress_callback:
                             progress_callback(f"{result['message']}が確認されました")
                         return result
@@ -1153,6 +1197,8 @@ def search_service_area(postal_code, address, progress_callback=None):
                             "screenshot": screenshot_path,
                             "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
+                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
+                        return result
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存
