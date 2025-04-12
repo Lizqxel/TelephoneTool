@@ -17,9 +17,9 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox, QPushButton,
-    QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-    QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
+                              QLabel, QLineEdit, QComboBox, QPushButton,
+                              QTextEdit, QGroupBox, QMessageBox, QScrollArea,
+                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
     QSizePolicy, QProgressBar, QListView, QGridLayout,
     QDialog, QStatusBar, QSpacerItem, QTabWidget,
     QRadioButton
@@ -1248,7 +1248,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             }
         """)
         area_result_layout.addWidget(self.area_result_label)
-        
+
         address_layout.addWidget(area_result_container, 4, 0, 1, 4)
         
         address_group.setLayout(address_layout)
@@ -1414,7 +1414,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 background-color: white;
                 color: #2C3E50;
                 border: 1px solid #3498DB;
-                border-radius: 4px;
+                        border-radius: 4px;
                 margin-top: 10px;
                 padding-top: 15px;
             }
@@ -1437,19 +1437,19 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 border: 2px solid #3498DB;
                 background-color: #F0F8FF;
             }
-            QPushButton {
+                    QPushButton {
                 background-color: #3498DB;
-                color: white;
-                border: none;
+                        color: white;
+                        border: none;
                 border-radius: 2px;
                 padding: 8px 15px;
                 font-size: 13px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
+                    }
+                    QPushButton:hover {
                 background-color: #2980B9;
-            }
-            QPushButton:pressed {
+                    }
+                    QPushButton:pressed {
                 background-color: #2472A4;
             }
             QPushButton:disabled {
@@ -1503,7 +1503,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.list_name_kana_input.textChanged.connect(self.validate_list_furigana)
         
         # 郵便番号検索
-        self.area_search_btn.clicked.connect(self.search_service_area)
+            self.area_search_btn.clicked.connect(self.search_service_area)
         
         # 手数料認識の変更
         self.fee_combo.currentTextChanged.connect(self.on_fee_combo_changed)
@@ -1788,7 +1788,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         try:
             # 受注者入力項目
             self.operator_input.clear()  # 対応者名をクリア
-            self.available_time_input.clear()  # 出やすい時間帯をクリア
+        self.available_time_input.clear()  # 出やすい時間帯をクリア
             self.contractor_input.clear()  # 契約者名をクリア
             self.furigana_input.clear()  # フリガナをクリア
             self.furigana_mode_combo.setCurrentText("自動")  # フリガナモードを自動に設定
@@ -1831,7 +1831,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.relationship_input.clear()  # リストとの関係性をクリア
             
             # プレビューをクリア
-            self.preview_text.clear()
+        self.preview_text.clear()
             
         except Exception as e:
             logging.error(f"入力フィールドクリア中にエラー: {e}")
