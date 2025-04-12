@@ -913,10 +913,16 @@ class OrdererInputDialog(QDialog):
         
         # 料金認識
         orderer_layout.addWidget(QLabel("料金認識"))
+        fee_layout = QHBoxLayout()
+        self.fee_combo = NoWheelComboBox()
+        self.fee_combo.addItems(["2500円～3000円", "3500円～4000円"])
+        self.fee_combo.currentTextChanged.connect(self.on_fee_combo_changed)
+        fee_layout.addWidget(self.fee_combo)
         self.fee_input = QLineEdit()
-        self.fee_input.setText("2500円～3000円")
+        self.fee_input.setPlaceholderText("手動入力")
         self.fee_input.textChanged.connect(self.check_input_fields)
-        orderer_layout.addWidget(self.fee_input)
+        fee_layout.addWidget(self.fee_input)
+        orderer_layout.addLayout(fee_layout)
         
         # ネット利用
         orderer_layout.addWidget(QLabel("ネット利用"))
@@ -1542,6 +1548,16 @@ class OrdererInputDialog(QDialog):
                 
         # 標準のイベント処理を継続
         return super().eventFilter(obj, event)
+
+    def on_fee_combo_changed(self, text):
+        """
+        料金認識のコンボボックスが変更された時の処理
+        
+        Args:
+            text (str): 選択されたテキスト
+        """
+        self.fee_input.setText(text)
+        self.check_input_fields()
 
 class OrderInfoDialog(QDialog):
     """受注情報入力ダイアログ"""
