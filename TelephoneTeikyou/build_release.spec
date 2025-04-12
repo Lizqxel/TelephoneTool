@@ -28,7 +28,6 @@ block_cipher = None
 
 # 追加するファイル
 added_files = [
-    ('settings.json', '.'),
     ('qt.conf', '.'),
     ('version.py', '.'),
     ('requirements.txt', '.'),
