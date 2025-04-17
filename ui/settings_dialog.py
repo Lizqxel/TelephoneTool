@@ -43,7 +43,7 @@ class SettingsDialog(QDialog):
         # デフォルトのフォーマットテンプレート
         self.default_format = """対応者（お客様の名前）：{operator}
 工事希望日
-★出やすい時間帯：{available_time} 携帯：{mobile}
+★出やすい時間帯：{available_time}
 ★電話取次：アナログ→光電話
 ★電話OP：
 ★無線
@@ -73,8 +73,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
-※リスト名との関係性："""
+案内料金：2500円"""
 
         # デフォルトのフォントサイズ
         self.default_font_size = 9
