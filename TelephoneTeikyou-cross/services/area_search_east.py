@@ -432,7 +432,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         if progress_callback:
             progress_callback("サイトにアクセス中...")
         
-        driver.get("https://flets.com/app_new/cao/")
+        driver.get("https://flets.com/app2/search_c.html")
         logging.info("サイトにアクセスしました")
         
 
@@ -440,7 +440,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         # 郵便番号入力ページが表示されるのを待つ
         # 郵便番号入力フィールドが表示されるまで待機
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "id_address_search_zip1"))
+            EC.presence_of_element_located((By.NAME, "FIELD_ZIP1"))
         )
         logging.info("郵便番号入力ページが表示されました")
         
@@ -450,7 +450,7 @@ def search_service_area(postal_code, address, progress_callback=None):
         try:
             # 郵便番号前半3桁を入力
             postal_code_first_input = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "id_address_search_zip1"))
+                EC.presence_of_element_located((By.NAME, "FIELD_ZIP1"))
             )
             postal_code_first_input.clear()
             postal_code_first_input.send_keys(postal_code_first)
@@ -458,7 +458,7 @@ def search_service_area(postal_code, address, progress_callback=None):
             
             # 郵便番号後半4桁を入力
             postal_code_second_input = WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.ID, "id_address_search_zip2"))
+                EC.presence_of_element_located((By.NAME, "FIELD_ZIP2"))
             )
             postal_code_second_input.clear()
             postal_code_second_input.send_keys(postal_code_second)
@@ -466,7 +466,7 @@ def search_service_area(postal_code, address, progress_callback=None):
             
             # 再検索ボタンをクリック
             search_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.ID, "id_address_search_button"))
+                EC.element_to_be_clickable((By.CLASS_NAME, "cao_submit"))
             )
             search_button.click()
             logging.info("再検索ボタンをクリックしました")
@@ -881,7 +881,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                             "details": {
                                 "判定結果": "OK",
                                 "提供エリア": "提供可能エリアです",
-                                "備考": "光アクセスのサービスがご利用いただけます"
+                                "備考": "フレッツ光のサービスがご利用いただけます"
                             },
                             "screenshot": screenshot_path,
                             "show_popup": show_popup
