@@ -1,7 +1,7 @@
 {
   "font_size": 11,
   "browser_settings": {
-    "headless": true,
+    "headless": false,
     "disable_images": true,
     "show_popup": true,
     "auto_close": true,
