@@ -700,6 +700,19 @@ class MainWindow(QMainWindow):
                         color: #E74C3C;
                     }
                 """)
+            elif status == "investigation":
+                self.result_label.setText("提供エリア: 要調査")
+                self.result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #F1C40F;
+                        border-radius: 4px;
+                        background-color: #FFF9E3;
+                        color: #B7950B;
+                        font-weight: bold;
+                    }
+                """)
             else:
                 self.result_label.setText("提供エリア: 判定失敗")
                 self.result_label.setStyleSheet("""

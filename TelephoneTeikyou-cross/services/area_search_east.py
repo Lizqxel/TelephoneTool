@@ -77,20 +77,17 @@ def split_address(address):
                 remaining = remaining_address[len(city):].strip()
                 
                 # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
-                special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
-                
-                if special_location_match:
-                    # 番地のみを抽出（甲乙丙丁は除外）
-                    number_part = special_location_match.group(3)
-                    # 基本住所は市区町村までとする
-                    town = ""
+                # 町名抽出のための正規表現を拡張
+                # 例: "巻堀字巻堀88" → 町名: "巻堀字巻堀" 番地: "88"
+                town_match = re.match(r'^(.+?字.+?)(\d+.*)?$', remaining)
+                if town_match:
+                    town = town_match.group(1)
+                    number_part = town_match.group(2).strip() if town_match.group(2) else None
                 else:
-                    # 丁目を含む場合は、丁目の後ろの番地を抽出
+                    # 既存のロジック（丁目や番地パターン）
                     chome_match = re.search(r'(\d+)丁目', remaining)
                     if chome_match:
-                        # 丁目より後ろの部分から番地を探す
                         after_chome = remaining[remaining.find('丁目') + 2:].strip()
-                        # ハイフンを含む番地のパターンを優先的に検索
                         number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
                         if number_match:
                             number_part = number_match.group(1)
@@ -100,14 +97,12 @@ def split_address(address):
                             town = remaining[:remaining.find('丁目')].strip()
                         block = chome_match.group(1)
                     else:
-                        # ハイフンが2つある場合は、最初の数字を丁目として扱う
                         double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
                         if double_hyphen_match:
                             block = double_hyphen_match.group(1)
                             number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
                             town = remaining[:double_hyphen_match.start()].strip()
                         else:
-                            # 通常の番地パターンを検索
                             number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
                             if number_match:
                                 number_part = number_match.group(1)
@@ -528,9 +523,29 @@ def search_service_area(postal_code, address, progress_callback=None):
                     # JavaScriptを使用してクリックを実行
                     driver.execute_script("arguments[0].click();", best_candidate)
                     logging.info("JavaScriptを使用して住所を選択しました")
-                    
-                    # クリック後の待機
                     time.sleep(2)
+
+                    # 住所選択直後に「要調査」文言や特殊URLを即時チェック
+                    page_title = driver.title
+                    current_url = driver.current_url
+                    page_text = driver.find_element(By.TAG_NAME, "body").text
+                    if ("詳しい状況確認が必要" in page_text or
+                        "InfoSpecialAddressCollabo" in current_url):
+                        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                        screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
+                        driver.save_screenshot(screenshot_path)
+                        logging.info("要調査文言またはInfoSpecialAddressCollabo遷移を検出。即時要調査判定で返却")
+                        return {
+                            "status": "investigation",
+                            "message": "要調査",
+                            "details": {
+                                "判定結果": "要調査",
+                                "提供エリア": "詳しい状況確認が必要です",
+                                "備考": "ご指定の住所は『光アクセスサービス』の詳しい状況確認が必要です。"
+                            },
+                            "screenshot": screenshot_path,
+                            "show_popup": show_popup
+                        }
                     
                     # 番地入力画面への遷移を待機
                     WebDriverWait(driver, 15).until(
@@ -865,6 +880,9 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                     elif "提供エリア外です" in page_text:
                         result_text = "提供エリア外です"
                         logging.info("ページテキストから「提供エリア外です」を検出")
+                    elif "詳しい状況確認が必要" in page_text or "詳しい状況確認が必要" in (result_text or ""):
+                        result_text = "要調査"
+                        logging.info("ページテキストから「詳しい状況確認が必要」を検出")
 
                 logging.info(f"最終的な結果テキスト: {result_text}")
 
@@ -896,6 +914,20 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                                 "判定結果": "NG",
                                 "提供エリア": "提供対象外エリアです",
                                 "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
+                            },
+                            "screenshot": screenshot_path,
+                            "show_popup": show_popup
+                        }
+                    elif "要調査" in result_text or "詳しい状況確認が必要" in result_text:
+                        screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
+                        driver.save_screenshot(screenshot_path)
+                        return {
+                            "status": "investigation",
+                            "message": "要調査",
+                            "details": {
+                                "判定結果": "要調査",
+                                "提供エリア": "詳しい状況確認が必要です",
+                                "備考": "ご指定の住所は『光アクセスサービス』の詳しい状況確認が必要です。"
                             },
                             "screenshot": screenshot_path,
                             "show_popup": show_popup
