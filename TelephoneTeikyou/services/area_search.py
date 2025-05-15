@@ -373,60 +373,51 @@ def find_best_address_match(input_address, candidates):
     
     return None, best_similarity
 
-def handle_building_selection(driver):
+def handle_building_selection(driver, progress_callback=None):
     """
-    建物選択モーダルの検出とハンドリング
-    モーダルが表示されない場合は正常に処理を続行
+    建物選択モーダルの検出とハンドリング（集合住宅判定）
+
+    Args:
+        driver (webdriver): SeleniumのWebDriverインスタンス
+        progress_callback (callable, optional): 進捗通知用コールバック
+
+    Returns:
+        dict or None: 集合住宅判定時は判定結果dict、そうでなければNone
+
+    例外:
+        重大なエラー時はraise
     """
     try:
         # 建物選択モーダルが表示されているか確認（短い待機時間で）
         modal = WebDriverWait(driver, 3).until(
             EC.visibility_of_element_located((By.ID, "buildingNameSelectModal"))
         )
-        
+
         if not modal.is_displayed():
             logging.info("建物選択モーダルは表示されていません - 処理を続行します")
-            return
-            
-        logging.info("建物選択モーダルが表示されました")
-        
-        # 「該当する建物名がない」リンクを探して選択
-        try:
-            no_building_link = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "li.not_adress a"))
-            )
-            logging.info("「該当する建物名がない」リンクを検出しました")
-            
-            # クリックを試行
-            try:
-                no_building_link.click()
-                logging.info("通常のクリックで「該当する建物名がない」を選択しました")
-            except Exception as click_error:
-                logging.warning(f"通常のクリックに失敗: {str(click_error)}")
-                try:
-                    driver.execute_script("arguments[0].click();", no_building_link)
-                    logging.info("JavaScriptでクリックしました")
-                except Exception as js_error:
-                    logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
-                    ActionChains(driver).move_to_element(no_building_link).click().perform()
-                    logging.info("ActionChainsでクリックしました")
-            
-            # クリック後の待機
-            time.sleep(2)
-            
-            # モーダルが閉じられるのを待機
-            WebDriverWait(driver, 10).until(
-                EC.invisibility_of_element_located((By.ID, "buildingNameSelectModal"))
-            )
-            logging.info("建物選択モーダルが閉じられました")
-            
-        except Exception as e:
-            logging.error(f"「該当する建物名がない」の選択に失敗: {str(e)}")
-            driver.save_screenshot("debug_no_building_error.png")
-            raise
-            
+            return None
+
+        logging.info("建物選択モーダルが表示されました（集合住宅判定）")
+        if progress_callback:
+            progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
+        # スクリーンショットを保存
+        screenshot_path = "apartment_detected.png"
+        take_full_page_screenshot(driver, screenshot_path)
+        logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
+        # 判定結果を返す
+        return {
+            "status": "apartment",
+            "message": "集合住宅（アパート・マンション等）",
+            "details": {
+                "判定結果": "集合住宅",
+                "提供エリア": "集合住宅（アパート・マンション等）",
+                "備考": "該当住所は集合住宅（アパート・マンション等）です。"
+            },
+            "screenshot": screenshot_path
+        }
     except TimeoutException:
         logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+        return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
         driver.save_screenshot("debug_building_modal_error.png")
@@ -1061,14 +1052,15 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             except TimeoutException:
                 logging.info("号入力画面はスキップされました")
             
-            # 建物選択モーダルの処理
-            handle_building_selection(driver)
-            
+            # 建物選択モーダルの処理（集合住宅判定）
+            building_result = handle_building_selection(driver, progress_callback)
+            if building_result:
+                logging.info("集合住宅判定のため、検索処理を終了し結果を返します")
+                return building_result
             # 7. 結果の判定
             try:
                 if progress_callback:
                     progress_callback("検索結果を確認中...")
-                
                 # 検索結果確認ボタンをクリック
                 logging.info("検索結果確認ボタンの検出を開始します")
                 

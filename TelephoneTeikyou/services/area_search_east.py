@@ -777,25 +777,21 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                 )
                 logging.info("建物選択画面が表示されました")
 
-                # 「該当する建物がない方」のリンクを探す
-                link_element = WebDriverWait(driver, 20).until(
-                    EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '該当する建物がない方')]"))
-                )
-                logging.info("「該当する建物がない方」のリンクが見つかりました")
-
-                # リンクの位置までスクロール
-                driver.execute_script("arguments[0].scrollIntoView(true);", link_element)
-                time.sleep(1)  # スクロールの完了を待機
-
-                # 標準クリックを実行
-                link_element.click()
-                logging.info("リンクをクリックしました")
-
-                # 結果ページへの遷移を待機
-                WebDriverWait(driver, 45).until(
-                    EC.url_contains("ProvideResult")
-                )
-                logging.info("結果ページへ遷移しました")
+                # 建物選択画面が表示された時点で集合住宅と判定
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
+                driver.save_screenshot(screenshot_path)
+                return {
+                    "status": "apartment",
+                    "message": "集合住宅",
+                    "details": {
+                        "判定結果": "NG",
+                        "提供エリア": "集合住宅",
+                        "備考": "集合住宅のため、判定を終了します"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": show_popup
+                }
 
             except TimeoutException:
                 # 建物選択画面が表示されない場合は通常の結果ページへの遷移を待機
