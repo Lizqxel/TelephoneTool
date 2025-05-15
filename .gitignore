@@ -38,6 +38,7 @@ debug_result_*.png
 debug_timeout_*.png
 debug_unavailable_*.png
 debug_general_*.png
+apartment_detected*.png
 screenshots/
 
 # 仮想環境

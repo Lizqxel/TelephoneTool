@@ -373,10 +373,17 @@ def find_best_address_match(input_address, candidates):
     
     return None, best_similarity
 
-def handle_building_selection(driver):
+def handle_building_selection(driver, progress_callback=None, show_popup=True):
     """
-    建物選択モーダルの検出とハンドリング
+    建物選択モーダルの検出と集合住宅判定
     モーダルが表示されない場合は正常に処理を続行
+    集合住宅と判定した場合はスクリーンショットを保存し、判定結果を返す
+    Args:
+        driver: Selenium WebDriverインスタンス
+        progress_callback: 進捗コールバック関数（任意）
+        show_popup: ポップアップ表示フラグ
+    Returns:
+        dict or None: 集合住宅判定時は判定結果辞書、それ以外はNone
     """
     try:
         # 建物選択モーダルが表示されているか確認（短い待機時間で）
@@ -386,47 +393,30 @@ def handle_building_selection(driver):
         
         if not modal.is_displayed():
             logging.info("建物選択モーダルは表示されていません - 処理を続行します")
-            return
-            
-        logging.info("建物選択モーダルが表示されました")
+            return None
         
-        # 「該当する建物名がない」リンクを探して選択
-        try:
-            no_building_link = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "li.not_adress a"))
-            )
-            logging.info("「該当する建物名がない」リンクを検出しました")
-            
-            # クリックを試行
-            try:
-                no_building_link.click()
-                logging.info("通常のクリックで「該当する建物名がない」を選択しました")
-            except Exception as click_error:
-                logging.warning(f"通常のクリックに失敗: {str(click_error)}")
-                try:
-                    driver.execute_script("arguments[0].click();", no_building_link)
-                    logging.info("JavaScriptでクリックしました")
-                except Exception as js_error:
-                    logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
-                    ActionChains(driver).move_to_element(no_building_link).click().perform()
-                    logging.info("ActionChainsでクリックしました")
-            
-            # クリック後の待機
-            time.sleep(2)
-            
-            # モーダルが閉じられるのを待機
-            WebDriverWait(driver, 10).until(
-                EC.invisibility_of_element_located((By.ID, "buildingNameSelectModal"))
-            )
-            logging.info("建物選択モーダルが閉じられました")
-            
-        except Exception as e:
-            logging.error(f"「該当する建物名がない」の選択に失敗: {str(e)}")
-            driver.save_screenshot("debug_no_building_error.png")
-            raise
-            
+        logging.info("建物選択モーダルが表示されました（集合住宅判定）")
+        if progress_callback:
+            progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
+        # スクリーンショットを保存
+        screenshot_path = f"apartment_detected.png"
+        take_full_page_screenshot(driver, screenshot_path)
+        logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
+        # 判定結果を返す
+        return {
+            "status": "apartment",
+            "message": "集合住宅（アパート・マンション等）",
+            "details": {
+                "判定結果": "集合住宅",
+                "提供エリア": "集合住宅（アパート・マンション等）",
+                "備考": "該当住所は集合住宅（アパート・マンション等）です。"
+            },
+            "screenshot": screenshot_path,
+            "show_popup": show_popup
+        }
     except TimeoutException:
         logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+        return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
         driver.save_screenshot("debug_building_modal_error.png")
@@ -1062,8 +1052,10 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 logging.info("号入力画面はスキップされました")
             
             # 建物選択モーダルの処理
-            handle_building_selection(driver)
-            
+            result = handle_building_selection(driver, progress_callback, show_popup)
+            if result is not None:
+                logging.info(f"search_service_area_west: apartment返却: {result}")
+                return result
             # 7. 結果の判定
             try:
                 if progress_callback:
@@ -1175,7 +1167,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         result = found_pattern.copy()
                         result["screenshot"] = screenshot_path
                         result["show_popup"] = show_popup  # ポップアップ表示設定を追加
-                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
+                        logging.info(f"search_service_area_west: available返却: {result}")
                         if progress_callback:
                             progress_callback(f"{result['message']}が確認されました")
                         return result
@@ -1184,9 +1176,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         screenshot_path = "debug_unavailable_confirmation.png"
                         take_full_page_screenshot(driver, screenshot_path)
                         logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
-                        if progress_callback:
-                            progress_callback("判定できませんでした")
-                        return {
+                        result = {
                             "status": "failure",
                             "message": "判定失敗",
                             "details": {
@@ -1197,7 +1187,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             "screenshot": screenshot_path,
                             "show_popup": show_popup  # ポップアップ表示設定を追加
                         }
-                        logging.info(f"検索結果を返します: status={result['status']}, message={result['message']}")
+                        logging.info(f"search_service_area_west: failure返却: {result}")
+                        if progress_callback:
+                            progress_callback("判定できませんでした")
                         return result
                         
                 except TimeoutException:

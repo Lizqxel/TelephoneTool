@@ -692,10 +692,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def handle_search_result(self, result):
         """検索結果を処理"""
         try:
-            if result.get("status") == "available":
+            status = result.get("status")
+            if status == "available":
                 self.update_judgment_result("提供可能")
-            elif result.get("status") == "unavailable":
+            elif status == "unavailable":
                 self.update_judgment_result("提供エリア外")
+            elif status == "apartment":
+                # 集合住宅の場合は明示的に表示
+                self.update_judgment_result("集合住宅（アパート・マンション等）")
             else:
                 self.update_judgment_result("判定失敗")
             
@@ -2090,6 +2094,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 }
             """)
             self.judgment_combo.setCurrentText("×")
+        elif status == "apartment":
+            # 集合住宅の場合は明示的に表示
+            self.area_result_label.setText("提供エリア: 集合住宅（アパート・マンション等）")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #FF9800;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #E65100;
+                }
+            """)
+            self.judgment_combo.setCurrentText("○")
         else:
             self.area_result_label.setText("提供エリア: 判定失敗")
             self.area_result_label.setStyleSheet("""
