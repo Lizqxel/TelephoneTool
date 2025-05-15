@@ -602,8 +602,14 @@ ND：{nd}
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
+        # 追加ログ：resultの内容を詳細に出力
+        logging.info(f"[UI] on_search_completed 受信 result: {result}")
+        logging.info(f"[UI] on_search_completed 受信 status: {result.get('status', 'キーなし')}, message: {result.get('message', 'キーなし')}")
+        
         try:
-            logging.info(f"★★★ on_search_completed呼び出し: {result} ★★★")
+            logging.info(f"on_search_completed受信: {result}")
+            logging.info(f"resultの型: {type(result)}")
+            logging.info(f"resultのキー: {result.keys() if isinstance(result, dict) else 'dictではありません'}")
             
             # 検索ボタンを有効化
             self.area_search_btn.setEnabled(True)
@@ -650,7 +656,23 @@ ND：{nd}
                     if hasattr(self, 'judgment_combo'):
                         self.judgment_combo.setCurrentText("未提供")
                         logging.info("提供判定を「未提供」に設定")
-                else:
+                elif status == "apartment":
+                    # 集合住宅の場合
+                    self.area_result_label.setText("提供エリア: 集合住宅（アパート・マンション等）")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #388E3C;
+                            border-radius: 4px;
+                            background-color: #C8E6C9;
+                            color: #388E3C;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("集合住宅")
+                        logging.info("提供判定を「集合住宅」に設定")
+                elif status == "failure":
                     # 判定失敗の場合
                     self.area_result_label.setText(f"提供エリア: {message}")
                     self.area_result_label.setStyleSheet("""
@@ -666,6 +688,22 @@ ND：{nd}
                     if hasattr(self, 'judgment_combo'):
                         self.judgment_combo.setCurrentText("検索失敗")
                         logging.info("提供判定を「検索失敗」に設定")
+                else:
+                    # その他の場合（エラーなど）
+                    self.area_result_label.setText(f"提供エリア: {message}")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #E74C3C;
+                            border-radius: 4px;
+                            background-color: #FFEBEE;
+                            color: #E74C3C;
+                        }
+                    """)
+                    if hasattr(self, 'judgment_combo'):
+                        self.judgment_combo.setCurrentText("エラー")
+                        logging.info("提供判定を「エラー」に設定")
                 logging.info("area_result_labelの更新が完了")
                 
                 # UIの更新を確実に実行
@@ -711,8 +749,12 @@ ND：{nd}
                     self.judgment_combo.setCurrentText("提供可能")
                 elif status == "unavailable":
                     self.judgment_combo.setCurrentText("未提供")
-                else:
+                elif status == "apartment":
+                    self.judgment_combo.setCurrentText("集合住宅")
+                elif status == "failure":
                     self.judgment_combo.setCurrentText("検索失敗")
+                else:
+                    self.judgment_combo.setCurrentText("エラー")
                 
                 # プレビューテキストを生成
                 self.generate_preview_text()

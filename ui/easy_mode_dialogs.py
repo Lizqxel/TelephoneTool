@@ -334,6 +334,10 @@ class AddressInfoDialog(QDialog):
 
     def on_search_finished(self, result):
         """検索完了時の処理"""
+        
+        # 追加ログ：resultの内容を詳細に出力
+        logging.info(f"[UI] on_search_completed 受信 result: {result}")
+        logging.info(f"[UI] on_search_completed 受信 status: {result.get('status', 'キーなし')}, message: {result.get('message', 'キーなし')}")
         try:
             logging.info(f"★★★ 検索完了: {result} ★★★")
             
@@ -365,6 +369,18 @@ class AddressInfoDialog(QDialog):
                         border-radius: 4px;
                         background-color: #FFEBEE;
                         color: #E74C3C;
+                    }
+                """
+            elif status == "apartment":
+                result_text = "提供エリア: 集合住宅（アパート・マンション等）"
+                style = """
+                    QLabel {
+                        font-size: 14px;
+                        padding: 10px;
+                        border: 1px solid #388E3C;
+                        border-radius: 4px;
+                        background-color: #C8E6C9;
+                        color: #388E3C;
                     }
                 """
             else:
