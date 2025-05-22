@@ -412,7 +412,7 @@ def handle_building_selection(driver, progress_callback=None):
         return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
-        driver.save_screenshot("debug_building_modal_error.png")
+        take_full_page_screenshot(driver, "debug_building_modal_error.png")
         raise
 
 def create_driver(headless=False):
