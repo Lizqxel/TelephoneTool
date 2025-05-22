@@ -713,6 +713,18 @@ class MainWindow(QMainWindow):
                         font-weight: bold;
                     }
                 """)
+            elif status == "apartment":
+                self.result_label.setText("提供エリア: 集合住宅")
+                self.result_label.setStyleSheet("""
+                    QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #FF9800;
+                    border-radius: 4px;
+                    background-color: #FFF3E0;
+                    color: #E65100;
+                }
+            """)
             else:
                 self.result_label.setText("提供エリア: 判定失敗")
                 self.result_label.setStyleSheet("""
