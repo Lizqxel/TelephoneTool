@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, QObject, Signal, Slot, QEvent, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QPixmap, QCursor
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from services.area_search import search_service_area
 from ui.settings_dialog import SettingsDialog
@@ -159,8 +160,8 @@ class MainWindow(QMainWindow):
         # メインウィジェットとレイアウトの設定
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QVBoxLayout()
-        main_widget.setLayout(main_layout)
+        self.main_layout = QVBoxLayout()
+        main_widget.setLayout(self.main_layout)
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -169,7 +170,7 @@ class MainWindow(QMainWindow):
         self.cti_service = OneClickService()
         
         # トップバーを作成し、メインレイアウトに追加
-        self.create_top_bar(main_layout)
+        self.create_top_bar(self.main_layout)
         
         # 入力フォームエリアをスクロール可能に
         form_widget = QWidget()
@@ -206,7 +207,7 @@ class MainWindow(QMainWindow):
         """)
         
         # スクロールエリアをメインレイアウトに追加
-        main_layout.addWidget(scroll_area)
+        self.main_layout.addWidget(scroll_area)
         
         # 設定の読み込み
         self.load_settings()
@@ -307,6 +308,12 @@ class MainWindow(QMainWindow):
         self.address_input = QLineEdit()
         self.address_input.setPlaceholderText("例: 大阪府大阪市中央区城見2-1-61")
         address_layout.addWidget(self.address_input)
+        
+        # 電話番号（任意）
+        address_layout.addWidget(QLabel("電話番号（任意）"))
+        self.phone_input = QLineEdit()
+        self.phone_input.setPlaceholderText("例: 0312345678 または 03-1234-5678")
+        address_layout.addWidget(self.phone_input)
         
         # 地図表示ボタン
         self.map_btn = QPushButton("地図を表示")
@@ -438,6 +445,12 @@ class MainWindow(QMainWindow):
         self.screenshot_btn.clicked.connect(self.show_screenshot)
         address_layout.addWidget(self.screenshot_btn)
         
+        # QWebEngineView（Google検索結果表示用）をここで生成・追加
+        self.web_view = QWebEngineView()
+        self.web_view.setVisible(False)  # 初期表示は非表示
+        self.web_view.setMinimumHeight(300)  # 必要に応じて調整
+        address_layout.addWidget(self.web_view)
+        
         # 住所情報グループをレイアウトに追加
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
@@ -513,6 +526,7 @@ class MainWindow(QMainWindow):
         """全ての入力フィールドをクリア"""
         self.postal_code_input.clear()
         self.address_input.clear()
+        self.phone_input.clear()
         self.result_label.setText("提供エリア: 未検索")
         self.result_label.setStyleSheet("""
             QLabel {
@@ -529,6 +543,7 @@ class MainWindow(QMainWindow):
         """提供エリア検索を開始"""
         postal_code = self.postal_code_input.text().strip()
         address = self.address_input.text().strip()
+        phone = self.phone_input.text().strip()
         
         if not postal_code or not address:
             QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
@@ -589,6 +604,10 @@ class MainWindow(QMainWindow):
             self.thread.started.connect(self.worker.run)
             self.thread.finished.connect(self.thread.deleteLater)
             self.thread.start()
+            
+            # --- ここからGoogle検索埋め込み処理 ---
+            self.start_google_search_embed(phone, address)
+            # --- ここまで ---
             
         except Exception as e:
             logging.error(f"検索の開始に失敗: {str(e)}")
@@ -778,6 +797,7 @@ class MainWindow(QMainWindow):
             if data:
                 self.postal_code_input.setText(data.postal_code)
                 self.address_input.setText(data.address)
+                self.phone_input.setText(data.phone)
                 logging.info("CTIデータの取得に成功しました")
             else:
                 logging.warning("CTIデータの取得に失敗しました")
@@ -933,3 +953,48 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"進捗更新中にエラー: {str(e)}")
             self.result_label.setText(message) 
+    
+    def start_google_search_embed(self, phone, address):
+        """
+        電話番号または住所でGoogle検索し、QWebEngineViewに結果を表示する
+        """
+        try:
+            # web_viewが初期化されていない場合は何もしない
+            if self.web_view is None:
+                logging.error("QWebEngineViewが初期化されていません")
+                return
+            self.web_view.setVisible(False)
+            search_query = ""
+            if phone:
+                # ハイフンなしで検索
+                phone_no_hyphen = phone.replace("-", "")
+                search_query = phone_no_hyphen
+                url = f"https://www.google.com/search?q={search_query}"
+                self.web_view.setUrl(url)
+                self.web_view.setVisible(True)
+                # JavaScriptでosrp-blkがなければハイフンありで再検索
+                def check_osrp_blk():
+                    js = """
+                        (function(){
+                            return document.querySelector('.osrp-blk') !== null;
+                        })();
+                    """
+                    self.web_view.page().runJavaScript(js, self._handle_osrp_blk_result(phone, address))
+                self.web_view.loadFinished.connect(check_osrp_blk)
+            else:
+                # 住所で検索
+                search_query = address
+                url = f"https://www.google.com/search?q={search_query}"
+                self.web_view.setUrl(url)
+                self.web_view.setVisible(True)
+        except Exception as e:
+            logging.error(f"Google検索埋め込み処理エラー: {str(e)}")
+
+    def _handle_osrp_blk_result(self, phone, address):
+        def callback(result):
+            if not result and "-" in phone:
+                # ハイフンありで再検索
+                url = f"https://www.google.com/search?q={phone}"
+                self.web_view.setUrl(url)
+            # それ以外は何もしない（そのまま表示）
+        return callback 
