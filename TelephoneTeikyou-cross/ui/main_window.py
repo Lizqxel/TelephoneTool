@@ -448,15 +448,14 @@ class MainWindow(QMainWindow):
         # QWebEngineView（Google検索結果表示用）をここで生成・追加
         self.web_view = QWebEngineView()
         self.web_view.setVisible(False)  # 初期表示は非表示
-        self.web_view.setMinimumHeight(300)  # 必要に応じて調整
+        self.web_view.setMinimumHeight(300)
+        self.web_view.setMaximumHeight(500)
+        self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         address_layout.addWidget(self.web_view)
         
         # 住所情報グループをレイアウトに追加
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
-        
-        # 垂直方向のスペーサーを追加
-        parent_layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
     
     def load_settings(self):
         """設定ファイルを読み込む"""
@@ -957,9 +956,9 @@ class MainWindow(QMainWindow):
     def start_google_search_embed(self, phone, address):
         """
         電話番号または住所でGoogle検索し、QWebEngineViewに結果を表示する
+        .osrp-blkがあればその部分まで自動スクロール（右端）する
         """
         try:
-            # web_viewが初期化されていない場合は何もしない
             if self.web_view is None:
                 logging.error("QWebEngineViewが初期化されていません")
                 return
@@ -970,31 +969,20 @@ class MainWindow(QMainWindow):
                 phone_no_hyphen = phone.replace("-", "")
                 search_query = phone_no_hyphen
                 url = f"https://www.google.com/search?q={search_query}"
-                self.web_view.setUrl(url)
-                self.web_view.setVisible(True)
-                # JavaScriptでosrp-blkがなければハイフンありで再検索
-                def check_osrp_blk():
-                    js = """
-                        (function(){
-                            return document.querySelector('.osrp-blk') !== null;
-                        })();
-                    """
-                    self.web_view.page().runJavaScript(js, self._handle_osrp_blk_result(phone, address))
-                self.web_view.loadFinished.connect(check_osrp_blk)
             else:
                 # 住所で検索
                 search_query = address
                 url = f"https://www.google.com/search?q={search_query}"
-                self.web_view.setUrl(url)
-                self.web_view.setVisible(True)
+            self.web_view.setUrl(url)
+            self.web_view.setVisible(True)
+            def scroll_to_osrp_blk():
+                js = """
+                    (function(){
+                        var blk = document.querySelector('.osrp-blk');
+                        if (blk) blk.scrollIntoView({behavior: 'auto', block: 'nearest', inline: 'end'});
+                    })();
+                """
+                self.web_view.page().runJavaScript(js)
+            self.web_view.loadFinished.connect(scroll_to_osrp_blk)
         except Exception as e:
-            logging.error(f"Google検索埋め込み処理エラー: {str(e)}")
-
-    def _handle_osrp_blk_result(self, phone, address):
-        def callback(result):
-            if not result and "-" in phone:
-                # ハイフンありで再検索
-                url = f"https://www.google.com/search?q={phone}"
-                self.web_view.setUrl(url)
-            # それ以外は何もしない（そのまま表示）
-        return callback 
+            logging.error(f"Google検索埋め込み処理エラー: {str(e)}") 
