@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, QObject, Signal, Slot, QEvent, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QPixmap, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings
 
 from services.area_search import search_service_area
 from ui.settings_dialog import SettingsDialog
@@ -156,6 +157,10 @@ class MainWindow(QMainWindow):
         # スレッドとワーカーの初期化
         self.thread = None
         self.worker = None
+        
+        # Google検索カウンターの初期化（5件ごとにWebView再初期化）
+        self.google_search_count = 0
+        self.webview_refresh_interval = 5
         
         # メインウィジェットとレイアウトの設定
         main_widget = QWidget()
@@ -295,6 +300,7 @@ class MainWindow(QMainWindow):
         """入力フォームを作成"""
         # 住所情報セクション
         address_group = QGroupBox("住所情報")
+        address_group.setObjectName("address_group")  # オブジェクト名を設定
         address_layout = QVBoxLayout()
         
         # 郵便番号
@@ -314,6 +320,9 @@ class MainWindow(QMainWindow):
         self.phone_input = QLineEdit()
         self.phone_input.setPlaceholderText("例: 0312345678 または 03-1234-5678")
         address_layout.addWidget(self.phone_input)
+        
+        # ボタンレイアウト
+        button_layout = QHBoxLayout()
         
         # 地図表示ボタン
         self.map_btn = QPushButton("地図を表示")
@@ -340,7 +349,37 @@ class MainWindow(QMainWindow):
             }
         """)
         self.map_btn.clicked.connect(self.show_map)
-        address_layout.addWidget(self.map_btn)
+        button_layout.addWidget(self.map_btn)
+        
+        # WebViewリフレッシュボタン
+        self.refresh_webview_btn = QPushButton("Google更新")
+        self.refresh_webview_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                text-align: center;
+                font-size: 14px;
+                margin: 4px 2px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:pressed {
+                background-color: #E65100;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.refresh_webview_btn.clicked.connect(self.manual_refresh_webview)
+        self.refresh_webview_btn.setToolTip("Google検索ウィンドウを手動で更新（reCAPTCHA対策）")
+        button_layout.addWidget(self.refresh_webview_btn)
+        
+        address_layout.addLayout(button_layout)
         
         # 提供エリア検索ボタン
         self.area_search_btn = QPushButton("提供エリア検索")
@@ -445,6 +484,20 @@ class MainWindow(QMainWindow):
         self.screenshot_btn.clicked.connect(self.show_screenshot)
         address_layout.addWidget(self.screenshot_btn)
         
+        # 検索回数表示ラベル
+        self.search_count_label = QLabel("Google検索回数: 0回")
+        self.search_count_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #666666;
+                padding: 2px;
+                background-color: #f0f0f0;
+                border-radius: 3px;
+                margin: 2px;
+            }
+        """)
+        address_layout.addWidget(self.search_count_label)
+        
         # QWebEngineView（Google検索結果表示用）をここで生成・追加
         self.web_view = QWebEngineView()
         self.web_view.setVisible(False)  # 初期表示は非表示
@@ -463,6 +516,7 @@ class MainWindow(QMainWindow):
             # 初期設定を設定
             self.settings = {
                 'font_size': 11,
+                'webview_refresh_interval': 5,  # WebView再初期化間隔
                 'browser_settings': {
                     'headless': True,
                     'disable_images': True,
@@ -481,8 +535,10 @@ class MainWindow(QMainWindow):
             else:
                 # デフォルト設定をファイルに保存
                 self.save_settings()
-                    
-            logging.info("設定を読み込みました")
+            
+            # WebView再初期化間隔を設定から取得
+            self.webview_refresh_interval = self.settings.get('webview_refresh_interval', 5)
+            logging.info(f"設定を読み込みました - WebView再初期化間隔: {self.webview_refresh_interval}件")
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -537,6 +593,11 @@ class MainWindow(QMainWindow):
                 color: #95a5a6;
             }
         """)
+        
+        # Google検索カウンターもリセット
+        self.google_search_count = 0
+        self.update_search_count_display()
+        logging.info("Google検索カウンターをリセットしました")
     
     def search_service_area(self):
         """提供エリア検索を開始"""
@@ -953,15 +1014,194 @@ class MainWindow(QMainWindow):
             logging.error(f"進捗更新中にエラー: {str(e)}")
             self.result_label.setText(message) 
     
+    def manual_refresh_webview(self):
+        """
+        手動でWebViewをリフレッシュする（reCAPTCHA対策）
+        """
+        try:
+            logging.info("手動でWebViewをリフレッシュします")
+            self.refresh_webview()
+            
+            # リフレッシュ後に現在の検索を再実行
+            phone = self.phone_input.text().strip()
+            address = self.address_input.text().strip()
+            
+            if phone or address:
+                # カウンターを減らして再実行（重複カウントを避ける）
+                self.google_search_count -= 1
+                self.start_google_search_embed(phone, address)
+                logging.info("検索を再実行しました")
+            else:
+                QMessageBox.information(
+                    self, 
+                    "情報", 
+                    "検索ウィンドウをリフレッシュしました。\n電話番号または住所を入力して検索を行ってください。"
+                )
+                
+        except Exception as e:
+            logging.error(f"手動WebViewリフレッシュエラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"検索ウィンドウのリフレッシュに失敗しました: {str(e)}")
+    
+    def update_search_count_display(self):
+        """
+        Google検索回数の表示を更新する
+        """
+        try:
+            next_refresh = self.webview_refresh_interval - (self.google_search_count % self.webview_refresh_interval)
+            if next_refresh == self.webview_refresh_interval:
+                next_refresh = 0
+            
+            if hasattr(self, 'search_count_label'):
+                if next_refresh == 0:
+                    self.search_count_label.setText(f"Google検索回数: {self.google_search_count}回 (次回更新)")
+                    self.search_count_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 12px;
+                            color: #E65100;
+                            padding: 2px;
+                            background-color: #FFF3E0;
+                            border: 1px solid #FF9800;
+                            border-radius: 3px;
+                            margin: 2px;
+                            font-weight: bold;
+                        }
+                    """)
+                else:
+                    self.search_count_label.setText(f"Google検索回数: {self.google_search_count}回 (あと{next_refresh}回で更新)")
+                    self.search_count_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 12px;
+                            color: #666666;
+                            padding: 2px;
+                            background-color: #f0f0f0;
+                            border-radius: 3px;
+                            margin: 2px;
+                        }
+                    """)
+        except Exception as e:
+            logging.error(f"検索回数表示更新エラー: {str(e)}")
+    
+    def refresh_webview(self):
+        """
+        WebViewを再初期化してreCAPTCHA対策を行う
+        より強力なreCAPTCHA対策として以下の機能を追加：
+        - User-Agentのランダム設定
+        - 検索間隔の調整
+        - キャッシュとCookieのクリア
+        """
+        try:
+            import time
+            import random
+            
+            # 短時間の間隔を空けてreCAPTCHA対策
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            if hasattr(self, 'web_view') and self.web_view is not None:
+                # 現在のWebViewを削除
+                self.web_view.setParent(None)
+                self.web_view.deleteLater()
+                logging.info("既存のWebViewを削除しました")
+                # 削除後に少し待機
+                time.sleep(0.5)
+            
+            # 新しいWebViewを作成
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            self.web_view = QWebEngineView()
+            
+            # 新しいプロファイルを作成（セッション・Cookie・キャッシュをクリア）
+            profile = QWebEngineProfile("google_search_profile")
+            profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
+            profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
+            
+            # User-Agentをランダムに設定
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ]
+            selected_ua = random.choice(user_agents)
+            profile.setHttpUserAgent(selected_ua)
+            logging.info(f"User-Agentを設定: {selected_ua[:50]}...")
+            
+            # WebViewを作成
+            self.web_view = QWebEngineView()
+            
+            # プロファイルを設定
+            page = self.web_view.page()
+            page.setProfile(profile)
+            
+            # 各種設定
+            self.web_view.setVisible(False)
+            self.web_view.setMinimumHeight(300)
+            self.web_view.setMaximumHeight(500)
+            self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            
+            # JavaScript、画像の有効化
+            settings = page.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, False)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
+            
+            # 住所情報グループのレイアウトを取得してWebViewを追加
+            address_group = self.findChild(QGroupBox, "address_group")
+            if address_group:
+                address_layout = address_group.layout()
+                if address_layout:
+                    address_layout.addWidget(self.web_view)
+            
+            logging.info("WebViewを強化されたreCAPTCHA対策で再初期化しました")
+            
+        except Exception as e:
+            logging.error(f"WebView再初期化エラー: {str(e)}")
+            # フォールバック：基本的なWebView作成
+            self.web_view = QWebEngineView()
+            self.web_view.setVisible(False)
+            self.web_view.setMinimumHeight(300)
+            self.web_view.setMaximumHeight(500)
+            self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            
+            address_group = self.findChild(QGroupBox, "address_group")
+            if address_group:
+                address_layout = address_group.layout()
+                if address_layout:
+                    address_layout.addWidget(self.web_view)
+
     def start_google_search_embed(self, phone, address):
         """
         電話番号または住所でGoogle検索し、QWebEngineViewに結果を表示する
         .osrp-blkがあればその部分まで自動スクロール（右端）する
+        5件ごとにWebViewを再初期化してreCAPTCHA対策を行う
         """
         try:
+            import time
+            import random
+            
+            # 検索回数をカウント
+            self.google_search_count += 1
+            logging.info(f"Google検索実行: {self.google_search_count}回目")
+            
+            # 検索回数表示を更新
+            self.update_search_count_display()
+            
+            # 連続検索の間隔調整（reCAPTCHA対策）
+            if self.google_search_count > 1:
+                # 2回目以降は少し間隔を空ける
+                delay = random.uniform(0.5, 1.5)
+                time.sleep(delay)
+                logging.info(f"検索間隔調整: {delay:.1f}秒待機")
+            
+            # 指定件数ごとにWebViewを再初期化
+            if self.google_search_count % self.webview_refresh_interval == 0:
+                logging.info(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
+                self.refresh_webview()
+            
             if self.web_view is None:
                 logging.error("QWebEngineViewが初期化されていません")
                 return
+                
             self.web_view.setVisible(False)
             search_query = ""
             if phone:
@@ -973,8 +1213,11 @@ class MainWindow(QMainWindow):
                 # 住所で検索
                 search_query = address
                 url = f"https://www.google.com/search?q={search_query}"
+            
+            logging.info(f"Google検索URL: {url}")
             self.web_view.setUrl(url)
             self.web_view.setVisible(True)
+            
             def scroll_to_osrp_blk():
                 js = """
                     (function(){
@@ -984,5 +1227,6 @@ class MainWindow(QMainWindow):
                 """
                 self.web_view.page().runJavaScript(js)
             self.web_view.loadFinished.connect(scroll_to_osrp_blk)
+            
         except Exception as e:
             logging.error(f"Google検索埋め込み処理エラー: {str(e)}") 
