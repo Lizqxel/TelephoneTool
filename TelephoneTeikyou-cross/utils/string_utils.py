@@ -25,7 +25,8 @@ def normalize_string(text):
     normalized = text.replace('　', ' ')
     
     # 都道府県名を一時的に保存
-    prefecture_match = re.match(r'^(.+?[都道府県])', normalized)
+    # 京都府、大阪府などの「府」を正しく認識するように修正
+    prefecture_match = re.match(r'^([^都道府県]*[都道府県])', normalized)
     if prefecture_match:
         prefecture = prefecture_match.group(1)
         remaining = normalized[len(prefecture):]
@@ -40,17 +41,86 @@ def normalize_string(text):
     zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
     remaining = remaining.translate(zen_to_han)
     
-    # 漢数字を半角数字に変換（都道府県名は除外）
+    # 住所の文脈を考慮した漢数字変換
+    # 「条」と「丁目」の間の漢数字を優先的に変換
+    
+    # 1. まず「〇条△丁目」パターンを特定して変換
+    condition_pattern = r'([一二三四五六七八九十壱弐参肆伍陸漆捌玖拾]+)条([一二三四五六七八九十壱弐参肆伍陸漆捌玖拾]*[０-９]*[一二三四五六七八九十壱弐参肆伍陸漆捌玖拾]*)丁目'
+    
+    def convert_kanji_number(kanji_str):
+        """漢数字文字列を数字に変換"""
+        if not kanji_str:
+            return ""
+            
+        # 漢数字のマッピング
+        kanji_to_num = {
+            '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+            '壱': 1, '弐': 2, '参': 3, '肆': 4, '伍': 5,
+            '陸': 6, '漆': 7, '捌': 8, '玖': 9, '拾': 10,
+            '〇': 0, '零': 0
+        }
+        
+        # 既に数字が含まれている場合はそのまま返す
+        if re.search(r'\d', kanji_str):
+            # 漢数字と数字が混在している場合の処理
+            result = kanji_str
+            for kanji, num in kanji_to_num.items():
+                result = result.replace(kanji, str(num))
+            return result
+        
+        # 複合漢数字の特別処理（十五 → 15）
+        if '十' in kanji_str and len(kanji_str) > 1:
+            # 十五、十六、十七、十八、十九のような複合パターン
+            if kanji_str.startswith('十'):
+                remaining = kanji_str[1:]
+                if remaining in kanji_to_num:
+                    return str(10 + kanji_to_num[remaining])
+                else:
+                    return str(10)
+            # 二十、三十のような十の倍数パターン
+            elif kanji_str.endswith('十'):
+                prefix = kanji_str[:-1]
+                if prefix in kanji_to_num:
+                    return str(kanji_to_num[prefix] * 10)
+        
+        # 純粋な漢数字の場合
+        if kanji_str in kanji_to_num:
+            return str(kanji_to_num[kanji_str])
+        
+        # その他の複数桁の漢数字の場合（簡単なケースのみ対応）
+        result = kanji_str
+        for kanji, num in kanji_to_num.items():
+            result = result.replace(kanji, str(num))
+        
+        return result
+    
+    def replace_address_pattern(match):
+        jo_part = match.group(1)  # 条の前の数字
+        chome_part = match.group(2)  # 丁目の前の数字
+        
+        jo_num = convert_kanji_number(jo_part)
+        chome_num = convert_kanji_number(chome_part)
+        
+        return f"{jo_num}条{chome_num}丁目"
+    
+    # 条・丁目パターンを変換
+    remaining = re.sub(condition_pattern, replace_address_pattern, remaining)
+    
+    # 2. 番地・号のみの漢数字を変換（地名の漢数字は除外）
     kanji_to_number = {
         '一': '1', '二': '2', '三': '3', '四': '4', '五': '5',
         '六': '6', '七': '7', '八': '8', '九': '9', '十': '10',
         '壱': '1', '弐': '2', '参': '3', '肆': '4', '伍': '5',
-        '陸': '6', '漆': '7', '捌': '8', '玖': '9', '拾': '10'
+        '陸': '6', '漆': '7', '捌': '8', '玖': '9', '拾': '10',
+        '〇': '0', '零': '0'
     }
     
-    # 漢数字を数字に変換（都道府県名は除外）
+    # 番地・号の前の漢数字のみを変換
+    # 地名（一番町など）は除外する
     for kanji, number in kanji_to_number.items():
-        remaining = remaining.replace(kanji, number)
+        # 「漢数字＋番」「漢数字＋号」パターンのみ変換（「番町」は除外）
+        remaining = re.sub(f'{kanji}(?=番(?!町)|号)', number, remaining)
     
     # 全角ハイフンを半角に変換
     remaining = remaining.replace('−', '-').replace('ー', '-').replace('－', '-')
