@@ -56,8 +56,8 @@ def split_address(address):
             - building_id: 建物ID
     """
     try:
-        # 住所を正規化
-        address = normalize_address(address)
+        # 住所を正規化（normalize_stringを使用して漢数字変換も含める）
+        address = normalize_string(address)
         logging.info(f"正規化後の住所: {address}")
         
         # 都道府県を抽出
@@ -85,18 +85,32 @@ def split_address(address):
                     town = town_match.group(1)
                     number_part = town_match.group(2).strip() if town_match.group(2) else None
                 else:
-                    # 既存のロジック（丁目や番地パターン）
+                    # 改良された丁目認識ロジック
                     chome_match = re.search(r'(\d+)丁目', remaining)
                     if chome_match:
+                        block = chome_match.group(1)
                         after_chome = remaining[remaining.find('丁目') + 2:].strip()
                         number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
                         if number_match:
                             number_part = number_match.group(1)
-                            town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
                         else:
                             number_part = None
-                            town = remaining[:remaining.find('丁目')].strip()
-                        block = chome_match.group(1)
+                        
+                        # 町名の抽出を改良
+                        # 「恵比寿四丁目」→ 町名: "恵比寿", 丁目: "4"
+                        # 「西岡四条1丁目」→ 町名: "西岡四条", 丁目: "1"
+                        full_chome_text = chome_match.group(1) + '丁目'
+                        chome_start = remaining.find(full_chome_text)
+                        
+                        # 丁目より前の部分を町名として抽出
+                        town_candidate = remaining[:chome_start].strip()
+                        
+                        # 条がある場合は条も含めて町名とする
+                        if '条' in town_candidate:
+                            town = town_candidate
+                        else:
+                            # 通常の場合は丁目の前の部分が町名
+                            town = town_candidate
                     else:
                         double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
                         if double_hyphen_match:
