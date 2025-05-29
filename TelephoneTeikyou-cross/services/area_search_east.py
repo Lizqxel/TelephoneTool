@@ -578,10 +578,55 @@ def search_service_area(postal_code, address, progress_callback=None):
                 logging.info(f"選択された住所: '{selected_address}' (類似度: {similarity})")
                 
                 try:
+                    # 住所選択前に必要な情報を取得（要素が無効になる前に）
+                    selected_address_text = best_candidate.text.strip()
+                    logging.info(f"住所選択前に取得した住所テキスト: {selected_address_text}")
+                    
                     # JavaScriptを使用してクリックを実行
                     driver.execute_script("arguments[0].click();", best_candidate)
                     logging.info("JavaScriptを使用して住所を選択しました")
                     time.sleep(2)
+
+                    # 住所選択後の丁目・番地調整処理
+                    logging.info(f"選択された住所: {selected_address_text}")
+                    
+                    # 選択された候補の住所構造を分析
+                    selected_parts = split_address(selected_address_text)
+                    if selected_parts:
+                        logging.info(f"選択された住所の分割結果 - 丁目: {selected_parts.get('block')}")
+                        
+                        # 入力住所では丁目があるが、選択された候補では丁目がない場合
+                        if address_parts.get('block') and not selected_parts.get('block'):
+                            original_block = address_parts.get('block')
+                            original_number = address_parts.get('number', '')
+                            
+                            logging.info(f"丁目・番地調整が必要です:")
+                            logging.info(f"  入力住所の丁目: {original_block}")
+                            logging.info(f"  入力住所の番地: {original_number}")
+                            logging.info(f"  選択候補の丁目: {selected_parts.get('block')}")
+                            
+                            # 丁目を番地の先頭に移動
+                            if original_number:
+                                adjusted_number = f"{original_block}-{original_number}"
+                            else:
+                                adjusted_number = str(original_block)
+                            
+                            # address_partsを更新
+                            address_parts['block'] = None
+                            address_parts['number'] = adjusted_number
+                            
+                            logging.info(f"丁目・番地を調整しました:")
+                            logging.info(f"  調整前 - 丁目: {original_block}, 番地: {original_number}")
+                            logging.info(f"  調整後 - 丁目: {address_parts['block']}, 番地: {address_parts['number']}")
+                            
+                            # 調整後の値を確認
+                            logging.info(f"調整後のaddress_parts全体: {address_parts}")
+                        else:
+                            logging.info("丁目・番地の調整は不要です")
+                            logging.info(f"  入力住所の丁目: {address_parts.get('block')}")
+                            logging.info(f"  選択候補の丁目: {selected_parts.get('block')}")
+                    else:
+                        logging.warning("選択された住所の分割に失敗しました")
 
                     # 住所選択直後に「要調査」文言や特殊URLを即時チェック
                     page_title = driver.title
@@ -765,6 +810,13 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
         )
         debug_page_state(driver, "番地入力画面_読み込み完了後")
         
+        # address_partsの内容を確認
+        logging.info(f"番地入力処理開始時のaddress_parts:")
+        logging.info(f"  都道府県: {address_parts.get('prefecture')}")
+        logging.info(f"  市区町村: {address_parts.get('city')}")
+        logging.info(f"  町名: {address_parts.get('town')}")
+        logging.info(f"  丁目: {address_parts.get('block')}")
+        logging.info(f"  番地: {address_parts.get('number')}")
 
 
         # 番地がない場合のチェックボックス処理
@@ -1311,14 +1363,50 @@ def handle_go_selection(driver, address_parts, progress_callback=None, show_popu
             driver.execute_script("arguments[0].click();", button)
             logging.info(f"最初の候補を選択しました: {first_candidate.text}")
         
-        # 結果画面への遷移を待機
-        WebDriverWait(driver, 10).until(
-            EC.url_contains("ProvideResult")
-        )
-        logging.info("結果画面へ遷移しました")
+        # 号選択後の遷移先を判定
+        time.sleep(2)
+        current_url = driver.current_url
+        logging.info(f"号選択後のURL: {current_url}")
         
-        # 結果画面の処理
-        return handle_result_page(driver, show_popup)
+        # 建物選択画面に遷移した場合
+        try:
+            WebDriverWait(driver, 5).until(
+                lambda d: "SelectBuild1" in d.current_url
+            )
+            logging.info("号選択後に建物選択画面に遷移しました")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
+            take_full_page_screenshot(driver, screenshot_path)
+            return {
+                "status": "apartment",
+                "message": "集合住宅",
+                "details": {
+                    "判定結果": "NG",
+                    "提供エリア": "集合住宅",
+                    "備考": "集合住宅のため、判定を終了します"
+                },
+                "screenshot": screenshot_path,
+                "show_popup": show_popup
+            }
+        except TimeoutException:
+            # 建物選択画面に遷移しない場合は結果画面への遷移を待機
+            logging.info("号選択後に建物選択画面は表示されませんでした")
+            pass
+        
+        # 結果画面への遷移を待機
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.url_contains("ProvideResult")
+            )
+            logging.info("結果画面へ遷移しました")
+            
+            # 結果画面の処理
+            return handle_result_page(driver, show_popup)
+        except TimeoutException:
+            logging.error("結果画面への遷移がタイムアウトしました")
+            current_url = driver.current_url
+            logging.error(f"現在のURL: {current_url}")
+            return {"status": "error", "message": "結果画面への遷移に失敗しました"}
         
     except Exception as e:
         logging.error(f"号選択画面の処理中にエラー: {str(e)}")
