@@ -830,7 +830,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                         "InfoSpecialAddressCollabo" in current_url):
                         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                         screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
-                        take_full_page_screenshot(driver, screenshot_path)
+                        driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                         logging.info("要調査文言またはInfoSpecialAddressCollabo遷移を検出。即時要調査判定で返却")
                         return {
                             "status": "investigation",
@@ -866,7 +866,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                     
                 except Exception as e:
                     logging.error(f"住所選択処理に失敗: {str(e)}")
-                    take_full_page_screenshot(driver, "debug_address_select_error.png")
+                    driver.save_screenshot("debug_address_select_error.png")  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     raise
             else:
                 logging.error(f"適切な住所候補が見つかりませんでした。入力住所: {address}")
@@ -1133,7 +1133,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                 # 建物選択画面が表示された時点で集合住宅と判定
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
-                take_full_page_screenshot(driver, screenshot_path)
+                driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                 return {
                     "status": "apartment",
                     "message": "集合住宅",
@@ -1226,7 +1226,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                 if result_text:
                     if "提供エリアです" in result_text or "の提供エリアです" in result_text:
                         screenshot_path = f"debug_available_confirmation_{timestamp}.png"
-                        take_full_page_screenshot(driver, screenshot_path)
+                        driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                         return {
                             "status": "available",
                             "message": "提供可能",
@@ -1240,7 +1240,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                         }
                     elif "提供エリア外です" in result_text or "エリア外" in result_text:
                         screenshot_path = f"debug_not_provided_confirmation_{timestamp}.png"
-                        take_full_page_screenshot(driver, screenshot_path)
+                        driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                         return {
                             "status": "unavailable",
                             "message": "未提供",
@@ -1254,7 +1254,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                         }
                     elif "要調査" in result_text or "詳しい状況確認が必要" in result_text:
                         screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
-                        take_full_page_screenshot(driver, screenshot_path)
+                        driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                         return {
                             "status": "investigation",
                             "message": "要調査",
@@ -1268,7 +1268,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                         }
                     else:
                         screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
-                        take_full_page_screenshot(driver, screenshot_path)
+                        driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                         logging.warning(f"予期しない結果テキスト: {result_text}")
                         return {
                             "status": "failure",
@@ -1282,10 +1282,8 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                             "show_popup": show_popup
                         }
                 else:
-
-                    
                     screenshot_path = f"debug_error_confirmation_{timestamp}.png"
-                    take_full_page_screenshot(driver, screenshot_path)
+                    driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     logging.error("結果テキストが取得できませんでした")
                     return {
                         "status": "failure",
@@ -1301,7 +1299,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
 
             except Exception as e:
                 screenshot_path = f"debug_error_confirmation_{timestamp}.png"
-                take_full_page_screenshot(driver, screenshot_path)
+                driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                 logging.error(f"結果テキストの取得中にエラー: {str(e)}")
                 return {
                     "status": "failure",
@@ -1442,7 +1440,7 @@ def handle_address_number_selection(driver, address_parts, progress_callback=Non
                 logging.info("建物選択画面に遷移しました")
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
-                take_full_page_screenshot(driver, screenshot_path)
+                driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                 return {
                     "status": "apartment",
                     "message": "集合住宅",
@@ -1570,7 +1568,7 @@ def handle_go_selection(driver, address_parts, progress_callback=None, show_popu
             logging.info("号選択後に建物選択画面に遷移しました")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
-            take_full_page_screenshot(driver, screenshot_path)
+            driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
             return {
                 "status": "apartment",
                 "message": "集合住宅",
@@ -1678,7 +1676,7 @@ def handle_result_page(driver, show_popup=True):
             if result_text:
                 if "提供エリアです" in result_text or "の提供エリアです" in result_text:
                     screenshot_path = f"debug_available_confirmation_{timestamp}.png"
-                    take_full_page_screenshot(driver, screenshot_path)
+                    driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     return {
                         "status": "available",
                         "message": "提供可能",
@@ -1692,7 +1690,7 @@ def handle_result_page(driver, show_popup=True):
                     }
                 elif "提供エリア外です" in result_text or "エリア外" in result_text:
                     screenshot_path = f"debug_not_provided_confirmation_{timestamp}.png"
-                    take_full_page_screenshot(driver, screenshot_path)
+                    driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     return {
                         "status": "unavailable",
                         "message": "未提供",
@@ -1706,7 +1704,7 @@ def handle_result_page(driver, show_popup=True):
                     }
                 elif "要調査" in result_text or "詳しい状況確認が必要" in result_text:
                     screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
-                    take_full_page_screenshot(driver, screenshot_path)
+                    driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     return {
                         "status": "investigation",
                         "message": "要調査",
@@ -1720,7 +1718,7 @@ def handle_result_page(driver, show_popup=True):
                     }
                 else:
                     screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
-                    take_full_page_screenshot(driver, screenshot_path)
+                    driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                     logging.warning(f"予期しない結果テキスト: {result_text}")
                     return {
                         "status": "failure",
@@ -1735,7 +1733,7 @@ def handle_result_page(driver, show_popup=True):
                     }
             else:
                 screenshot_path = f"debug_error_confirmation_{timestamp}.png"
-                take_full_page_screenshot(driver, screenshot_path)
+                driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
                 logging.error("結果テキストが取得できませんでした")
                 return {
                     "status": "failure",
@@ -1752,7 +1750,7 @@ def handle_result_page(driver, show_popup=True):
         except Exception as e:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             screenshot_path = f"debug_error_confirmation_{timestamp}.png"
-            take_full_page_screenshot(driver, screenshot_path)
+            driver.save_screenshot(screenshot_path)  # メモリ使用量を抑制するため軽量なスクリーンショットに変更
             logging.error(f"結果テキストの取得中にエラー: {str(e)}")
             return {
                 "status": "failure",

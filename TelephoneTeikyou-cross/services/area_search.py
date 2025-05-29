@@ -392,9 +392,9 @@ def handle_building_selection(driver, progress_callback=None):
         logging.info("建物選択モーダルが表示されました（集合住宅判定）")
         if progress_callback:
             progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
-        # スクリーンショットを保存
+        # 軽量なスクリーンショットを保存（メモリ使用量を抑制）
         screenshot_path = "apartment_detected.png"
-        take_full_page_screenshot(driver, screenshot_path)
+        driver.save_screenshot(screenshot_path)  # take_full_page_screenshotの代わりに通常のスクリーンショットを使用
         logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
         # 判定結果を返す
         return {
@@ -413,7 +413,7 @@ def handle_building_selection(driver, progress_callback=None):
         return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
-        take_full_page_screenshot(driver, "debug_building_modal_error.png")
+        driver.save_screenshot("debug_building_modal_error.png")  # こちらも軽量なスクリーンショットに変更
         raise
 
 def create_driver(headless=False):
@@ -444,10 +444,15 @@ def create_driver(headless=False):
         options.add_argument('--disable-notifications')
         options.add_argument('--disable-popup-blocking')
         
-        # メモリ使用量の最適化
+        # メモリ使用量の最適化（追加設定）
         options.add_argument('--disable-application-cache')
         options.add_argument('--aggressive-cache-discard')
         options.add_argument('--disable-default-apps')
+        options.add_argument('--max_old_space_size=512')  # JavaScript V8エンジンのメモリ上限を512MBに制限
+        options.add_argument('--memory-pressure-off')  # メモリプレッシャー通知を無効化
+        options.add_argument('--disable-background-timer-throttling')  # バックグラウンドタイマーを最適化
+        options.add_argument('--disable-backgrounding-occluded-windows')  # 隠れたウィンドウの処理を無効化
+        options.add_argument('--disable-renderer-backgrounding')  # レンダラーのバックグラウンド化を無効化
         
         driver = webdriver.Chrome(options=options)
         logging.info(f"Chromeドライバーを作成しました（ヘッドレスモード: {headless}）")
@@ -461,6 +466,7 @@ def take_full_page_screenshot(driver, save_path):
     """
     ページ全体のスクリーンショットを取得する（スクロール部分も含む）
     現在のウィンドウサイズを維持したまま撮影します
+    メモリ使用量を抑制するため、大きなページでは通常のスクリーンショットにフォールバックします
 
     Args:
         driver (webdriver): Seleniumのwebdriverインスタンス
@@ -495,6 +501,13 @@ def take_full_page_screenshot(driver, save_path):
         
         logging.info(f"ページ高さ: {total_height}, ビューポートサイズ: 幅={viewport_width}, 高さ={viewport_height}")
         
+        # メモリ使用量を抑制するため、大きなページでは通常のスクリーンショットを使用
+        max_height_for_full_screenshot = viewport_height * 3  # 3画面分まで
+        if total_height > max_height_for_full_screenshot:
+            logging.info(f"ページが大きすぎるため（{total_height}px > {max_height_for_full_screenshot}px）、通常のスクリーンショットを使用します")
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
+        
         # ページ全体が1画面に収まる場合は単純にスクリーンショットを撮影
         if total_height <= viewport_height:
             logging.info("ページ全体が1画面に収まります - 単純スクリーンショット")
@@ -503,19 +516,23 @@ def take_full_page_screenshot(driver, save_path):
         
         # スクリーンショットを保存するリスト
         screenshots = []
+        temp_files = []  # 一時ファイル管理用
         
         # スクロールの開始位置
         current_position = 0
         overlap = 100  # 画像の重複部分を多めにして継ぎ目を確実に対処
         
         screenshot_count = 0
-        while current_position < total_height:
+        max_screenshots = 8  # メモリ使用量を抑制するため、最大スクリーンショット数を制限
+        
+        while current_position < total_height and screenshot_count < max_screenshots:
             # 指定位置までスクロール
             driver.execute_script(f"window.scrollTo(0, {current_position});")
             time.sleep(1.0)  # スクロール後の描画を十分に待機
             
             # 一時的なスクリーンショットファイル名
             temp_screenshot = f"temp_screenshot_{screenshot_count}.png"
+            temp_files.append(temp_screenshot)
             
             # スクリーンショットを撮影
             driver.save_screenshot(temp_screenshot)
@@ -529,23 +546,47 @@ def take_full_page_screenshot(driver, save_path):
             # 次のスクロール位置（重複を考慮）
             current_position += viewport_height - overlap
             screenshot_count += 1
-            
-            # 無限ループ防止
-            if screenshot_count > 25:
-                logging.warning("スクリーンショット撮影回数が上限に達しました")
-                break
         
-        # 画像を読み込み
+        # 最大数に達した場合は通常のスクリーンショットにフォールバック
+        if screenshot_count >= max_screenshots:
+            logging.warning(f"スクリーンショット数が上限（{max_screenshots}）に達しました。通常のスクリーンショットを使用します。")
+            # 一時ファイルを削除
+            for temp_file in temp_files:
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
+        
+        # 画像を読み込み（メモリ効率を考慮して一つずつ処理）
         images = []
         for screenshot in screenshots:
             try:
                 img = Image.open(screenshot['path'])
+                # メモリ使用量を抑制するため、必要以上に大きな画像は制限
+                if img.width * img.height > 2000000:  # 2M pixel以上の場合はリサイズ
+                    logging.warning(f"画像が大きすぎます（{img.width}x{img.height}）。リサイズします。")
+                    # 高さを制限してリサイズ
+                    max_height = 1500
+                    if img.height > max_height:
+                        ratio = max_height / img.height
+                        new_width = int(img.width * ratio)
+                        img = img.resize((new_width, max_height), Image.Resampling.LANCZOS)
+                
                 images.append({
                     'image': img,
                     'position': screenshot['position']
                 })
             except Exception as e:
                 logging.error(f"画像の読み込みに失敗: {screenshot['path']}, エラー: {str(e)}")
+        
+        # 一時ファイルを即座に削除（メモリリーク防止）
+        for temp_file in temp_files:
+            try:
+                os.remove(temp_file)
+            except Exception as e:
+                logging.warning(f"一時ファイルの削除に失敗: {temp_file}, エラー: {str(e)}")
         
         if not images:
             logging.error("有効な画像がありません")
@@ -565,6 +606,16 @@ def take_full_page_screenshot(driver, save_path):
         combined_height = min(combined_height, total_height)
         
         logging.info(f"合成画像サイズ: 幅={max_width}, 高さ={combined_height}")
+        
+        # メモリ使用量チェック（概算）
+        estimated_memory_mb = (max_width * combined_height * 3) / (1024 * 1024)  # RGB 3バイト/ピクセル
+        if estimated_memory_mb > 100:  # 100MB以上の場合は警告
+            logging.warning(f"合成画像のメモリ使用量が大きすぎます（約{estimated_memory_mb:.1f}MB）。通常のスクリーンショットを使用します。")
+            # メモリを解放
+            for img_data in images:
+                img_data['image'].close()
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
         
         # 新しい画像を作成
         combined_image = Image.new('RGB', (max_width, combined_height), 'white')
@@ -598,13 +649,6 @@ def take_full_page_screenshot(driver, save_path):
         # 画像オブジェクトを閉じる
         for img_data in images:
             img_data['image'].close()
-        
-        # 一時ファイルを削除
-        for screenshot in screenshots:
-            try:
-                os.remove(screenshot['path'])
-            except Exception as e:
-                logging.warning(f"一時ファイルの削除に失敗: {str(e)}")
         
         logging.info(f"ページ全体のスクリーンショットを保存しました: {save_path}")
         return os.path.abspath(save_path)
