@@ -308,14 +308,16 @@ def find_best_address_match(input_address, candidates):
     
     logging.info(f"基本住所（比較用）: {base_input_address}")
     
-    # 入力住所から字名を抽出（「字」が含まれる場合）
+    # 入力住所から字名を抽出（原文から直接抽出）
     input_aza_name = None
-    if '字' in input_parts['town']:
-        # 「字」以降の部分を抽出
-        aza_parts = input_parts['town'].split('字')
-        if len(aza_parts) > 1:
-            input_aza_name = aza_parts[-1]  # 最後の「字」以降
-            logging.info(f"入力住所の字名: {input_aza_name}")
+    original_input = normalize_string(input_address)
+    if '字' in original_input:
+        # 「字」以降、数字が現れるまでの部分を抽出
+        aza_pattern = r'字([^0-9０-９一-九十百千万億兆\-－−ー]+)'
+        aza_match = re.search(aza_pattern, original_input)
+        if aza_match:
+            input_aza_name = aza_match.group(1).strip()
+            logging.info(f"入力住所の字名（原文から抽出）: {input_aza_name}")
     
     candidate_scores = []  # 各候補のスコアを記録
     
@@ -340,39 +342,62 @@ def find_best_address_match(input_address, candidates):
             # 詳細なマッチスコアを計算
             match_score = similarity
             
-            # 字名の完全一致チェック
+            # 字名の完全一致チェック（原文同士で比較）
             aza_match_bonus = 0
-            if input_aza_name and '字' in candidate_text:
-                candidate_aza_parts = candidate_text.split('字')
-                if len(candidate_aza_parts) > 1:
-                    candidate_aza_name = candidate_aza_parts[-1].strip()
-                    # 「字」以降の部分から数字や記号を除去して比較
-                    candidate_aza_clean = re.sub(r'[0-9０-９一-九十百千万億兆\-－−ー号番丁目\s]+.*$', '', candidate_aza_name)
+            candidate_aza_name = None
+            
+            if '字' in candidate_text:
+                # 候補からも字名を抽出
+                aza_pattern = r'字([^0-9０-９一-九十百千万億兆\-－−ー]+)'
+                candidate_aza_match = re.search(aza_pattern, candidate_text)
+                if candidate_aza_match:
+                    candidate_aza_name = candidate_aza_match.group(1).strip()
+                    logging.info(f"候補の字名: {candidate_aza_name}")
                     
-                    if input_aza_name == candidate_aza_clean:
-                        aza_match_bonus = 0.3  # 字名完全一致で大幅なボーナス
-                        logging.info(f"字名完全一致ボーナス: {aza_match_bonus} ('{input_aza_name}' == '{candidate_aza_clean}')")
-                    elif input_aza_name in candidate_aza_clean or candidate_aza_clean in input_aza_name:
-                        aza_match_bonus = 0.15  # 字名部分一致でボーナス
-                        logging.info(f"字名部分一致ボーナス: {aza_match_bonus}")
+                    if input_aza_name and candidate_aza_name:
+                        if input_aza_name == candidate_aza_name:
+                            aza_match_bonus = 0.5  # 字名完全一致で大幅なボーナス
+                            logging.info(f"字名完全一致ボーナス: {aza_match_bonus} ('{input_aza_name}' == '{candidate_aza_name}')")
+                        elif input_aza_name in candidate_aza_name or candidate_aza_name in input_aza_name:
+                            aza_match_bonus = 0.25  # 字名部分一致でボーナス
+                            logging.info(f"字名部分一致ボーナス: {aza_match_bonus}")
             
-            # 部分文字列の完全一致チェック
-            substring_match_bonus = 0
-            normalized_input = normalize_string(base_input_address)
-            normalized_candidate = normalize_string(base_candidate_address)
+            # より厳密な文字列一致チェック
+            exact_match_bonus = 0
+            normalized_input = normalize_string(original_input)
+            normalized_candidate = normalize_string(candidate_text)
             
-            # 3文字以上の共通部分文字列をチェック
-            for i in range(len(normalized_input) - 2):
-                for length in range(3, min(len(normalized_input) - i + 1, 10)):  # 最大9文字まで
-                    substring = normalized_input[i:i+length]
-                    if substring in normalized_candidate:
-                        substring_match_bonus = max(substring_match_bonus, length * 0.01)  # 長い一致ほど高いボーナス
+            # 重要キーワードの完全一致をチェック
+            input_keywords = set(re.findall(r'[一-龯]{2,}', normalized_input))  # 2文字以上の漢字部分
+            candidate_keywords = set(re.findall(r'[一-龯]{2,}', normalized_candidate))
             
-            if substring_match_bonus > 0:
-                logging.info(f"部分文字列一致ボーナス: {substring_match_bonus}")
+            # 共通キーワードの重要度を計算
+            common_keywords = input_keywords & candidate_keywords
+            for keyword in common_keywords:
+                keyword_bonus = len(keyword) * 0.02  # 文字数に応じたボーナス
+                exact_match_bonus += keyword_bonus
+                logging.info(f"共通キーワード '{keyword}' によるボーナス: {keyword_bonus}")
+            
+            # 最長共通部分文字列の長さによるボーナス
+            lcs_bonus = 0
+            lcs_length = calculate_longest_common_substring(normalized_input, normalized_candidate)
+            if lcs_length >= 4:  # 4文字以上の共通部分文字列
+                lcs_bonus = (lcs_length - 3) * 0.02  # 長さに応じたボーナス
+                logging.info(f"最長共通部分文字列長: {lcs_length}, ボーナス: {lcs_bonus}")
+            
+            # 候補リストでの順序によるボーナス（早い方が良い）
+            position_bonus = 0
+            try:
+                candidate_index = candidates.index(candidate)
+                # 最初の10件には順序ボーナスを付与（微細な差）
+                if candidate_index < 10:
+                    position_bonus = (10 - candidate_index) * 0.001
+                    logging.info(f"順序ボーナス（{candidate_index + 1}位）: {position_bonus}")
+            except ValueError:
+                pass
             
             # 最終的なマッチスコアを計算
-            final_match_score = match_score + aza_match_bonus + substring_match_bonus
+            final_match_score = match_score + aza_match_bonus + exact_match_bonus + lcs_bonus + position_bonus
             
             candidate_scores.append({
                 'candidate': candidate,
@@ -380,10 +405,18 @@ def find_best_address_match(input_address, candidates):
                 'match_score': final_match_score,
                 'text': candidate_text,
                 'aza_bonus': aza_match_bonus,
-                'substring_bonus': substring_match_bonus
+                'exact_match_bonus': exact_match_bonus,
+                'lcs_bonus': lcs_bonus,
+                'position_bonus': position_bonus
             })
             
-            logging.info(f"候補 '{candidate_text}' の最終スコア: {final_match_score} (基本: {similarity}, 字名: {aza_match_bonus}, 部分一致: {substring_match_bonus})")
+            logging.info(f"候補 '{candidate_text}' の詳細スコア:")
+            logging.info(f"  基本類似度: {similarity}")
+            logging.info(f"  字名ボーナス: {aza_match_bonus}")
+            logging.info(f"  完全一致ボーナス: {exact_match_bonus}")
+            logging.info(f"  最長共通部分ボーナス: {lcs_bonus}")
+            logging.info(f"  順序ボーナス: {position_bonus}")
+            logging.info(f"  最終スコア: {final_match_score}")
             
         except Exception as e:
             logging.warning(f"候補の処理中にエラー: {str(e)}")
@@ -403,20 +436,50 @@ def find_best_address_match(input_address, candidates):
         logging.info(f"  候補: {best_result['text']}")
         logging.info(f"  基本類似度: {best_similarity}")
         logging.info(f"  最終スコア: {best_match_score}")
-        logging.info(f"  字名ボーナス: {best_result['aza_bonus']}")
-        logging.info(f"  部分一致ボーナス: {best_result['substring_bonus']}")
         
         # 上位候補が複数ある場合の詳細ログ
-        if len(candidate_scores) > 1 and candidate_scores[0]['match_score'] == candidate_scores[1]['match_score']:
-            logging.warning(f"同スコアの候補が複数存在します:")
-            for i, score_info in enumerate(candidate_scores[:3]):  # 上位3つまで表示
-                logging.warning(f"  {i+1}位: {score_info['text']} (スコア: {score_info['match_score']})")
+        if len(candidate_scores) > 1:
+            score_diff = candidate_scores[0]['match_score'] - candidate_scores[1]['match_score']
+            if score_diff < 0.01:  # スコア差が0.01未満の場合
+                logging.warning(f"僅差の候補が複数存在します（スコア差: {score_diff}）:")
+                for i, score_info in enumerate(candidate_scores[:3]):  # 上位3つまで表示
+                    logging.warning(f"  {i+1}位: {score_info['text']} (スコア: {score_info['match_score']})")
     
     if best_candidate and best_similarity >= 0.5:  # 最低限の類似度しきい値
         logging.info(f"最適な候補が見つかりました（類似度: {best_similarity}）: {best_candidate.text.strip()}")
         return best_candidate, best_similarity
     
     return None, best_similarity
+
+def calculate_longest_common_substring(str1, str2):
+    """
+    2つの文字列の最長共通部分文字列の長さを計算
+    
+    Args:
+        str1 (str): 文字列1
+        str2 (str): 文字列2
+        
+    Returns:
+        int: 最長共通部分文字列の長さ
+    """
+    if not str1 or not str2:
+        return 0
+    
+    max_length = 0
+    len1, len2 = len(str1), len(str2)
+    
+    # 動的プログラミングを使用
+    dp = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+    
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            if str1[i-1] == str2[j-1]:
+                dp[i][j] = dp[i-1][j-1] + 1
+                max_length = max(max_length, dp[i][j])
+            else:
+                dp[i][j] = 0
+    
+    return max_length
 
 def create_driver(headless=False):
     """
