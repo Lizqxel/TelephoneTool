@@ -41,6 +41,7 @@ added_files = [
 datas = []
 datas += collect_data_files('selenium')
 datas += collect_data_files('webdriver_manager')
+datas += collect_data_files('PIL')  # PILライブラリのデータファイルを追加
 for src, dst in added_files:
     if os.path.exists(os.path.join(work_dir, src)):
         datas.append((os.path.join(work_dir, src), dst))
@@ -49,6 +50,7 @@ for src, dst in added_files:
 hiddenimports = []
 hiddenimports += collect_submodules('selenium')
 hiddenimports += collect_submodules('webdriver_manager')
+hiddenimports += collect_submodules('PIL')  # PILライブラリのサブモジュールを追加
 
 # 実行ファイルの設定
 a = Analysis(
