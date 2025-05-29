@@ -459,6 +459,7 @@ def create_driver(headless=False):
 def take_full_page_screenshot(driver, save_path):
     """
     ページ全体のスクリーンショットを取得する（スクロール部分も含む）
+    現在のウィンドウサイズを維持したまま撮影します
 
     Args:
         driver (webdriver): Seleniumのwebdriverインスタンス
@@ -467,86 +468,163 @@ def take_full_page_screenshot(driver, save_path):
     Returns:
         str: 保存されたスクリーンショットの絶対パス
     """
-    # 元のウィンドウサイズと位置、スクロール位置を保存
-    original_size = driver.get_window_size()
-    original_position = driver.get_window_position()
+    # 元のスクロール位置を保存
     original_scroll = driver.execute_script("return window.pageYOffset;")
 
     try:
-        # ページ全体のサイズを取得
-        total_width = driver.execute_script("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);")
-        total_height = driver.execute_script("return Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);")
+        # ページの先頭にスクロール
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.5)
         
-        # ビューポートの高さを取得
+        # ページ全体のサイズを取得
+        total_height = driver.execute_script("""
+            return Math.max(
+                document.documentElement.scrollHeight,
+                document.body.scrollHeight,
+                document.documentElement.offsetHeight,
+                document.body.offsetHeight,
+                document.documentElement.clientHeight,
+                document.body.clientHeight
+            );
+        """)
+        
+        # 現在のビューポートサイズを取得
         viewport_width = driver.execute_script("return window.innerWidth;")
         viewport_height = driver.execute_script("return window.innerHeight;")
+        
+        logging.info(f"ページ高さ: {total_height}, ビューポートサイズ: 幅={viewport_width}, 高さ={viewport_height}")
+        
+        # ページ全体が1画面に収まる場合は単純にスクリーンショットを撮影
+        if total_height <= viewport_height:
+            logging.info("ページ全体が1画面に収まります - 単純スクリーンショット")
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
         
         # スクリーンショットを保存するリスト
         screenshots = []
         
         # スクロールの開始位置
         current_position = 0
+        overlap = 100  # 画像の重複部分を多めにして継ぎ目を確実に対処
         
-        # ウィンドウサイズを設定（幅はビューポートに合わせる）
-        driver.set_window_size(viewport_width, viewport_height)
-        
+        screenshot_count = 0
         while current_position < total_height:
             # 指定位置までスクロール
             driver.execute_script(f"window.scrollTo(0, {current_position});")
-            time.sleep(0.5)  # スクロール後の描画を待機
+            time.sleep(1.0)  # スクロール後の描画を十分に待機
             
             # 一時的なスクリーンショットファイル名
-            temp_screenshot = f"temp_screenshot_{current_position}.png"
+            temp_screenshot = f"temp_screenshot_{screenshot_count}.png"
             
             # スクリーンショットを撮影
             driver.save_screenshot(temp_screenshot)
-            screenshots.append(temp_screenshot)
+            screenshots.append({
+                'path': temp_screenshot,
+                'position': current_position
+            })
             
-            # 次のスクロール位置（ビューポートの高さ分）
-            current_position += viewport_height
+            logging.info(f"スクリーンショット {screenshot_count + 1} を撮影: 位置={current_position}")
+            
+            # 次のスクロール位置（重複を考慮）
+            current_position += viewport_height - overlap
+            screenshot_count += 1
+            
+            # 無限ループ防止
+            if screenshot_count > 25:
+                logging.warning("スクリーンショット撮影回数が上限に達しました")
+                break
         
-        # スクリーンショットを合成
-        images = [Image.open(s) for s in screenshots]
+        # 画像を読み込み
+        images = []
+        for screenshot in screenshots:
+            try:
+                img = Image.open(screenshot['path'])
+                images.append({
+                    'image': img,
+                    'position': screenshot['position']
+                })
+            except Exception as e:
+                logging.error(f"画像の読み込みに失敗: {screenshot['path']}, エラー: {str(e)}")
+        
+        if not images:
+            logging.error("有効な画像がありません")
+            # フォールバック：通常のスクリーンショット
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
         
         # 合成後の画像サイズを計算
-        max_width = max(img.width for img in images)
-        total_height = min(sum(img.height for img in images), total_height)  # ページの実際の高さを超えないように
+        max_width = max(img['image'].width for img in images)
+        
+        # 実際の合成高さを計算（重複を考慮）
+        combined_height = images[0]['image'].height
+        for i in range(1, len(images)):
+            combined_height += images[i]['image'].height - overlap
+        
+        # 実際のページ高さを超えないように制限
+        combined_height = min(combined_height, total_height)
+        
+        logging.info(f"合成画像サイズ: 幅={max_width}, 高さ={combined_height}")
         
         # 新しい画像を作成
-        combined_image = Image.new('RGB', (max_width, total_height))
+        combined_image = Image.new('RGB', (max_width, combined_height), 'white')
         
         # 画像を縦に結合
         y_offset = 0
-        for img in images:
-            # 最後の画像の場合、はみ出る部分をトリミング
-            if y_offset + img.height > total_height:
-                crop_height = total_height - y_offset
-                img = img.crop((0, 0, img.width, crop_height))
+        for i, img_data in enumerate(images):
+            img = img_data['image']
+            
+            # 最初の画像以外は重複部分をカット
+            if i > 0:
+                img = img.crop((0, overlap, img.width, img.height))
+            
+            # 最後の部分で画像がはみ出る場合の処理
+            if y_offset + img.height > combined_height:
+                crop_height = combined_height - y_offset
+                if crop_height > 0:
+                    img = img.crop((0, 0, img.width, crop_height))
+                else:
+                    break
             
             combined_image.paste(img, (0, y_offset))
             y_offset += img.height
             
-            # 一時ファイルを削除
-            img.close()
+            logging.info(f"画像 {i + 1} を合成: y_offset={y_offset}")
         
         # 最終画像を保存
-        combined_image.save(save_path)
+        combined_image.save(save_path, 'PNG', quality=95)
         combined_image.close()
+        
+        # 画像オブジェクトを閉じる
+        for img_data in images:
+            img_data['image'].close()
         
         # 一時ファイルを削除
         for screenshot in screenshots:
             try:
-                os.remove(screenshot)
+                os.remove(screenshot['path'])
             except Exception as e:
                 logging.warning(f"一時ファイルの削除に失敗: {str(e)}")
         
+        logging.info(f"ページ全体のスクリーンショットを保存しました: {save_path}")
         return os.path.abspath(save_path)
         
+    except Exception as e:
+        logging.error(f"スクリーンショット撮影中にエラー: {str(e)}")
+        # エラー時のフォールバック：通常のスクリーンショット
+        try:
+            driver.save_screenshot(save_path)
+            return os.path.abspath(save_path)
+        except Exception as fallback_error:
+            logging.error(f"フォールバックスクリーンショットも失敗: {str(fallback_error)}")
+            raise
+        
     finally:
-        # ウィンドウサイズと位置、スクロール位置を元に戻す
-        driver.set_window_size(original_size['width'], original_size['height'])
-        driver.set_window_position(original_position['x'], original_position['y'])
-        driver.execute_script(f"window.scrollTo(0, {original_scroll});")
+        # スクロール位置を元に戻す
+        try:
+            driver.execute_script(f"window.scrollTo(0, {original_scroll});")
+            time.sleep(0.5)
+        except Exception as e:
+            logging.warning(f"スクロール位置の復元に失敗: {str(e)}")
 
 def search_service_area(postal_code, address, progress_callback=None):
     """
