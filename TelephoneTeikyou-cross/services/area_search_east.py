@@ -112,19 +112,62 @@ def split_address(address):
                             # 通常の場合は丁目の前の部分が町名
                             town = town_candidate
                     else:
-                        double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
-                        if double_hyphen_match:
-                            block = double_hyphen_match.group(1)
-                            number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
-                            town = remaining[:double_hyphen_match.start()].strip()
+                        # 住所パターンの智能判定
+                        # パターン1: 「町名＋1-2桁数字－番地」形式（丁目あり）
+                        # 例: "外川町4-11162" → 町名: "外川町", 丁目: "4", 番地: "11162"
+                        town_with_block_pattern = r'^(.+?町)(\d{1,2})[-－](\d{3,}(?:[-－]\d+)*)$'
+                        town_block_match = re.match(town_with_block_pattern, remaining)
+                        
+                        if town_block_match:
+                            town = town_block_match.group(1)
+                            block = town_block_match.group(2)
+                            number_part = town_block_match.group(3)
+                            logging.info(f"丁目形式を検出: 町名={town}, 丁目={block}, 番地={number_part}")
                         else:
-                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
-                            if number_match:
-                                number_part = number_match.group(1)
-                                town = remaining[:number_match.start()].strip()
+                            # パターン2: 「町名＋3桁以上数字－数字」形式（番地－号）
+                            # 例: "北堀1870-1" → 町名: "北堀", 番地: "1870", 号: "1"
+                            town_with_number_pattern = r'^(.+?)(\d{3,})[-－](\d+(?:[-－]\d+)*)$'
+                            town_number_match = re.match(town_with_number_pattern, remaining)
+                            
+                            if town_number_match:
+                                town = town_number_match.group(1).strip()
+                                block = None  # 丁目はなし
+                                number_part = f"{town_number_match.group(2)}-{town_number_match.group(3)}"
+                                logging.info(f"番地－号形式を検出: 町名={town}, 番地={number_part}")
                             else:
-                                number_part = None
-                                town = remaining
+                                # パターン3: より汎用的なパターン（従来のフォールバック）
+                                general_pattern = r'^(.+?)(\d+)[-－](\d+(?:[-－]\d+)*)$'
+                                general_match = re.match(general_pattern, remaining)
+                                
+                                if general_match:
+                                    first_number = general_match.group(2)
+                                    # 数字の桁数で判断
+                                    if len(first_number) <= 2:
+                                        # 1-2桁なら丁目として扱う
+                                        town = general_match.group(1).strip()
+                                        block = first_number
+                                        number_part = general_match.group(3)
+                                        logging.info(f"汎用丁目形式を検出: 町名={town}, 丁目={block}, 番地={number_part}")
+                                    else:
+                                        # 3桁以上なら番地として扱う
+                                        town = general_match.group(1).strip()
+                                        block = None
+                                        number_part = f"{first_number}-{general_match.group(3)}"
+                                        logging.info(f"汎用番地形式を検出: 町名={town}, 番地={number_part}")
+                                else:
+                                    double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
+                                    if double_hyphen_match:
+                                        block = double_hyphen_match.group(1)
+                                        number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
+                                        town = remaining[:double_hyphen_match.start()].strip()
+                                    else:
+                                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                                        if number_match:
+                                            number_part = number_match.group(1)
+                                            town = remaining[:number_match.start()].strip()
+                                        else:
+                                            number_part = None
+                                            town = remaining
                 
                 result = {
                     'prefecture': prefecture,
@@ -799,7 +842,41 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
             driver.execute_script("arguments[0].click();", next_button)
             logging.info("次へボタンをクリックしました")
 
-            # 建物選択画面が表示されたかチェック
+            # 分岐1: 該当する番地・号が見つからない場合のモーダル処理
+            try:
+                # モーダルメッセージの確認（短い待機時間）
+                modal_message = WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "p.ico_att.jc_c"))
+                )
+                if "該当する番地・号が見つかりませんでした" in modal_message.text:
+                    logging.info("番地・号未発見モーダルを検出しました")
+                    
+                    # モーダルの「次へ」ボタンをクリック
+                    modal_next_button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.ID, "id_modalNextButton"))
+                    )
+                    driver.execute_script("arguments[0].click();", modal_next_button)
+                    logging.info("モーダルの次へボタンをクリックしました")
+                    
+                    # SelectAddressNum1ページへの遷移を待機
+                    WebDriverWait(driver, 10).until(
+                        EC.url_contains("SelectAddressNum1")
+                    )
+                    logging.info("番地選択画面(SelectAddressNum1)へ遷移しました")
+                    
+                    # 番地選択処理
+                    return handle_address_number_selection(driver, address_parts, progress_callback, show_popup)
+                    
+            except TimeoutException:
+                logging.info("番地・号未発見モーダルは表示されませんでした")
+                # モーダルが表示されない場合は次の処理に進む
+                pass
+            except Exception as e:
+                logging.warning(f"モーダル処理中にエラー: {str(e)}")
+                # エラーが発生した場合も次の処理に進む
+                pass
+
+            # 分岐2: 建物選択画面が表示されたかチェック
             try:
                 # 建物選択画面のURLを確認
                 WebDriverWait(driver, 10).until(
@@ -1001,3 +1078,412 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
         logging.error(f"番地入力画面の処理中にエラー: {str(e)}")
         debug_page_state(driver, "エラー発生時の状態")
         raise 
+
+def handle_address_number_selection(driver, address_parts, progress_callback=None, show_popup=True):
+    """
+    番地選択画面（SelectAddressNum1/SelectAddressNum2）の処理を行う
+    
+    Args:
+        driver: WebDriverインスタンス
+        address_parts: 分割された住所情報
+        progress_callback: 進捗コールバック関数
+        show_popup: ポップアップ表示設定
+        
+    Returns:
+        dict: 処理結果
+    """
+    try:
+        logging.info("=== 番地選択画面の処理開始 ===")
+        debug_page_state(driver, "番地選択画面_初期状態")
+        
+        # 進捗更新
+        if progress_callback:
+            progress_callback("番地を選択中...")
+        
+        # 番地情報を取得
+        target_number = address_parts.get('number', '').split('-')[0] if address_parts.get('number') else None
+        logging.info(f"選択対象の番地: {target_number}")
+        
+        if not target_number:
+            logging.error("選択する番地が見つかりません")
+            return {"status": "error", "message": "選択する番地が見つかりません"}
+        
+        # SelectAddressNum1での番地選択
+        try:
+            # 番地リストの読み込み完了を待機
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "li.addressNum1"))
+            )
+            logging.info("番地リストが表示されました")
+            
+            # 番地候補を取得
+            address_candidates = driver.find_elements(By.CSS_SELECTOR, "li.addressNum1")
+            logging.info(f"{len(address_candidates)} 件の番地候補が見つかりました")
+            
+            # 最適な番地を選択
+            selected = False
+            max_attempts = 3
+            
+            for attempt in range(max_attempts):
+                try:
+                    # 番地候補を取得（毎回新しく取得してStaleElementExceptionを回避）
+                    address_candidates = driver.find_elements(By.CSS_SELECTOR, "li.addressNum1")
+                    logging.info(f"{len(address_candidates)} 件の番地候補が見つかりました")
+                    
+                    for i, candidate in enumerate(address_candidates):
+                        try:
+                            candidate_text = candidate.get_attribute("data-addressnum1")
+                            if not candidate_text:
+                                candidate_text = candidate.text.strip()
+                            
+                            # 全角数字を半角数字に変換してから数字のみを抽出
+                            zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
+                            candidate_normalized = candidate_text.translate(zen_to_han)
+                            candidate_number = re.sub(r'[^\d]', '', candidate_normalized)
+                            target_number_clean = re.sub(r'[^\d]', '', target_number)
+                            
+                            logging.info(f"候補番地: {candidate_text} → 正規化: {candidate_normalized} → 数字: {candidate_number}")
+                            
+                            if candidate_number == target_number_clean:
+                                # 番地ボタンをクリック
+                                button = candidate.find_element(By.TAG_NAME, "button")
+                                driver.execute_script("arguments[0].scrollIntoView(true);", button)
+                                time.sleep(0.5)  # スクロール完了を待つ
+                                driver.execute_script("arguments[0].click();", button)
+                                logging.info(f"番地を選択しました: {candidate_text}")
+                                selected = True
+                                break
+                        except Exception as e:
+                            logging.warning(f"候補 {i} の処理中にエラー: {str(e)}")
+                            continue
+                    
+                    if selected:
+                        break
+                        
+                except Exception as e:
+                    logging.warning(f"番地選択の試行 {attempt + 1} でエラー: {str(e)}")
+                    if attempt < max_attempts - 1:
+                        time.sleep(1)  # 1秒待機してリトライ
+                        continue
+                    else:
+                        raise
+            
+            if not selected:
+                # 完全一致しない場合は最初の候補を選択
+                logging.warning(f"完全一致する番地が見つからないため、最初の候補を選択します")
+                try:
+                    address_candidates = driver.find_elements(By.CSS_SELECTOR, "li.addressNum1")
+                    if address_candidates:
+                        first_candidate = address_candidates[0]
+                        button = first_candidate.find_element(By.TAG_NAME, "button")
+                        driver.execute_script("arguments[0].scrollIntoView(true);", button)
+                        time.sleep(0.5)
+                        driver.execute_script("arguments[0].click();", button)
+                        logging.info(f"最初の候補を選択しました: {first_candidate.text}")
+                        selected = True
+                except Exception as e:
+                    logging.error(f"最初の候補選択でもエラー: {str(e)}")
+                    raise
+            
+            # 次の画面への遷移を待機
+            time.sleep(2)
+            current_url = driver.current_url
+            logging.info(f"番地選択後のURL: {current_url}")
+            
+            # 遷移先の判定
+            if "SelectBuild1" in current_url:
+                # 建物選択画面に遷移 → 集合住宅判定
+                logging.info("建物選択画面に遷移しました")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_path = f"debug_apartment_confirmation_{timestamp}.png"
+                take_full_page_screenshot(driver, screenshot_path)
+                return {
+                    "status": "apartment",
+                    "message": "集合住宅",
+                    "details": {
+                        "判定結果": "NG",
+                        "提供エリア": "集合住宅",
+                        "備考": "集合住宅のため、判定を終了します"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": show_popup
+                }
+                
+            elif "SelectAddressNum2" in current_url:
+                # 号選択画面に遷移
+                logging.info("号選択画面(SelectAddressNum2)に遷移しました")
+                return handle_go_selection(driver, address_parts, progress_callback, show_popup)
+                
+            elif "ProvideResult" in current_url:
+                # 結果画面に直接遷移
+                logging.info("結果画面に直接遷移しました")
+                return handle_result_page(driver, show_popup)
+                
+            else:
+                # 予期しない遷移
+                logging.warning(f"予期しない遷移先: {current_url}")
+                # 10秒待機して再度確認
+                time.sleep(10)
+                current_url = driver.current_url
+                
+                if "ProvideResult" in current_url:
+                    return handle_result_page(driver, show_popup)
+                else:
+                    return {"status": "error", "message": "予期しない画面に遷移しました"}
+                    
+        except Exception as e:
+            logging.error(f"番地選択処理中にエラー: {str(e)}")
+            debug_page_state(driver, "番地選択_エラー")
+            raise
+            
+    except Exception as e:
+        logging.error(f"番地選択画面の処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"番地選択処理中にエラーが発生しました: {str(e)}"}
+
+def handle_go_selection(driver, address_parts, progress_callback=None, show_popup=True):
+    """
+    号選択画面（SelectAddressNum2）の処理を行う
+    
+    Args:
+        driver: WebDriverインスタンス
+        address_parts: 分割された住所情報
+        progress_callback: 進捗コールバック関数
+        show_popup: ポップアップ表示設定
+        
+    Returns:
+        dict: 処理結果
+    """
+    try:
+        logging.info("=== 号選択画面の処理開始 ===")
+        debug_page_state(driver, "号選択画面_初期状態")
+        
+        # 進捗更新
+        if progress_callback:
+            progress_callback("号を選択中...")
+        
+        # 号情報を取得（番地の2番目の部分）
+        number_parts = address_parts.get('number', '').split('-')
+        target_go = number_parts[1] if len(number_parts) > 1 else "1"
+        logging.info(f"選択対象の号: {target_go}")
+        
+        # 号リストの読み込み完了を待機
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "li.addressNum2"))
+        )
+        logging.info("号リストが表示されました")
+        
+        # 号候補を取得
+        go_candidates = driver.find_elements(By.CSS_SELECTOR, "li.addressNum2")
+        logging.info(f"{len(go_candidates)} 件の号候補が見つかりました")
+        
+        # 最適な号を選択
+        selected = False
+        for candidate in go_candidates:
+            candidate_text = candidate.get_attribute("data-addressnum2")
+            if not candidate_text:
+                candidate_text = candidate.text.strip()
+            
+            # 全角数字を半角数字に変換してから数字のみを抽出
+            zen_to_han = str.maketrans('０１２３４５６７８９', '0123456789')
+            candidate_normalized = candidate_text.translate(zen_to_han)
+            candidate_go = re.sub(r'[^\d]', '', candidate_normalized)
+            target_go_clean = re.sub(r'[^\d]', '', target_go)
+            
+            logging.info(f"候補号: {candidate_text} → 正規化: {candidate_normalized} → 数字: {candidate_go}")
+            
+            if candidate_go == target_go_clean:
+                # 号ボタンをクリック
+                button = candidate.find_element(By.TAG_NAME, "button")
+                driver.execute_script("arguments[0].scrollIntoView(true);", button)
+                time.sleep(0.5)  # スクロール完了を待つ
+                driver.execute_script("arguments[0].click();", button)
+                logging.info(f"号を選択しました: {candidate_text}")
+                selected = True
+                break
+        
+        if not selected:
+            # 完全一致しない場合は最初の候補を選択
+            logging.warning(f"完全一致する号が見つからないため、最初の候補を選択します")
+            first_candidate = go_candidates[0]
+            button = first_candidate.find_element(By.TAG_NAME, "button")
+            driver.execute_script("arguments[0].scrollIntoView(true);", button)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].click();", button)
+            logging.info(f"最初の候補を選択しました: {first_candidate.text}")
+        
+        # 結果画面への遷移を待機
+        WebDriverWait(driver, 10).until(
+            EC.url_contains("ProvideResult")
+        )
+        logging.info("結果画面へ遷移しました")
+        
+        # 結果画面の処理
+        return handle_result_page(driver, show_popup)
+        
+    except Exception as e:
+        logging.error(f"号選択画面の処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"号選択処理中にエラーが発生しました: {str(e)}"}
+
+def handle_result_page(driver, show_popup=True):
+    """
+    結果画面の処理を行う
+    
+    Args:
+        driver: WebDriverインスタンス
+        show_popup: ポップアップ表示設定
+        
+    Returns:
+        dict: 処理結果
+    """
+    try:
+        logging.info("=== 結果画面の処理開始 ===")
+        debug_page_state(driver, "結果画面_表示")
+
+        # 結果テキストの取得
+        try:
+            # まず、ローディング表示が消えるのを待つ
+            WebDriverWait(driver, 10).until_not(
+                EC.presence_of_element_located((By.CLASS_NAME, "loading"))
+            )
+            
+            # 結果テキストを取得（複数の方法で試行）
+            result_text = None
+            
+            # 結果テキストの取得方法
+            selectors = [
+                (By.XPATH, "//div[contains(@class, 'main_wrap')]//h1/following-sibling::div"),
+                (By.CLASS_NAME, "resultText"),
+                (By.XPATH, "//div[contains(text(), 'フレッツ光') and contains(text(), 'エリア')]"),
+                (By.XPATH, "//div[contains(@class, 'main_wrap')]//div[contains(text(), 'エリア')]"),
+                (By.XPATH, "//h1[contains(text(), 'エリア')]"),
+                (By.XPATH, "//div[contains(@class, 'result')]"),
+                (By.XPATH, "//div[contains(@class, 'main_wrap')]//div[not(@class)]")
+            ]
+
+            for selector_type, selector in selectors:
+                try:
+                    element = WebDriverWait(driver, 3).until(
+                        EC.presence_of_element_located((selector_type, selector))
+                    )
+                    if element and element.is_displayed():
+                        result_text = element.text.strip()
+                        logging.info(f"結果テキストを取得: {result_text} (セレクター: {selector})")
+                        if result_text:
+                            break
+                except Exception as e:
+                    logging.debug(f"セレクター {selector} での検索に失敗: {str(e)}")
+                    continue
+
+            # 結果が見つからない場合、ページ全体のテキストから判定
+            if not result_text:
+                logging.info("個別の要素での結果テキスト取得に失敗。ページ全体から検索を試みます。")
+                page_text = driver.find_element(By.TAG_NAME, "body").text
+                if "提供エリアです" in page_text:
+                    result_text = "提供エリアです"
+                    logging.info("ページテキストから「提供エリアです」を検出")
+                elif "提供エリア外です" in page_text:
+                    result_text = "提供エリア外です"
+                    logging.info("ページテキストから「提供エリア外です」を検出")
+                elif "詳しい状況確認が必要" in page_text:
+                    result_text = "要調査"
+                    logging.info("ページテキストから「詳しい状況確認が必要」を検出")
+
+            logging.info(f"最終的な結果テキスト: {result_text}")
+
+            # スクリーンショットを保存
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            
+            if result_text:
+                if "提供エリアです" in result_text or "の提供エリアです" in result_text:
+                    screenshot_path = f"debug_available_confirmation_{timestamp}.png"
+                    take_full_page_screenshot(driver, screenshot_path)
+                    return {
+                        "status": "available",
+                        "message": "提供可能",
+                        "details": {
+                            "判定結果": "OK",
+                            "提供エリア": "提供可能エリアです",
+                            "備考": "フレッツ光のサービスがご利用いただけます"
+                        },
+                        "screenshot": screenshot_path,
+                        "show_popup": show_popup
+                    }
+                elif "提供エリア外です" in result_text or "エリア外" in result_text:
+                    screenshot_path = f"debug_not_provided_confirmation_{timestamp}.png"
+                    take_full_page_screenshot(driver, screenshot_path)
+                    return {
+                        "status": "unavailable",
+                        "message": "未提供",
+                        "details": {
+                            "判定結果": "NG",
+                            "提供エリア": "提供対象外エリアです",
+                            "備考": "申し訳ございませんが、このエリアではサービスを提供しておりません"
+                        },
+                        "screenshot": screenshot_path,
+                        "show_popup": show_popup
+                    }
+                elif "要調査" in result_text or "詳しい状況確認が必要" in result_text:
+                    screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
+                    take_full_page_screenshot(driver, screenshot_path)
+                    return {
+                        "status": "investigation",
+                        "message": "要調査",
+                        "details": {
+                            "判定結果": "要調査",
+                            "提供エリア": "詳しい状況確認が必要です",
+                            "備考": "ご指定の住所は『光アクセスサービス』の詳しい状況確認が必要です。"
+                        },
+                        "screenshot": screenshot_path,
+                        "show_popup": show_popup
+                    }
+                else:
+                    screenshot_path = f"debug_investigation_confirmation_{timestamp}.png"
+                    take_full_page_screenshot(driver, screenshot_path)
+                    logging.warning(f"予期しない結果テキスト: {result_text}")
+                    return {
+                        "status": "failure",
+                        "message": "判定失敗",
+                        "details": {
+                            "判定結果": "判定失敗",
+                            "提供エリア": "調査が必要なエリアです",
+                            "備考": "住所を特定できないため、担当者がお調べします"
+                        },
+                        "screenshot": screenshot_path,
+                        "show_popup": show_popup
+                    }
+            else:
+                screenshot_path = f"debug_error_confirmation_{timestamp}.png"
+                take_full_page_screenshot(driver, screenshot_path)
+                logging.error("結果テキストが取得できませんでした")
+                return {
+                    "status": "failure",
+                    "message": "判定失敗",
+                    "details": {
+                        "判定結果": "判定失敗",
+                        "提供エリア": "判定できませんでした",
+                        "備考": "結果テキストが取得できませんでした"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": show_popup
+                }
+
+        except Exception as e:
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            screenshot_path = f"debug_error_confirmation_{timestamp}.png"
+            take_full_page_screenshot(driver, screenshot_path)
+            logging.error(f"結果テキストの取得中にエラー: {str(e)}")
+            return {
+                "status": "failure",
+                "message": "判定失敗",
+                "details": {
+                    "判定結果": "判定失敗",
+                    "提供エリア": "判定できませんでした",
+                    "備考": f"結果の判定に失敗しました: {str(e)}"
+                },
+                "screenshot": screenshot_path,
+                "show_popup": show_popup
+            }
+
+    except Exception as e:
+        logging.error(f"結果画面の処理中にエラー: {str(e)}")
+        return {"status": "error", "message": f"結果画面の処理中にエラーが発生しました: {str(e)}"} 
