@@ -310,14 +310,45 @@ def find_best_address_match(input_address, candidates):
     
     # 入力住所から字名を抽出（原文から直接抽出）
     input_aza_name = None
-    original_input = normalize_string(input_address)
-    if '字' in original_input:
-        # 「字」以降、数字が現れるまでの部分を抽出
-        aza_pattern = r'字([^0-9０-９一-九十百千万億兆\-－−ー]+)'
-        aza_match = re.search(aza_pattern, original_input)
+    original_input_raw = input_address  # 正規化前の原文
+    logging.info(f"原文（正規化前）: {original_input_raw}")
+    
+    if '字' in original_input_raw:
+        # 「字」以降、数字（ただし地名として使われる漢数字は除く）が現れるまでの部分を抽出
+        # 改良：「丁目」「番」「号」などの前、または半角数字の前で区切る
+        aza_pattern = r'字([^0-9０-９\-－−ー番号]+?)(?=\d|番|号|$)'
+        logging.info(f"字名抽出パターン: {aza_pattern}")
+        aza_match = re.search(aza_pattern, original_input_raw)
         if aza_match:
             input_aza_name = aza_match.group(1).strip()
-            logging.info(f"入力住所の字名（原文から抽出）: {input_aza_name}")
+            logging.info(f"入力住所の字名（正規表現で抽出）: '{input_aza_name}'")
+        else:
+            logging.info(f"正規表現での字名抽出に失敗。フォールバック処理を実行します。")
+            # フォールバック：「字」以降の部分を取得
+            aza_index = original_input_raw.find('字')
+            if aza_index != -1:
+                after_aza = original_input_raw[aza_index + 1:]
+                logging.info(f"「字」以降の文字列: '{after_aza}'")
+                # 最初の半角数字の位置を探す
+                digit_match = re.search(r'\d', after_aza)
+                if digit_match:
+                    input_aza_name = after_aza[:digit_match.start()].strip()
+                    logging.info(f"数字前までの文字列: '{input_aza_name}'")
+                else:
+                    # 数字が見つからない場合は全体を字名とする
+                    input_aza_name = after_aza.strip()
+                    logging.info(f"数字なし、全体を字名とする: '{input_aza_name}'")
+    else:
+        logging.info(f"「字」が含まれていません")
+    
+    logging.info(f"最終的に抽出された入力住所の字名: '{input_aza_name}'")
+    
+    # 正規化後の住所（住所比較用）
+    original_input = normalize_string(input_address)
+    logging.info(f"原文（正規化後）: {original_input}")
+    
+    if not input_aza_name:
+        logging.info("入力住所から字名を抽出できませんでした")
     
     candidate_scores = []  # 各候補のスコアを記録
     
@@ -348,50 +379,70 @@ def find_best_address_match(input_address, candidates):
             
             if '字' in candidate_text:
                 # 候補からも字名を抽出
-                aza_pattern = r'字([^0-9０-９一-九十百千万億兆\-－−ー]+)'
+                logging.info(f"候補原文: '{candidate_text}'")
+                aza_pattern = r'字([^0-9０-９\-－−ー番号]+?)(?=\d|番|号|$)'
                 candidate_aza_match = re.search(aza_pattern, candidate_text)
                 if candidate_aza_match:
                     candidate_aza_name = candidate_aza_match.group(1).strip()
-                    logging.info(f"候補の字名: {candidate_aza_name}")
+                    logging.info(f"候補の字名（正規表現）: '{candidate_aza_name}'")
+                else:
+                    # フォールバック：「字」以降の部分を取得
+                    aza_index = candidate_text.find('字')
+                    if aza_index != -1:
+                        after_aza = candidate_text[aza_index + 1:]
+                        # 最初の半角数字の位置を探す
+                        digit_match = re.search(r'\d', after_aza)
+                        if digit_match:
+                            candidate_aza_name = after_aza[:digit_match.start()].strip()
+                        else:
+                            candidate_aza_name = after_aza.strip()
+                        logging.info(f"候補の字名（フォールバック）: '{candidate_aza_name}'")
+                
+                if candidate_aza_name:
+                    logging.info(f"字名比較: 入力='{input_aza_name}' vs 候補='{candidate_aza_name}'")
                     
                     if input_aza_name and candidate_aza_name:
                         if input_aza_name == candidate_aza_name:
-                            aza_match_bonus = 0.5  # 字名完全一致で大幅なボーナス
-                            logging.info(f"字名完全一致ボーナス: {aza_match_bonus} ('{input_aza_name}' == '{candidate_aza_name}')")
+                            aza_match_bonus = 1.0  # 字名完全一致で決定的なボーナス
+                            logging.info(f"★字名完全一致ボーナス: {aza_match_bonus} ('{input_aza_name}' == '{candidate_aza_name}')")
                         elif input_aza_name in candidate_aza_name or candidate_aza_name in input_aza_name:
-                            aza_match_bonus = 0.25  # 字名部分一致でボーナス
+                            aza_match_bonus = 0.5  # 字名部分一致でボーナス
                             logging.info(f"字名部分一致ボーナス: {aza_match_bonus}")
+                        else:
+                            logging.info(f"字名不一致: ボーナスなし")
             
             # より厳密な文字列一致チェック
             exact_match_bonus = 0
-            normalized_input = normalize_string(original_input)
+            normalized_input = original_input  # 既に正規化済み
             normalized_candidate = normalize_string(candidate_text)
             
-            # 重要キーワードの完全一致をチェック
-            input_keywords = set(re.findall(r'[一-龯]{2,}', normalized_input))  # 2文字以上の漢字部分
-            candidate_keywords = set(re.findall(r'[一-龯]{2,}', normalized_candidate))
+            # 重要キーワードの完全一致をチェック（字名一致がない場合のみ）
+            if aza_match_bonus == 0:
+                input_keywords = set(re.findall(r'[一-龯]{2,}', normalized_input))  # 2文字以上の漢字部分
+                candidate_keywords = set(re.findall(r'[一-龯]{2,}', normalized_candidate))
+                
+                # 共通キーワードの重要度を計算
+                common_keywords = input_keywords & candidate_keywords
+                for keyword in common_keywords:
+                    keyword_bonus = len(keyword) * 0.01  # 字名一致がない場合のみ適用
+                    exact_match_bonus += keyword_bonus
+                    logging.info(f"共通キーワード '{keyword}' によるボーナス: {keyword_bonus}")
             
-            # 共通キーワードの重要度を計算
-            common_keywords = input_keywords & candidate_keywords
-            for keyword in common_keywords:
-                keyword_bonus = len(keyword) * 0.02  # 文字数に応じたボーナス
-                exact_match_bonus += keyword_bonus
-                logging.info(f"共通キーワード '{keyword}' によるボーナス: {keyword_bonus}")
-            
-            # 最長共通部分文字列の長さによるボーナス
+            # 最長共通部分文字列の長さによるボーナス（字名一致がない場合のみ）
             lcs_bonus = 0
-            lcs_length = calculate_longest_common_substring(normalized_input, normalized_candidate)
-            if lcs_length >= 4:  # 4文字以上の共通部分文字列
-                lcs_bonus = (lcs_length - 3) * 0.02  # 長さに応じたボーナス
-                logging.info(f"最長共通部分文字列長: {lcs_length}, ボーナス: {lcs_bonus}")
+            if aza_match_bonus == 0:
+                lcs_length = calculate_longest_common_substring(normalized_input, normalized_candidate)
+                if lcs_length >= 4:  # 4文字以上の共通部分文字列
+                    lcs_bonus = (lcs_length - 3) * 0.01  # 字名一致がない場合のみ適用
+                    logging.info(f"最長共通部分文字列長: {lcs_length}, ボーナス: {lcs_bonus}")
             
-            # 候補リストでの順序によるボーナス（早い方が良い）
+            # 候補リストでの順序によるボーナス（微細な差のみ）
             position_bonus = 0
             try:
                 candidate_index = candidates.index(candidate)
-                # 最初の10件には順序ボーナスを付与（微細な差）
+                # 最初の10件には順序ボーナスを付与（非常に微細な差）
                 if candidate_index < 10:
-                    position_bonus = (10 - candidate_index) * 0.001
+                    position_bonus = (10 - candidate_index) * 0.0001  # より小さな値に調整
                     logging.info(f"順序ボーナス（{candidate_index + 1}位）: {position_bonus}")
             except ValueError:
                 pass
