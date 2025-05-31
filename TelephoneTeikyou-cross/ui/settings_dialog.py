@@ -7,9 +7,11 @@
 
 import json
 import os
+import logging
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QMessageBox, QSlider,
-                              QGroupBox, QCheckBox, QScrollArea, QWidget)
+                              QGroupBox, QCheckBox, QScrollArea, QWidget,
+                              QRadioButton)
 from PySide6.QtCore import Qt
 
 
@@ -25,7 +27,7 @@ class SettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("設定")
-        self.setFixedSize(700, 400)  # ダイアログサイズを固定
+        self.setFixedSize(700, 500)  # ダイアログサイズを少し大きく調整
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -43,13 +45,21 @@ class SettingsDialog(QDialog):
             "auto_close": False
         }
         
+        # デフォルトのGoogle検索設定
+        self.default_google_search_settings = {
+            "search_mode": "embedded",  # "embedded", "external", "disabled"
+            "enable_search": True
+        }
+        
         # 親ウィンドウから現在の設定を取得
         if parent and hasattr(parent, 'settings'):
             self.current_font_size = parent.settings.get('font_size', self.default_font_size)
             self.current_browser_settings = parent.settings.get('browser_settings', self.default_browser_settings)
+            self.current_google_search_settings = parent.settings.get('google_search_settings', self.default_google_search_settings)
         else:
             self.current_font_size = self.default_font_size
             self.current_browser_settings = self.default_browser_settings
+            self.current_google_search_settings = self.default_google_search_settings
         
         # メインレイアウト
         main_layout = QVBoxLayout(self)
@@ -166,6 +176,63 @@ class SettingsDialog(QDialog):
         browser_group.setLayout(browser_layout)
         content_layout.addWidget(browser_group)
         
+        # Google検索設定グループ
+        google_search_group = QGroupBox("Google検索設定")
+        google_search_layout = QVBoxLayout()
+        
+        # Google検索設定の説明
+        google_search_description = QLabel("電話番号・住所での自動Google検索の動作を設定します。")
+        google_search_description.setWordWrap(True)
+        google_search_layout.addWidget(google_search_description)
+        
+        # Google検索有効化設定
+        self.enable_search_checkbox = QCheckBox("Google検索機能を有効にする")
+        self.enable_search_checkbox.setChecked(self.current_google_search_settings.get("enable_search", True))
+        self.enable_search_checkbox.setToolTip("無効にするとGoogle検索機能が完全に停止します")
+        google_search_layout.addWidget(self.enable_search_checkbox)
+        
+        # 検索方式選択
+        search_mode_label = QLabel("検索方式:")
+        search_mode_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        google_search_layout.addWidget(search_mode_label)
+        
+        # アプリ内表示ラジオボタン
+        self.embedded_radio = QRadioButton("アプリ内で表示（QWebEngineView）")
+        self.embedded_radio.setToolTip("アプリ内でGoogle検索結果を表示します。高機能ですがリソースを多く使用します。")
+        current_mode = self.current_google_search_settings.get("search_mode", "embedded")
+        self.embedded_radio.setChecked(current_mode == "embedded")
+        google_search_layout.addWidget(self.embedded_radio)
+        
+        # 外部ブラウザ起動ラジオボタン
+        self.external_radio = QRadioButton("外部ブラウザで開く")
+        self.external_radio.setToolTip("システムの既定ブラウザでGoogle検索を開きます。軽量で安定しています。")
+        self.external_radio.setChecked(current_mode == "external")
+        google_search_layout.addWidget(self.external_radio)
+        
+        # 無効化ラジオボタン
+        self.disabled_radio = QRadioButton("Google検索を実行しない")
+        self.disabled_radio.setToolTip("Google検索機能を完全に無効化します。最も軽量です。")
+        self.disabled_radio.setChecked(current_mode == "disabled")
+        google_search_layout.addWidget(self.disabled_radio)
+        
+        # 検索機能有効化チェックボックスとラジオボタンの連動
+        def toggle_search_mode_controls():
+            enabled = self.enable_search_checkbox.isChecked()
+            self.embedded_radio.setEnabled(enabled)
+            self.external_radio.setEnabled(enabled)
+            self.disabled_radio.setEnabled(enabled)
+            
+            # 無効化時は自動的に「実行しない」を選択
+            if not enabled:
+                self.disabled_radio.setChecked(True)
+        
+        self.enable_search_checkbox.toggled.connect(toggle_search_mode_controls)
+        # 初期状態を適用
+        toggle_search_mode_controls()
+        
+        google_search_group.setLayout(google_search_layout)
+        content_layout.addWidget(google_search_group)
+        
         # スクロールエリアにコンテンツを設定
         scroll_area.setWidget(content_widget)
         main_layout.addWidget(scroll_area)
@@ -226,9 +293,25 @@ class SettingsDialog(QDialog):
             self.page_load_timeout_slider.setValue(browser_settings.get('page_load_timeout', 30))
             self.script_timeout_slider.setValue(browser_settings.get('script_timeout', 30))
             
+            # Google検索設定
+            google_search_settings = settings.get('google_search_settings', self.default_google_search_settings)
+            
+            # Google検索有効化設定
+            self.enable_search_checkbox.setChecked(google_search_settings.get('enable_search', True))
+            
+            # 検索方式設定
+            search_mode = google_search_settings.get('search_mode', 'embedded')
+            if search_mode == 'embedded':
+                self.embedded_radio.setChecked(True)
+            elif search_mode == 'external':
+                self.external_radio.setChecked(True)
+            else:
+                self.disabled_radio.setChecked(True)
+            
             # 現在の設定を更新
             self.current_font_size = font_size
             self.current_browser_settings = browser_settings
+            self.current_google_search_settings = google_search_settings
             
         except Exception as e:
             logging.error(f"設定の適用中にエラー: {str(e)}")
@@ -241,6 +324,14 @@ class SettingsDialog(QDialog):
         Returns:
             dict: 設定データ
         """
+        # 検索方式を取得
+        if self.embedded_radio.isChecked():
+            search_mode = "embedded"
+        elif self.external_radio.isChecked():
+            search_mode = "external"
+        else:
+            search_mode = "disabled"
+        
         return {
             'font_size': self.font_size_slider.value(),
             'browser_settings': {
@@ -250,5 +341,9 @@ class SettingsDialog(QDialog):
                 'auto_close': self.auto_close_checkbox.isChecked(),
                 'page_load_timeout': self.page_load_timeout_slider.value(),
                 'script_timeout': self.script_timeout_slider.value()
+            },
+            'google_search_settings': {
+                'enable_search': self.enable_search_checkbox.isChecked(),
+                'search_mode': search_mode
             }
         } 

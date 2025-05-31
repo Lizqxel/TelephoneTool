@@ -498,17 +498,15 @@ class MainWindow(QMainWindow):
         """)
         address_layout.addWidget(self.search_count_label)
         
-        # QWebEngineView（Google検索結果表示用）をここで生成・追加
-        self.web_view = QWebEngineView()
-        self.web_view.setVisible(False)  # 初期表示は非表示
-        self.web_view.setMinimumHeight(300)
-        self.web_view.setMaximumHeight(500)
-        self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        address_layout.addWidget(self.web_view)
+        # QWebEngineView（Google検索結果表示用）は設定読み込み後に条件分岐で初期化
+        self.web_view = None  # 初期はNone
         
         # 住所情報グループをレイアウトに追加
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
+        
+        # レイアウトを保存（後でWebViewを追加するため）
+        self.address_layout = address_layout
     
     def load_settings(self):
         """設定ファイルを読み込む"""
@@ -524,6 +522,10 @@ class MainWindow(QMainWindow):
                     'auto_close': True,
                     'page_load_timeout': 60,
                     'script_timeout': 60
+                },
+                'google_search_settings': {
+                    'enable_search': True,
+                    'search_mode': 'embedded'  # 'embedded', 'external', 'disabled'
                 }
             }
             
@@ -538,11 +540,50 @@ class MainWindow(QMainWindow):
             
             # WebView再初期化間隔を設定から取得
             self.webview_refresh_interval = self.settings.get('webview_refresh_interval', 5)
+            
+            # Google検索設定に応じてWebViewを初期化
+            self.initialize_webview_if_needed()
+            
             logging.info(f"設定を読み込みました - WebView再初期化間隔: {self.webview_refresh_interval}件")
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
+    
+    def initialize_webview_if_needed(self):
+        """
+        Google検索設定に応じてWebViewを初期化する
+        """
+        try:
+            google_search_settings = self.settings.get('google_search_settings', {})
+            enable_search = google_search_settings.get('enable_search', True)
+            search_mode = google_search_settings.get('search_mode', 'embedded')
+            
+            # アプリ内表示モードかつ検索が有効な場合のみWebViewを初期化
+            if enable_search and search_mode == 'embedded':
+                if self.web_view is None:
+                    # WebViewを初期化
+                    self.web_view = QWebEngineView()
+                    self.web_view.setVisible(False)  # 初期表示は非表示
+                    self.web_view.setMinimumHeight(300)
+                    self.web_view.setMaximumHeight(500)
+                    self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                    
+                    # レイアウトに追加
+                    if hasattr(self, 'address_layout') and self.address_layout:
+                        self.address_layout.addWidget(self.web_view)
+                    
+                    logging.info("Google検索用WebViewを初期化しました")
+            else:
+                # WebViewが不要な場合は削除
+                if self.web_view is not None:
+                    self.web_view.setParent(None)
+                    self.web_view.deleteLater()
+                    self.web_view = None
+                    logging.info("Google検索用WebViewを削除しました")
+                    
+        except Exception as e:
+            logging.error(f"WebView初期化エラー: {str(e)}")
     
     def save_settings(self):
         """設定をファイルに保存"""
@@ -568,7 +609,7 @@ class MainWindow(QMainWindow):
                 self.settings.update(new_settings)
                 # 設定を保存
                 self.save_settings()
-                # 設定を再読み込み
+                # 設定を再読み込み（WebViewの初期化も含む）
                 self.load_settings()
                 # フォントサイズを適用
                 self.apply_font_size()
@@ -1027,10 +1068,9 @@ class MainWindow(QMainWindow):
             address = self.address_input.text().strip()
             
             if phone or address:
-                # カウンターを減らして再実行（重複カウントを避ける）
-                self.google_search_count -= 1
-                self.start_google_search_embed(phone, address)
-                logging.info("検索を再実行しました")
+                # 手動リフレッシュ時はカウントを増やさずに再検索
+                self.start_google_search_embedded_internal_no_count(phone, address)
+                logging.info("検索を再実行しました（カウント無し）")
             else:
                 QMessageBox.information(
                     self, 
@@ -1171,7 +1211,171 @@ class MainWindow(QMainWindow):
 
     def start_google_search_embed(self, phone, address):
         """
-        電話番号または住所でGoogle検索し、QWebEngineViewに結果を表示する
+        電話番号または住所でGoogle検索し、設定に応じて表示方法を切り替える
+        """
+        try:
+            # Google検索設定を取得
+            google_search_settings = self.settings.get('google_search_settings', {})
+            enable_search = google_search_settings.get('enable_search', True)
+            search_mode = google_search_settings.get('search_mode', 'embedded')
+            
+            # Google検索が無効の場合は何もしない
+            if not enable_search or search_mode == 'disabled':
+                logging.info("Google検索機能が無効化されているため、検索をスキップします")
+                return
+            
+            # 外部ブラウザモードの場合
+            if search_mode == 'external':
+                self.open_google_search_external(phone, address)
+                return
+            
+            # アプリ内表示モード（既存実装）
+            if search_mode == 'embedded':
+                self.start_google_search_embedded_internal(phone, address)
+                return
+            
+        except Exception as e:
+            logging.error(f"Google検索処理選択エラー: {str(e)}")
+    
+    def open_google_search_external(self, phone, address):
+        """
+        外部ブラウザでGoogle検索を開く（提供判定ウィンドウと同じサイズ）
+        
+        Args:
+            phone (str): 電話番号
+            address (str): 住所
+        """
+        try:
+            import subprocess
+            import shutil
+            import webbrowser
+            from urllib.parse import quote
+            
+            # 検索クエリを決定
+            if phone:
+                # ハイフンなしで検索
+                phone_no_hyphen = phone.replace("-", "")
+                search_query = phone_no_hyphen
+            else:
+                # 住所で検索
+                search_query = address
+            
+            # Google検索URLを構築（URLエンコード）
+            encoded_query = quote(search_query)
+            url = f"https://www.google.com/search?q={encoded_query}"
+            
+            # ブラウザを特定サイズで起動を試行
+            browser_launched = False
+            
+            # Chrome を試行
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                shutil.which("chrome"),
+                shutil.which("google-chrome")
+            ]
+            
+            for chrome_path in chrome_paths:
+                if chrome_path and shutil.which(chrome_path):
+                    try:
+                        subprocess.Popen([
+                            chrome_path,
+                            f"--window-size=800,600",
+                            f"--window-position=100,100",
+                            url
+                        ], shell=False)
+                        browser_launched = True
+                        logging.info(f"Chromeの新しいタブでGoogle検索を開きました: {search_query}")
+                        break
+                    except Exception as e:
+                        logging.warning(f"Chrome起動に失敗: {str(e)}")
+                        continue
+            
+            # Chrome起動に失敗した場合、Microsoft Edge を試行
+            if not browser_launched:
+                edge_paths = [
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                    shutil.which("msedge"),
+                    shutil.which("edge")
+                ]
+                
+                for edge_path in edge_paths:
+                    if edge_path and shutil.which(edge_path):
+                        try:
+                            subprocess.Popen([
+                                edge_path,
+                                f"--window-size=800,600",
+                                f"--window-position=100,100",
+                                url
+                            ], shell=False)
+                            browser_launched = True
+                            logging.info(f"Microsoft Edgeの新しいタブでGoogle検索を開きました: {search_query}")
+                            break
+                        except Exception as e:
+                            logging.warning(f"Edge起動に失敗: {str(e)}")
+                            continue
+            
+            # PowerShellを使った方法を試行
+            if not browser_launched:
+                try:
+                    powershell_script = f'''
+$chrome = Get-Process chrome -ErrorAction SilentlyContinue
+if ($chrome) {{
+    Start-Process chrome -ArgumentList "--window-size=800,600", "--window-position=100,100", "{url}"
+}} else {{
+    $edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+    if (Test-Path $edge) {{
+        Start-Process $edge -ArgumentList "--window-size=800,600", "--window-position=100,100", "{url}"
+    }} else {{
+        Start-Process "{url}"
+    }}
+}}
+'''
+                    subprocess.run([
+                        "powershell", "-Command", powershell_script
+                    ], shell=True, check=False)
+                    browser_launched = True
+                    logging.info(f"PowerShellで新しいタブでGoogle検索を開きました: {search_query}")
+                except Exception as e:
+                    logging.warning(f"PowerShell起動に失敗: {str(e)}")
+            
+            # 上記すべてが失敗した場合、通常のwebbrowser.openを使用
+            if not browser_launched:
+                webbrowser.open(url)
+                logging.info(f"フォールバック: 標準ブラウザでGoogle検索を開きました: {search_query}")
+                QMessageBox.information(
+                    self, 
+                    "情報", 
+                    "ブラウザを指定サイズで起動できませんでした。\n標準ブラウザで検索を開きました。"
+                )
+            
+        except Exception as e:
+            logging.error(f"外部ブラウザでのGoogle検索起動エラー: {str(e)}")
+            
+            # 最終フォールバック: 基本的なwebbrowser.open
+            try:
+                import webbrowser
+                from urllib.parse import quote
+                
+                if phone:
+                    phone_no_hyphen = phone.replace("-", "")
+                    search_query = phone_no_hyphen
+                else:
+                    search_query = address
+                
+                encoded_query = quote(search_query)
+                url = f"https://www.google.com/search?q={encoded_query}"
+                webbrowser.open(url)
+                logging.info(f"最終フォールバック: Google検索を開きました: {search_query}")
+                
+            except Exception as fallback_error:
+                logging.error(f"最終フォールバック処理も失敗: {str(fallback_error)}")
+                QMessageBox.warning(self, "エラー", f"外部ブラウザの起動に失敗しました: {str(e)}")
+    
+    def start_google_search_embedded_internal(self, phone, address):
+        """
+        アプリ内でGoogle検索を実行する（既存実装）
         .osrp-blkがあればその部分まで自動スクロール（右端）する
         5件ごとにWebViewを再初期化してreCAPTCHA対策を行う
         """
@@ -1179,8 +1383,8 @@ class MainWindow(QMainWindow):
             import time
             import random
             
-            # 検索回数をカウント
-            self.google_search_count += 1
+            # 検索回数をカウント（0未満にならないよう保護）
+            self.google_search_count = max(0, self.google_search_count + 1)
             logging.info(f"Google検索実行: {self.google_search_count}回目")
             
             # 検索回数表示を更新
@@ -1198,6 +1402,35 @@ class MainWindow(QMainWindow):
                 logging.info(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
                 self.refresh_webview()
             
+            # 実際の検索処理を実行
+            self._execute_google_search(phone, address)
+            
+        except Exception as e:
+            logging.error(f"Google検索埋め込み処理エラー: {str(e)}")
+    
+    def start_google_search_embedded_internal_no_count(self, phone, address):
+        """
+        アプリ内でGoogle検索を実行する（カウント無し版）
+        手動リフレッシュ時の再検索用
+        """
+        try:
+            logging.info("Google検索実行（手動リフレッシュ・カウント無し）")
+            
+            # 実際の検索処理を実行（カウント無し）
+            self._execute_google_search(phone, address)
+            
+        except Exception as e:
+            logging.error(f"Google検索埋め込み処理エラー（カウント無し）: {str(e)}")
+    
+    def _execute_google_search(self, phone, address):
+        """
+        実際のGoogle検索処理を実行する（共通処理）
+        
+        Args:
+            phone (str): 電話番号
+            address (str): 住所
+        """
+        try:
             if self.web_view is None:
                 logging.error("QWebEngineViewが初期化されていません")
                 return
@@ -1229,4 +1462,4 @@ class MainWindow(QMainWindow):
             self.web_view.loadFinished.connect(scroll_to_osrp_blk)
             
         except Exception as e:
-            logging.error(f"Google検索埋め込み処理エラー: {str(e)}") 
+            logging.error(f"Google検索実行エラー: {str(e)}") 
