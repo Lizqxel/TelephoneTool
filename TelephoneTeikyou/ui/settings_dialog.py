@@ -9,7 +9,8 @@ import json
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QMessageBox, QSlider,
-                              QGroupBox, QCheckBox, QScrollArea, QWidget)
+                              QGroupBox, QCheckBox, QScrollArea, QWidget,
+                              QTabWidget, QSpinBox, QDoubleSpinBox)
 from PySide6.QtCore import Qt
 
 
@@ -25,7 +26,7 @@ class SettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("設定")
-        self.setFixedSize(700, 400)  # ダイアログサイズを固定
+        self.setMinimumWidth(400)
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -52,203 +53,154 @@ class SettingsDialog(QDialog):
             self.current_browser_settings = self.default_browser_settings
         
         # メインレイアウト
-        main_layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         
-        # スクロールエリアの設定
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # タブウィジェット
+        tab_widget = QTabWidget()
         
-        # スクロールエリア内のコンテンツウィジェット
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(10)
+        # 一般設定タブ
+        general_tab = QWidget()
+        general_layout = QVBoxLayout()
         
-        # フォントサイズ設定グループ
-        font_size_group = QGroupBox("フォントサイズ設定")
-        font_size_layout = QVBoxLayout()
+        # フォントサイズ設定
+        font_group = QGroupBox("フォントサイズ")
+        font_layout = QHBoxLayout()
+        self.font_size_spin = QSpinBox()
+        self.font_size_spin.setRange(8, 24)
+        font_layout.addWidget(QLabel("フォントサイズ:"))
+        font_layout.addWidget(self.font_size_spin)
+        font_group.setLayout(font_layout)
+        general_layout.addWidget(font_group)
         
-        # フォントサイズスライダー
-        font_size_slider_layout = QHBoxLayout()
-        self.font_size_label = QLabel(f"フォントサイズ: {self.current_font_size}pt")
-        font_size_slider_layout.addWidget(self.font_size_label)
+        general_tab.setLayout(general_layout)
+        tab_widget.addTab(general_tab, "一般")
         
-        self.font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_size_slider.setMinimum(8)
-        self.font_size_slider.setMaximum(24)
-        self.font_size_slider.setValue(self.current_font_size)
-        self.font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.font_size_slider.setTickInterval(1)
-        self.font_size_slider.valueChanged.connect(self.update_font_size_label)
-        font_size_slider_layout.addWidget(self.font_size_slider)
+        # CTI監視設定タブ
+        cti_tab = QWidget()
+        cti_layout = QVBoxLayout()
         
-        # フォントサイズリセットボタン
-        self.font_size_reset_btn = QPushButton("デフォルトに戻す")
-        self.font_size_reset_btn.clicked.connect(self.reset_font_size)
-        font_size_slider_layout.addWidget(self.font_size_reset_btn)
+        # CTI監視設定グループ
+        cti_group = QGroupBox("CTI監視設定")
+        cti_group_layout = QVBoxLayout()
         
-        font_size_layout.addLayout(font_size_slider_layout)
-        font_size_group.setLayout(font_size_layout)
-        content_layout.addWidget(font_size_group)
+        # CTI監視の有効/無効
+        self.enable_cti_check = QCheckBox("CTI監視を有効にする")
+        cti_group_layout.addWidget(self.enable_cti_check)
+        
+        # CTI自動処理の有効/無効
+        self.enable_auto_cti_check = QCheckBox("CTI自動処理を有効にする")
+        cti_group_layout.addWidget(self.enable_auto_cti_check)
+        
+        # 監視間隔設定
+        interval_layout = QHBoxLayout()
+        self.cti_interval_spin = QDoubleSpinBox()
+        self.cti_interval_spin.setRange(0.1, 1.0)
+        self.cti_interval_spin.setSingleStep(0.1)
+        self.cti_interval_spin.setDecimals(1)
+        interval_layout.addWidget(QLabel("監視間隔（秒）:"))
+        interval_layout.addWidget(self.cti_interval_spin)
+        cti_group_layout.addLayout(interval_layout)
+        
+        cti_group.setLayout(cti_group_layout)
+        cti_layout.addWidget(cti_group)
+        
+        cti_tab.setLayout(cti_layout)
+        tab_widget.addTab(cti_tab, "CTI監視")
+        
+        # ブラウザ設定タブ
+        browser_tab = QWidget()
+        browser_layout = QVBoxLayout()
         
         # ブラウザ設定グループ
         browser_group = QGroupBox("ブラウザ設定")
-        browser_layout = QVBoxLayout()
+        browser_group_layout = QVBoxLayout()
         
-        # ブラウザ設定の説明
-        browser_description = QLabel("提供エリア検索時のブラウザ動作を設定します。")
-        browser_description.setWordWrap(True)
-        browser_layout.addWidget(browser_description)
+        # ヘッドレスモード
+        self.headless_check = QCheckBox("ヘッドレスモードを使用")
+        browser_group_layout.addWidget(self.headless_check)
         
-        # ヘッドレスモード設定
-        self.headless_checkbox = QCheckBox("ヘッドレスモード（ブラウザを表示しない）")
-        self.headless_checkbox.setChecked(self.current_browser_settings.get("headless", False))
-        self.headless_checkbox.setToolTip("有効にするとブラウザが画面に表示されなくなり、処理が軽くなります")
-        browser_layout.addWidget(self.headless_checkbox)
+        # 画像読み込みの無効化
+        self.disable_images_check = QCheckBox("画像読み込みを無効化")
+        browser_group_layout.addWidget(self.disable_images_check)
         
-        # 画像読み込み無効化設定
-        self.disable_images_checkbox = QCheckBox("画像読み込みを無効化（高速化）")
-        self.disable_images_checkbox.setChecked(self.current_browser_settings.get("disable_images", True))
-        self.disable_images_checkbox.setToolTip("有効にすると画像の読み込みをスキップし、処理が大幅に軽くなります")
-        browser_layout.addWidget(self.disable_images_checkbox)
+        # ポップアップ表示
+        self.show_popup_check = QCheckBox("検索結果のポップアップを表示")
+        browser_group_layout.addWidget(self.show_popup_check)
         
-        # ポップアップ表示設定
-        self.popup_checkbox = QCheckBox("結果をポップアップで表示する")
-        self.popup_checkbox.setChecked(self.current_browser_settings.get("show_popup", True))
-        self.popup_checkbox.setToolTip("無効にすると提供判定結果のポップアップが表示されなくなります")
-        browser_layout.addWidget(self.popup_checkbox)
-        
-        # ブラウザ自動終了設定
-        self.auto_close_checkbox = QCheckBox("ブラウザを自動的に閉じる")
-        self.auto_close_checkbox.setChecked(self.current_browser_settings.get("auto_close", False))
-        self.auto_close_checkbox.setToolTip("有効にするとブラウザウィンドウが自動的に閉じられます")
-        browser_layout.addWidget(self.auto_close_checkbox)
+        # 自動クローズ
+        self.auto_close_check = QCheckBox("検索完了後にブラウザを自動クローズ")
+        browser_group_layout.addWidget(self.auto_close_check)
         
         # タイムアウト設定
-        timeout_group = QGroupBox("タイムアウト設定")
-        timeout_layout = QVBoxLayout()
+        timeout_layout = QHBoxLayout()
+        self.page_timeout_spin = QSpinBox()
+        self.page_timeout_spin.setRange(30, 180)
+        timeout_layout.addWidget(QLabel("ページ読み込みタイムアウト（秒）:"))
+        timeout_layout.addWidget(self.page_timeout_spin)
+        browser_group_layout.addLayout(timeout_layout)
         
-        # ページ読み込みタイムアウト
-        page_load_timeout_layout = QHBoxLayout()
-        self.page_load_timeout_label = QLabel(f"ページ読み込みタイムアウト: {self.current_browser_settings.get('page_load_timeout', 30)}秒")
-        page_load_timeout_layout.addWidget(self.page_load_timeout_label)
-        
-        self.page_load_timeout_slider = QSlider(Qt.Orientation.Horizontal)
-        self.page_load_timeout_slider.setMinimum(10)
-        self.page_load_timeout_slider.setMaximum(120)
-        self.page_load_timeout_slider.setValue(self.current_browser_settings.get('page_load_timeout', 30))
-        self.page_load_timeout_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.page_load_timeout_slider.setTickInterval(10)
-        self.page_load_timeout_slider.valueChanged.connect(self.update_page_load_timeout_label)
-        page_load_timeout_layout.addWidget(self.page_load_timeout_slider)
-        
-        timeout_layout.addLayout(page_load_timeout_layout)
-        
-        # スクリプトタイムアウト
         script_timeout_layout = QHBoxLayout()
-        self.script_timeout_label = QLabel(f"スクリプトタイムアウト: {self.current_browser_settings.get('script_timeout', 30)}秒")
-        script_timeout_layout.addWidget(self.script_timeout_label)
+        self.script_timeout_spin = QSpinBox()
+        self.script_timeout_spin.setRange(30, 180)
+        script_timeout_layout.addWidget(QLabel("スクリプト実行タイムアウト（秒）:"))
+        script_timeout_layout.addWidget(self.script_timeout_spin)
+        browser_group_layout.addLayout(script_timeout_layout)
         
-        self.script_timeout_slider = QSlider(Qt.Orientation.Horizontal)
-        self.script_timeout_slider.setMinimum(10)
-        self.script_timeout_slider.setMaximum(120)
-        self.script_timeout_slider.setValue(self.current_browser_settings.get('script_timeout', 30))
-        self.script_timeout_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.script_timeout_slider.setTickInterval(10)
-        self.script_timeout_slider.valueChanged.connect(self.update_script_timeout_label)
-        script_timeout_layout.addWidget(self.script_timeout_slider)
+        browser_group.setLayout(browser_group_layout)
+        browser_layout.addWidget(browser_group)
         
-        timeout_layout.addLayout(script_timeout_layout)
-        timeout_group.setLayout(timeout_layout)
-        browser_layout.addWidget(timeout_group)
+        browser_tab.setLayout(browser_layout)
+        tab_widget.addTab(browser_tab, "ブラウザ")
         
-        browser_group.setLayout(browser_layout)
-        content_layout.addWidget(browser_group)
+        layout.addWidget(tab_widget)
         
-        # スクロールエリアにコンテンツを設定
-        scroll_area.setWidget(content_widget)
-        main_layout.addWidget(scroll_area)
-        
-        # ボタンレイアウト
+        # OKとキャンセルボタン
         button_layout = QHBoxLayout()
-        
-        # OKボタン
         ok_button = QPushButton("OK")
         ok_button.clicked.connect(self.accept)
-        button_layout.addWidget(ok_button)
-        
-        # キャンセルボタン
         cancel_button = QPushButton("キャンセル")
         cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
         
-        main_layout.addLayout(button_layout)
-    
-    def update_font_size_label(self, value):
-        """フォントサイズラベルを更新"""
-        self.font_size_label.setText(f"フォントサイズ: {value}pt")
-    
-    def reset_font_size(self):
-        """フォントサイズをデフォルトに戻す"""
-        self.font_size_slider.setValue(self.default_font_size)
-    
-    def update_page_load_timeout_label(self, value):
-        """ページ読み込みタイムアウトラベルを更新"""
-        self.page_load_timeout_label.setText(f"ページ読み込みタイムアウト: {value}秒")
-    
-    def update_script_timeout_label(self, value):
-        """スクリプトタイムアウトラベルを更新"""
-        self.script_timeout_label.setText(f"スクリプトタイムアウト: {value}秒")
+        self.setLayout(layout)
     
     def set_settings(self, settings):
-        """
-        設定を適用する
+        """設定を読み込んでUIに反映"""
+        # フォントサイズ
+        self.font_size_spin.setValue(settings.get('font_size', self.default_font_size))
         
-        Args:
-            settings (dict): 設定データ
-        """
-        try:
-            # フォントサイズ設定
-            font_size = settings.get('font_size', self.default_font_size)
-            self.font_size_slider.setValue(font_size)
-            
-            # ブラウザ設定
-            browser_settings = settings.get('browser_settings', self.default_browser_settings)
-            
-            # チェックボックスの設定
-            self.headless_checkbox.setChecked(browser_settings.get('headless', False))
-            self.disable_images_checkbox.setChecked(browser_settings.get('disable_images', True))
-            self.popup_checkbox.setChecked(browser_settings.get('show_popup', True))
-            self.auto_close_checkbox.setChecked(browser_settings.get('auto_close', False))
-            
-            # タイムアウト設定
-            self.page_load_timeout_slider.setValue(browser_settings.get('page_load_timeout', 30))
-            self.script_timeout_slider.setValue(browser_settings.get('script_timeout', 30))
-            
-            # 現在の設定を更新
-            self.current_font_size = font_size
-            self.current_browser_settings = browser_settings
-            
-        except Exception as e:
-            logging.error(f"設定の適用中にエラー: {str(e)}")
-            QMessageBox.warning(self, "エラー", f"設定の適用中にエラーが発生しました: {str(e)}")
+        # CTI監視設定
+        cti_settings = settings.get('cti_settings', {})
+        self.enable_cti_check.setChecked(cti_settings.get('enable_cti', True))
+        self.enable_auto_cti_check.setChecked(cti_settings.get('enable_auto_cti_processing', True))
+        self.cti_interval_spin.setValue(cti_settings.get('cti_monitor_interval', 0.2))
+        
+        # ブラウザ設定
+        browser_settings = settings.get('browser_settings', self.default_browser_settings)
+        self.headless_check.setChecked(browser_settings.get('headless', False))
+        self.disable_images_check.setChecked(browser_settings.get('disable_images', True))
+        self.show_popup_check.setChecked(browser_settings.get('show_popup', True))
+        self.auto_close_check.setChecked(browser_settings.get('auto_close', False))
+        self.page_timeout_spin.setValue(browser_settings.get('page_load_timeout', 30))
+        self.script_timeout_spin.setValue(browser_settings.get('script_timeout', 30))
     
     def get_settings(self):
-        """
-        現在の設定を取得
-        
-        Returns:
-            dict: 設定データ
-        """
+        """UIの設定を取得"""
         return {
-            'font_size': self.font_size_slider.value(),
+            'font_size': self.font_size_spin.value(),
+            'cti_settings': {
+                'enable_cti': self.enable_cti_check.isChecked(),
+                'enable_auto_cti_processing': self.enable_auto_cti_check.isChecked(),
+                'cti_monitor_interval': self.cti_interval_spin.value()
+            },
             'browser_settings': {
-                'headless': self.headless_checkbox.isChecked(),
-                'disable_images': self.disable_images_checkbox.isChecked(),
-                'show_popup': self.popup_checkbox.isChecked(),
-                'auto_close': self.auto_close_checkbox.isChecked(),
-                'page_load_timeout': self.page_load_timeout_slider.value(),
-                'script_timeout': self.script_timeout_slider.value()
+                'headless': self.headless_check.isChecked(),
+                'disable_images': self.disable_images_check.isChecked(),
+                'show_popup': self.show_popup_check.isChecked(),
+                'auto_close': self.auto_close_check.isChecked(),
+                'page_load_timeout': self.page_timeout_spin.value(),
+                'script_timeout': self.script_timeout_spin.value()
             }
         } 

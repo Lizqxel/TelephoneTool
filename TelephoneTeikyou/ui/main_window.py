@@ -25,6 +25,7 @@ from services.area_search import search_service_area
 from ui.settings_dialog import SettingsDialog
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
+from services.cti_status_monitor import CTIStatusMonitor
 
 
 class CancellationError(Exception):
@@ -148,8 +149,9 @@ class MainWindow(QMainWindow):
     """メインウィンドウクラス"""
     
     def __init__(self):
+        """メインウィンドウの初期化"""
         super().__init__()
-        self.setWindowTitle("コールセンター業務効率化ツール")
+        self.setWindowTitle("フレッツ光クロス用 - コールセンター業務効率化ツール")
         self.setMinimumSize(600, 400)
         
         # スレッドとワーカーの初期化
@@ -159,8 +161,8 @@ class MainWindow(QMainWindow):
         # メインウィジェットとレイアウトの設定
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QVBoxLayout()
-        main_widget.setLayout(main_layout)
+        self.main_layout = QVBoxLayout()
+        main_widget.setLayout(self.main_layout)
         
         # 設定ファイルのパス
         self.settings_file = "settings.json"
@@ -168,8 +170,16 @@ class MainWindow(QMainWindow):
         # CTIサービスの初期化
         self.cti_service = OneClickService()
         
+        # CTI状態監視の初期化と開始
+        self.cti_status_monitor = CTIStatusMonitor(
+            on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
+            on_call_ended_callback=self.on_cti_call_ended,
+            on_talking_started_callback=self.on_cti_talking_started
+        )
+        self.cti_status_monitor.start_monitoring()
+        
         # トップバーを作成し、メインレイアウトに追加
-        self.create_top_bar(main_layout)
+        self.create_top_bar(self.main_layout)
         
         # 入力フォームエリアをスクロール可能に
         form_widget = QWidget()
@@ -206,7 +216,7 @@ class MainWindow(QMainWindow):
         """)
         
         # スクロールエリアをメインレイアウトに追加
-        main_layout.addWidget(scroll_area)
+        self.main_layout.addWidget(scroll_area)
         
         # 設定の読み込み
         self.load_settings()
@@ -451,6 +461,11 @@ class MainWindow(QMainWindow):
             # 初期設定を設定
             self.settings = {
                 'font_size': 11,
+                'cti_settings': {
+                    'enable_cti': True,
+                    'enable_auto_cti_processing': True,
+                    'cti_monitor_interval': 0.2
+                },
                 'browser_settings': {
                     'headless': True,
                     'disable_images': True,
@@ -471,6 +486,9 @@ class MainWindow(QMainWindow):
                 self.save_settings()
                     
             logging.info("設定を読み込みました")
+            
+            # CTI監視設定を適用
+            self.apply_cti_settings()
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -504,6 +522,8 @@ class MainWindow(QMainWindow):
                 self.load_settings()
                 # フォントサイズを適用
                 self.apply_font_size()
+                # CTI監視設定を適用
+                self.apply_cti_settings()
                 logging.info("設定を更新しました")
             except Exception as e:
                 logging.error(f"設定の更新中にエラー: {str(e)}")
@@ -834,9 +854,9 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
-        # 電話ボタン監視を停止
-        if hasattr(self, 'phone_monitor'):
-            self.phone_monitor.stop_monitoring()
+        # CTI状態監視を停止
+        if hasattr(self, 'cti_status_monitor'):
+            self.cti_status_monitor.stop_monitoring()
         
         # スレッドをクリーンアップ
         self.cleanup_thread()
@@ -919,4 +939,57 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             logging.error(f"進捗更新中にエラー: {str(e)}")
-            self.result_label.setText(message) 
+            self.result_label.setText(message)
+    
+    def on_cti_dialing_to_talking(self):
+        """発信中→通話中の状態変化時のコールバック処理"""
+        try:
+            logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+            logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+            
+            # 顧客情報取得を実行
+            self.fetch_cti_data()
+            
+        except Exception as e:
+            logging.error(f"発信中→通話中の自動処理でエラーが発生: {str(e)}")
+
+    def on_cti_talking_started(self):
+        """通話中状態開始時のコールバック処理"""
+        try:
+            logging.info("★★★ 通話中状態を検出 ★★★")
+        except Exception as e:
+            logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
+
+    def on_cti_call_ended(self):
+        """通話終了時（通話中→待ち受け中）のコールバック処理"""
+        try:
+            logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
+        except Exception as e:
+            logging.error(f"通話終了時の処理でエラーが発生: {str(e)}")
+
+    def apply_cti_settings(self):
+        """CTI監視設定を適用する"""
+        try:
+            cti_settings = self.settings.get('cti_settings', {})
+            
+            # CTI監視の有効/無効を設定
+            if cti_settings.get('enable_cti', True):
+                if not self.cti_status_monitor.is_monitoring:
+                    self.cti_status_monitor.start_monitoring()
+                    logging.info("CTI監視を開始しました")
+            else:
+                if self.cti_status_monitor.is_monitoring:
+                    self.cti_status_monitor.stop_monitoring()
+                    logging.info("CTI監視を停止しました")
+            
+            # 自動処理の有効/無効を設定
+            self.cti_status_monitor.enable_auto_processing = cti_settings.get('enable_auto_cti_processing', True)
+            
+            # 監視間隔を設定
+            self.cti_status_monitor.monitor_interval = cti_settings.get('cti_monitor_interval', 0.2)
+            
+            logging.info("CTI監視設定を適用しました")
+            
+        except Exception as e:
+            logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}") 
