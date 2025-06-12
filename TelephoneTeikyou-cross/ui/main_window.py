@@ -1313,10 +1313,20 @@ class MainWindow(QMainWindow):
                 logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
                 
                 # 顧客情報を取得
-                self.fetch_cti_data()
-                
-                # 提供判定検索を実行
-                self.trigger_auto_search.emit()
+                data = self.cti_service.get_all_fields_data()
+                if data:
+                    # 入力フィールドに設定
+                    self.postal_code_input.setText(data.postal_code)
+                    self.address_input.setText(data.address)
+                    self.phone_input.setText(data.phone)
+                    logging.info("CTIデータの取得に成功しました")
+                    
+                    # メインスレッドで提供判定検索を実行するようにシグナルを発行
+                    self.trigger_service_area_search.emit()
+                    logging.info("提供判定検索を要求しました")
+                else:
+                    logging.warning("CTIデータの取得に失敗しました")
+                    QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
                 
         except Exception as e:
             logging.error(f"発信中→通話中の処理でエラーが発生: {str(e)}")
