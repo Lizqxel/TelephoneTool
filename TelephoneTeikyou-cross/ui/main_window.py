@@ -27,6 +27,7 @@ from services.area_search import search_service_area
 from ui.settings_dialog import SettingsDialog
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
+from services.cti_status_monitor import CTIStatusMonitor
 
 
 class CancellationError(Exception):
@@ -149,7 +150,12 @@ class ServiceAreaSearchWorker(QObject):
 class MainWindow(QMainWindow):
     """メインウィンドウクラス"""
     
+    # カスタムシグナルを追加
+    trigger_service_area_search = Signal()
+    trigger_auto_search = Signal()
+    
     def __init__(self):
+        """メインウィンドウの初期化"""
         super().__init__()
         self.setWindowTitle("フレッツ光クロス用 - コールセンター業務効率化ツール")
         self.setMinimumSize(600, 400)
@@ -223,6 +229,37 @@ class MainWindow(QMainWindow):
         # 電話ボタン監視の初期化と開始
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
+        
+        # CTI状態監視の初期化と開始（設定に基づいて制御）
+        cti_monitoring_enabled = self.settings.get('enable_cti_monitoring', True)
+        logging.info(f"CTI監視設定: {cti_monitoring_enabled}")
+        
+        if cti_monitoring_enabled:
+            if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
+                self.cti_status_monitor = CTIStatusMonitor(
+                    on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
+                    on_call_ended_callback=self.on_cti_call_ended,
+                    on_talking_started_callback=self.on_cti_talking_started
+                )
+                self.cti_status_monitor.start_monitoring()
+                logging.info("CTI状態監視を開始しました")
+                
+                # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
+                if not hasattr(self, 'trigger_auto_search'):
+                    self.trigger_auto_search = Signal()
+                if not self.trigger_auto_search.isConnected(self.auto_search_service_area):
+                    self.trigger_auto_search.connect(self.auto_search_service_area)
+        else:
+            logging.info("CTI監視が設定で無効になっています")
+            self.cti_status_monitor = None
+        
+        # 自動処理の重複実行防止用フラグ
+        if not hasattr(self, 'is_auto_processing'):
+            self.is_auto_processing = False
+            self.last_auto_processing_time = 0
+        
+        # シグナルをスロットに接続
+        self.trigger_service_area_search.connect(self._execute_service_area_search)
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -516,7 +553,11 @@ class MainWindow(QMainWindow):
             # 初期設定を設定
             self.settings = {
                 'font_size': 11,
-                'webview_refresh_interval': 5,  # WebView再初期化間隔
+                'cti_settings': {
+                    'enable_cti': True,
+                    'enable_auto_cti_processing': True,
+                    'cti_monitor_interval': 0.2
+                },
                 'browser_settings': {
                     'headless': True,
                     'disable_images': True,
@@ -539,6 +580,9 @@ class MainWindow(QMainWindow):
             # WebView再初期化間隔を設定から取得
             self.webview_refresh_interval = self.settings.get('webview_refresh_interval', 5)
             logging.info(f"設定を読み込みました - WebView再初期化間隔: {self.webview_refresh_interval}件")
+                
+            # CTI監視設定を適用
+            self.apply_cti_settings()
                 
         except Exception as e:
             logging.error(f"設定の読み込みに失敗しました: {str(e)}")
@@ -927,14 +971,21 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
-        # 電話ボタン監視を停止
-        if hasattr(self, 'phone_monitor'):
-            self.phone_monitor.stop_monitoring()
-        
-        # スレッドをクリーンアップ
-        self.cleanup_thread()
-        
-        event.accept()
+        try:
+            # CTI状態監視を停止
+            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
+                self.cti_status_monitor.stop_monitoring()
+                logging.info("CTI状態監視を停止しました")
+            
+            # 電話ボタン監視を停止
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.stop_monitoring()
+                logging.info("電話ボタン監視を停止しました")
+            
+            event.accept()
+        except Exception as e:
+            logging.error(f"アプリケーション終了処理中にエラー: {e}")
+            event.accept()
     
     def apply_font_size(self):
         """フォントサイズを適用する"""
@@ -1230,3 +1281,94 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             logging.error(f"Google検索埋め込み処理エラー: {str(e)}") 
+
+    def _execute_service_area_search(self):
+        """提供判定検索を実行（メインスレッドで実行）"""
+        try:
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            logging.info(f"自動検索準備 - 郵便番号: {postal_code}, 住所: {address}")
+            
+            if postal_code and address:
+                logging.info("提供判定検索を自動実行します")
+                logging.info(f"検索ボタンの状態 - 有効: {self.area_search_btn.isEnabled()}, 表示: {self.area_search_btn.isVisible()}")
+                
+                # 検索ボタンの状態を確認して実行
+                if self.area_search_btn.isEnabled() and self.area_search_btn.isVisible():
+                    self.search_service_area()
+                    logging.info("提供判定検索を実行しました")
+                else:
+                    logging.warning("検索ボタンが無効または非表示のため、検索をスキップします")
+            else:
+                logging.warning(f"郵便番号または住所が空のため、提供判定検索をスキップします")
+        except Exception as e:
+            logging.error(f"提供判定検索の実行時にエラー: {str(e)}")
+
+    def on_cti_dialing_to_talking(self):
+        """発信中→通話中の状態変化時のコールバック処理"""
+        try:
+            if not self.is_auto_processing:
+                self.is_auto_processing = True
+                logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+                
+                # 顧客情報を取得
+                self.fetch_cti_data()
+                
+                # 提供判定検索を実行
+                self.trigger_auto_search.emit()
+                
+        except Exception as e:
+            logging.error(f"発信中→通話中の処理でエラーが発生: {str(e)}")
+        finally:
+            self.is_auto_processing = False
+
+    def on_cti_call_ended(self):
+        """通話終了時（通話中→待ち受け中）のコールバック処理"""
+        try:
+            logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
+            self.is_auto_processing = False
+        except Exception as e:
+            logging.error(f"通話終了時の処理でエラーが発生: {str(e)}")
+
+    def on_cti_talking_started(self):
+        """通話中状態開始時のコールバック処理"""
+        try:
+            logging.info("★★★ 通話中状態を検出 ★★★")
+        except Exception as e:
+            logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
+
+    def apply_cti_settings(self):
+        """CTI監視設定を適用する"""
+        try:
+            cti_settings = self.settings.get('cti_settings', {})
+            
+            # CTI監視の有効/無効を設定
+            if cti_settings.get('enable_cti', True):
+                if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
+                    self.cti_status_monitor = CTIStatusMonitor(
+                        on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
+                        on_call_ended_callback=self.on_cti_call_ended,
+                        on_talking_started_callback=self.on_cti_talking_started
+                    )
+                if not self.cti_status_monitor.is_monitoring:
+                    self.cti_status_monitor.start_monitoring()
+                    logging.info("CTI監視を開始しました")
+            else:
+                if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
+                    if self.cti_status_monitor.is_monitoring:
+                        self.cti_status_monitor.stop_monitoring()
+                        logging.info("CTI監視を停止しました")
+            
+            # 自動処理の有効/無効を設定
+            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
+                self.cti_status_monitor.enable_auto_processing = cti_settings.get('enable_auto_cti_processing', True)
+                
+                # 監視間隔を設定
+                self.cti_status_monitor.monitor_interval = cti_settings.get('cti_monitor_interval', 0.2)
+            
+            logging.info("CTI監視設定を適用しました")
+            
+        except Exception as e:
+            logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}") 

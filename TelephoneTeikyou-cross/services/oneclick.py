@@ -13,9 +13,19 @@ from dataclasses import dataclass
 from typing import Optional, Dict
 import ctypes
 import re
+import os
+import time
+from enum import Enum
 
 # ログレベルをINFOに設定
 logging.getLogger().setLevel(logging.DEBUG)
+
+class CTIStatus(Enum):
+    """CTI状態の列挙型"""
+    WAITING = "待ち受け中"
+    DIALING = "発信中"
+    TALKING = "通話中"
+    UNKNOWN = "不明"
 
 @dataclass
 class CTIData:
@@ -40,6 +50,14 @@ class OneClickService:
             "管理番号": "management_id",
             "リスト": "list_name"
         }
+        # CTI状態のラベルマッピング
+        self.status_labels = {
+            CTIStatus.WAITING.value: "waiting",
+            CTIStatus.DIALING.value: "dialing",
+            CTIStatus.TALKING.value: "talking"
+        }
+        # 前回のCTI状態を保持
+        self._previous_status = ""
         logging.debug("OneClickService initialized")
 
     def find_cti_window(self) -> bool:
@@ -775,4 +793,61 @@ class OneClickService:
         logging.info(f"管理番号: {data.management_id}")
         logging.info(f"リスト: {data.list_name}")
         
-        return data 
+        return data
+
+    def get_status(self) -> str:
+        """
+        CTIの現在の状態を取得する
+        
+        Returns:
+            str: CTIの状態（"waiting", "dialing", "talking"のいずれか）
+                見つからない場合は空文字列を返す
+        """
+        try:
+            if not self.window_handle:
+                if not self.find_cti_window():
+                    logging.debug("CTIウィンドウが見つかりません")
+                    return ""
+            
+            # 状態表示コントロールを探す
+            status_controls = []
+            
+            def enum_callback(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd):
+                    try:
+                        text = win32gui.GetWindowText(hwnd)
+                        if text and any(status.value in text for status in CTIStatus):
+                            class_name = win32gui.GetClassName(hwnd)
+                            rect = win32gui.GetWindowRect(hwnd)
+                            status_controls.append({
+                                'handle': hwnd,
+                                'text': text,
+                                'class': class_name,
+                                'rect': rect
+                            })
+                    except Exception:
+                        pass
+                return True
+            
+            win32gui.EnumChildWindows(self.window_handle, enum_callback, None)
+            
+            if status_controls:
+                # 最初に見つかったコントロールを使用
+                status_text = status_controls[0]['text'].strip()
+                
+                # 状態テキストを内部コードに変換
+                status_code = self.status_labels.get(status_text, "")
+                
+                # 状態が変化した場合のみログを出力
+                if status_code and status_code != self._previous_status:
+                    logging.info(f"CTI状態が変化: {self._previous_status} → {status_code}")
+                    self._previous_status = status_code
+                
+                return status_code
+            else:
+                logging.debug("状態表示コントロールが見つかりません")
+                return ""
+            
+        except Exception as e:
+            logging.error(f"CTI状態の取得中にエラー: {str(e)}")
+            return "" 
