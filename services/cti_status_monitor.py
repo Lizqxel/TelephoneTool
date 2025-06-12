@@ -214,15 +214,62 @@ class CTIStatusMonitor:
             return CTIStatus.UNKNOWN
             
     def start_monitoring(self):
-        """状態監視を開始"""
+        """CTI状態の監視を開始"""
         if self.is_monitoring:
             logging.warning("CTI状態監視は既に開始されています")
             return
             
         self.is_monitoring = True
+        logging.info("CTI状態監視を開始します")
+        
+        # 現在のCTI状態を取得して初期化
+        self._initialize_current_status()
+        
+        # 監視スレッドを開始
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-        logging.info("CTI状態監視を開始しました")
+        
+    def _initialize_current_status(self):
+        """現在のCTI状態を取得して初期化"""
+        try:
+            # CTIウィンドウとコントロールを検出
+            if self.find_cti_window() and self.find_status_text_control():
+                # 現在の状態テキストを取得
+                try:
+                    status_text = win32gui.GetWindowText(self.status_text_handle).strip()
+                    
+                    # テキストから状態を判定
+                    if status_text == "待ち受け中":
+                        self.current_status = CTIStatus.WAITING
+                        logging.info(f"CTI初期状態を設定: {self.current_status.value}")
+                    elif status_text == "発信中":
+                        self.current_status = CTIStatus.DIALING
+                        logging.info(f"CTI初期状態を設定: {self.current_status.value}")
+                    elif status_text == "通話中":
+                        self.current_status = CTIStatus.TALKING
+                        logging.info(f"CTI初期状態を設定: {self.current_status.value}")
+                        # 通話中の場合は処理中フラグをFalseに（新規電話に備える）
+                        self.is_processing = False
+                    else:
+                        self.current_status = CTIStatus.UNKNOWN
+                        logging.info(f"CTI初期状態を設定: {self.current_status.value}")
+                        
+                    # previous_statusも同じ値に設定（初期化時の誤検出を防ぐ）
+                    self.previous_status = self.current_status
+                    
+                except Exception as e:
+                    logging.warning(f"CTI初期状態の取得に失敗: {str(e)}")
+                    self.current_status = CTIStatus.UNKNOWN
+                    self.previous_status = CTIStatus.UNKNOWN
+            else:
+                logging.warning("CTIウィンドウまたはコントロールが見つからないため、状態をUNKNOWNに設定")
+                self.current_status = CTIStatus.UNKNOWN
+                self.previous_status = CTIStatus.UNKNOWN
+                
+        except Exception as e:
+            logging.error(f"CTI状態の初期化中にエラー: {str(e)}")
+            self.current_status = CTIStatus.UNKNOWN
+            self.previous_status = CTIStatus.UNKNOWN
         
     def stop_monitoring(self):
         """状態監視を停止"""
@@ -376,9 +423,17 @@ class CTIStatusMonitor:
                 
                 logging.info(f"CTI状態が変化: {previous_status.value} → {new_status.value}")
                 
-                # 発信中→通話中の変化を検出
-                if (previous_status == CTIStatus.DIALING and 
-                    new_status == CTIStatus.TALKING):
+                # 通話終了の検出（通話中 → 待ち受け中）
+                if (previous_status == CTIStatus.TALKING and 
+                    new_status == CTIStatus.WAITING):
+                    logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
+                    # 処理中フラグをリセット（通話終了により新しい電話に備える）
+                    self.is_processing = False
+                    logging.info("通話終了により処理中フラグをリセットしました")
+                
+                # 発信中→通話中の変化を検出（厳密な条件チェック付き）
+                elif (previous_status == CTIStatus.DIALING and 
+                      new_status == CTIStatus.TALKING):
                     
                     # 重複実行防止チェック
                     if self._should_trigger_auto_processing(current_time):
@@ -393,6 +448,15 @@ class CTIStatusMonitor:
                     else:
                         logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
                         logging.info("重複実行防止により自動処理をスキップしました")
+                
+                # 不正な状態変化パターンの検出と警告
+                elif (previous_status == CTIStatus.UNKNOWN and 
+                      new_status == CTIStatus.TALKING):
+                    logging.warning("不正な状態変化を検出: 不明 → 通話中（処理をスキップ）")
+                elif (previous_status == CTIStatus.WAITING and 
+                      new_status == CTIStatus.TALKING):
+                    logging.warning("待ち受け中から直接通話中への変化を検出（発信中を経由していない可能性）")
+                    # この場合は自動処理を実行しない
                         
         except Exception as e:
             logging.error(f"状態変化検出中にエラーが発生: {str(e)}")
@@ -448,13 +512,20 @@ class CTIStatusMonitor:
         except Exception as e:
             logging.error(f"自動処理の実行中にエラーが発生: {str(e)}")
         finally:
-            # 処理完了後、一定時間後にフラグをリセット
-            import threading
+            # 処理完了後、一定時間後にフラグをリセット（通話終了で自動リセットされるため、バックアップとして）
             def reset_processing_flag():
-                time.sleep(5.0)  # 5秒後にリセット
-                self.is_processing = False
-                logging.debug("処理中フラグをリセットしました")
-                
-            timer = threading.Timer(5.0, reset_processing_flag)
+                try:
+                    # 通話中でない場合のみリセット（通話終了で既にリセットされている可能性があるため）
+                    if self.current_status != CTIStatus.TALKING:
+                        self.is_processing = False
+                        logging.debug("バックアップ処理: 処理中フラグをリセットしました")
+                    else:
+                        logging.debug("通話中のため、処理中フラグのバックアップリセットをスキップしました")
+                except Exception as e:
+                    logging.error(f"処理中フラグのリセット中にエラー: {str(e)}")
+                    # エラーが発生した場合は強制的にリセット
+                    self.is_processing = False
+                    
+            timer = threading.Timer(10.0, reset_processing_flag)  # 10秒後にバックアップリセット
             timer.daemon = True
             timer.start() 
