@@ -148,6 +148,9 @@ class ServiceAreaSearchWorker(QObject):
 class MainWindow(QMainWindow):
     """メインウィンドウクラス"""
     
+    # カスタムシグナルを追加
+    trigger_service_area_search = Signal()
+    
     def __init__(self):
         """メインウィンドウの初期化"""
         super().__init__()
@@ -227,6 +230,9 @@ class MainWindow(QMainWindow):
         # 電話ボタン監視の初期化と開始
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
+        
+        # シグナルをスロットに接続
+        self.trigger_service_area_search.connect(self._execute_service_area_search)
     
     def create_top_bar(self, parent_layout):
         """トップバーを作成"""
@@ -955,32 +961,9 @@ class MainWindow(QMainWindow):
                 self.address_input.setText(data.address)
                 logging.info("CTIデータの取得に成功しました")
                 
-                # 提供判定検索ボタンを自動クリック（0.5秒後）
-                def click_search_button():
-                    try:
-                        postal_code = self.postal_code_input.text().strip()
-                        address = self.address_input.text().strip()
-                        logging.info(f"自動検索準備 - 郵便番号: {postal_code}, 住所: {address}")
-                        
-                        if postal_code and address:
-                            logging.info("提供判定検索を自動実行します")
-                            logging.info(f"検索ボタンの状態 - 有効: {self.area_search_btn.isEnabled()}, 表示: {self.area_search_btn.isVisible()}")
-                            
-                            # 検索ボタンの状態を確認して実行
-                            if self.area_search_btn.isEnabled() and self.area_search_btn.isVisible():
-                                # 直接search_service_areaメソッドを呼び出し
-                                self.search_service_area()
-                                logging.info("提供判定検索を実行しました")
-                            else:
-                                logging.warning("検索ボタンが無効または非表示のため、検索をスキップします")
-                        else:
-                            logging.warning(f"郵便番号または住所が空のため、提供判定検索をスキップします")
-                    except Exception as e:
-                        logging.error(f"提供判定検索の実行時にエラー: {str(e)}")
-                
-                # 0.5秒後に検索を実行
-                QTimer.singleShot(500, click_search_button)
-                logging.info("提供判定検索をスケジュールしました（0.5秒後）")
+                # メインスレッドで提供判定検索を実行するようにシグナルを発行
+                self.trigger_service_area_search.emit()
+                logging.info("提供判定検索を要求しました")
             else:
                 logging.warning("CTIデータの取得に失敗しました")
                 QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
@@ -1028,4 +1011,26 @@ class MainWindow(QMainWindow):
             
         except Exception as e:
             logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
-            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}") 
+            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}")
+
+    def _execute_service_area_search(self):
+        """提供判定検索を実行（メインスレッドで実行）"""
+        try:
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            logging.info(f"自動検索準備 - 郵便番号: {postal_code}, 住所: {address}")
+            
+            if postal_code and address:
+                logging.info("提供判定検索を自動実行します")
+                logging.info(f"検索ボタンの状態 - 有効: {self.area_search_btn.isEnabled()}, 表示: {self.area_search_btn.isVisible()}")
+                
+                # 検索ボタンの状態を確認して実行
+                if self.area_search_btn.isEnabled() and self.area_search_btn.isVisible():
+                    self.search_service_area()
+                    logging.info("提供判定検索を実行しました")
+                else:
+                    logging.warning("検索ボタンが無効または非表示のため、検索をスキップします")
+            else:
+                logging.warning(f"郵便番号または住所が空のため、提供判定検索をスキップします")
+        except Exception as e:
+            logging.error(f"提供判定検索の実行時にエラー: {str(e)}") 
