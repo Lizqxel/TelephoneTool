@@ -564,7 +564,8 @@ class MainWindow(QMainWindow):
                     'show_popup': True,
                     'auto_close': True,
                     'page_load_timeout': 60,
-                    'script_timeout': 60
+                    'script_timeout': 60,
+                    'use_external_browser': False
                 }
             }
             
@@ -1229,6 +1230,7 @@ class MainWindow(QMainWindow):
         try:
             import time
             import random
+            import webbrowser
             
             # 検索回数をカウント
             self.google_search_count += 1
@@ -1237,50 +1239,60 @@ class MainWindow(QMainWindow):
             # 検索回数表示を更新
             self.update_search_count_display()
             
-            # 連続検索の間隔調整（reCAPTCHA対策）
-            if self.google_search_count > 1:
-                # 2回目以降は少し間隔を空ける
-                delay = random.uniform(0.5, 1.5)
-                time.sleep(delay)
-                logging.info(f"検索間隔調整: {delay:.1f}秒待機")
-            
-            # 指定件数ごとにWebViewを再初期化
-            if self.google_search_count % self.webview_refresh_interval == 0:
-                logging.info(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
-                self.refresh_webview()
-            
-            if self.web_view is None:
-                logging.error("QWebEngineViewが初期化されていません")
-                return
-                
-            self.web_view.setVisible(False)
+            # 検索クエリを作成
             search_query = ""
             if phone:
                 # ハイフンなしで検索
                 phone_no_hyphen = phone.replace("-", "")
                 search_query = phone_no_hyphen
-                url = f"https://www.google.com/search?q={search_query}"
             else:
                 # 住所で検索
                 search_query = address
-                url = f"https://www.google.com/search?q={search_query}"
             
+            url = f"https://www.google.com/search?q={search_query}"
             logging.info(f"Google検索URL: {url}")
-            self.web_view.setUrl(url)
-            self.web_view.setVisible(True)
             
-            def scroll_to_osrp_blk():
-                js = """
-                    (function(){
-                        var blk = document.querySelector('.osrp-blk');
-                        if (blk) blk.scrollIntoView({behavior: 'auto', block: 'nearest', inline: 'end'});
-                    })();
-                """
-                self.web_view.page().runJavaScript(js)
-            self.web_view.loadFinished.connect(scroll_to_osrp_blk)
+            # 外部ブラウザで開く設定かどうかを確認
+            use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
+            
+            if use_external_browser:
+                # 外部ブラウザで開く
+                logging.info("外部ブラウザで検索を実行します")
+                webbrowser.open(url)
+            else:
+                # 連続検索の間隔調整（reCAPTCHA対策）
+                if self.google_search_count > 1:
+                    # 2回目以降は少し間隔を空ける
+                    delay = random.uniform(0.5, 1.5)
+                    time.sleep(delay)
+                    logging.info(f"検索間隔調整: {delay:.1f}秒待機")
+                
+                # 指定件数ごとにWebViewを再初期化
+                if self.google_search_count % self.webview_refresh_interval == 0:
+                    logging.info(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
+                    self.refresh_webview()
+                
+                if self.web_view is None:
+                    logging.error("QWebEngineViewが初期化されていません")
+                    return
+                
+                self.web_view.setVisible(False)
+                self.web_view.setUrl(url)
+                self.web_view.setVisible(True)
+                
+                def scroll_to_osrp_blk():
+                    js = """
+                        (function(){
+                            var blk = document.querySelector('.osrp-blk');
+                            if (blk) blk.scrollIntoView({behavior: 'auto', block: 'nearest', inline: 'end'});
+                        })();
+                    """
+                    self.web_view.page().runJavaScript(js)
+                self.web_view.loadFinished.connect(scroll_to_osrp_blk)
             
         except Exception as e:
-            logging.error(f"Google検索埋め込み処理エラー: {str(e)}") 
+            logging.error(f"Google検索埋め込み処理エラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"検索処理でエラーが発生しました: {str(e)}")
 
     def _execute_service_area_search(self):
         """提供判定検索を実行（メインスレッドで実行）"""

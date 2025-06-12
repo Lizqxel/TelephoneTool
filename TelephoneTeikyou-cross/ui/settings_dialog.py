@@ -41,7 +41,8 @@ class SettingsDialog(QDialog):
             "show_popup": True,
             "page_load_timeout": 30,
             "script_timeout": 30,
-            "auto_close": False
+            "auto_close": False,
+            "use_external_browser": False
         }
         
         # 親ウィンドウから現在の設定を取得
@@ -131,6 +132,10 @@ class SettingsDialog(QDialog):
         self.auto_close_check = QCheckBox("検索完了後にブラウザを自動クローズ")
         browser_group_layout.addWidget(self.auto_close_check)
         
+        # 外部ブラウザ使用
+        self.use_external_browser_check = QCheckBox("電話番号検索を外部ブラウザで開く（ノートパソコン用推奨設定）")
+        browser_group_layout.addWidget(self.use_external_browser_check)
+        
         # タイムアウト設定
         timeout_layout = QHBoxLayout()
         self.page_timeout_spin = QSpinBox()
@@ -183,6 +188,7 @@ class SettingsDialog(QDialog):
         self.disable_images_check.setChecked(browser_settings.get('disable_images', True))
         self.show_popup_check.setChecked(browser_settings.get('show_popup', True))
         self.auto_close_check.setChecked(browser_settings.get('auto_close', False))
+        self.use_external_browser_check.setChecked(browser_settings.get('use_external_browser', False))
         self.page_timeout_spin.setValue(browser_settings.get('page_load_timeout', 30))
         self.script_timeout_spin.setValue(browser_settings.get('script_timeout', 30))
     
@@ -200,6 +206,7 @@ class SettingsDialog(QDialog):
                 'disable_images': self.disable_images_check.isChecked(),
                 'show_popup': self.show_popup_check.isChecked(),
                 'auto_close': self.auto_close_check.isChecked(),
+                'use_external_browser': self.use_external_browser_check.isChecked(),
                 'page_load_timeout': self.page_timeout_spin.value(),
                 'script_timeout': self.script_timeout_spin.value()
             }
