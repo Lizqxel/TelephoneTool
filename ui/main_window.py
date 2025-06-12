@@ -1057,11 +1057,52 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.operator_input = QLineEdit()
         input_layout.addWidget(self.operator_input)
         
-        # 出やすい時間帯
-        input_layout.addWidget(QLabel("出やすい時間帯"))
+        # 出やすい時間帯（携帯番号入力）
+        input_layout.addWidget(QLabel("出やすい時間帯（携帯番号）"))
+        
+        # 携帯番号パターン選択
+        self.mobile_pattern_combo = CustomComboBox()
+        self.mobile_pattern_combo.addItems(["①携帯ありで番号がわかる", "②携帯なし", "③携帯ありで番号がわからない"])
+        self.mobile_pattern_combo.currentTextChanged.connect(self.on_mobile_pattern_changed)
+        input_layout.addWidget(self.mobile_pattern_combo)
+        
+        # 携帯番号入力欄（3つの枠）
+        self.mobile_number_widget = QWidget()
+        mobile_number_layout = QHBoxLayout(self.mobile_number_widget)
+        mobile_number_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.mobile_part1_input = QLineEdit()
+        self.mobile_part1_input.setMaxLength(3)
+        self.mobile_part1_input.setPlaceholderText("090")
+        self.mobile_part1_input.textChanged.connect(self.format_mobile_number_part)
+        mobile_number_layout.addWidget(self.mobile_part1_input)
+        
+        mobile_number_layout.addWidget(QLabel("-"))
+        
+        self.mobile_part2_input = QLineEdit()
+        self.mobile_part2_input.setMaxLength(4)
+        self.mobile_part2_input.setPlaceholderText("1234")
+        self.mobile_part2_input.textChanged.connect(self.format_mobile_number_part)
+        mobile_number_layout.addWidget(self.mobile_part2_input)
+        
+        mobile_number_layout.addWidget(QLabel("-"))
+        
+        self.mobile_part3_input = QLineEdit()
+        self.mobile_part3_input.setMaxLength(4)
+        self.mobile_part3_input.setPlaceholderText("5678")
+        self.mobile_part3_input.textChanged.connect(self.format_mobile_number_part)
+        mobile_number_layout.addWidget(self.mobile_part3_input)
+        
+        input_layout.addWidget(self.mobile_number_widget)
+        
+        # 従来の出やすい時間帯入力欄（互換性のため保持、非表示）
         self.available_time_input = QLineEdit()
-        self.available_time_input.setPlaceholderText("AMPM希望　固定or携帯　000-0000-0000")
-        input_layout.addWidget(self.available_time_input)
+        self.available_time_input.hide()
+        
+        # 初期状態の設定
+        self.mobile_pattern_combo.setCurrentText("②携帯なし")
+        self.mobile_number_widget.hide()
+        self.available_time_input.setText("携帯なし")
         
         # 契約者名
         input_layout.addWidget(QLabel("契約者名"))
@@ -1729,6 +1770,15 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.operator_input.clear()
         # 携帯電話番号入力エリアの参照を削除
         self.available_time_input.clear()  # 出やすい時間帯をクリア
+        
+        # 新しい携帯番号入力欄のクリア
+        self.mobile_part1_input.clear()
+        self.mobile_part2_input.clear()
+        self.mobile_part3_input.clear()
+        self.mobile_pattern_combo.setCurrentText("②携帯なし")
+        self.mobile_number_widget.hide()
+        self.available_time_input.setText("携帯なし")
+        
         self.contractor_input.clear()
         self.furigana_input.clear()
         self.postal_code_input.clear()
@@ -2271,6 +2321,81 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             
         except Exception as e:
             logging.error(f"年齢チェック中にエラー: {e}")
+
+    def on_mobile_pattern_changed(self, text):
+        """
+        携帯番号パターンが変更された時の処理
+        
+        Args:
+            text (str): 選択されたテキスト
+        """
+        if text == "①携帯ありで番号がわかる":
+            # 携帯番号入力欄を表示
+            self.mobile_number_widget.show()
+            # 入力欄をクリア
+            self.mobile_part1_input.clear()
+            self.mobile_part2_input.clear()
+            self.mobile_part3_input.clear()
+            # フォーカスを最初の入力欄に設定
+            self.mobile_part1_input.setFocus()
+        else:
+            # 携帯番号入力欄を非表示
+            self.mobile_number_widget.hide()
+            # パターンに応じてavailable_time_inputを更新
+            if text == "②携帯なし":
+                self.available_time_input.setText("携帯なし")
+            elif text == "③携帯ありで番号がわからない":
+                self.available_time_input.setText("携帯不明")
+        
+        # プレビューを更新
+        self.update_preview()
+
+    def format_mobile_number_part(self):
+        """
+        携帯番号の各部分が変更された時の処理
+        数字のみを許可し、自動的に次の入力欄にフォーカスを移動
+        """
+        sender = self.sender()
+        if not sender:
+            return
+            
+        # 数字以外の文字を削除
+        text = sender.text()
+        formatted_text = ''.join(filter(str.isdigit, text))
+        
+        # 全角数字を半角に変換
+        formatted_text = formatted_text.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+        
+        if formatted_text != text:
+            sender.setText(formatted_text)
+        
+        # 自動フォーカス移動
+        if sender == self.mobile_part1_input and len(formatted_text) == 3:
+            self.mobile_part2_input.setFocus()
+        elif sender == self.mobile_part2_input and len(formatted_text) == 4:
+            self.mobile_part3_input.setFocus()
+        
+        # 携帯番号が完成したらavailable_time_inputを更新
+        self.update_available_time_from_mobile_parts()
+    
+    def update_available_time_from_mobile_parts(self):
+        """
+        携帯番号の各部分から完全な携帯番号を組み立ててavailable_time_inputを更新
+        """
+        part1 = self.mobile_part1_input.text().strip()
+        part2 = self.mobile_part2_input.text().strip()
+        part3 = self.mobile_part3_input.text().strip()
+        
+        if part1 and part2 and part3:
+            # 3つの部分がすべて入力されている場合
+            mobile_number = f"{part1}-{part2}-{part3}"
+            self.available_time_input.setText(mobile_number)
+        elif part1 or part2 or part3:
+            # 一部だけ入力されている場合は空にする
+            self.available_time_input.setText("")
+        
+        # プレビューを更新
+        self.update_preview()
 
 
 class ServiceAreaSearchWorker(QObject):
