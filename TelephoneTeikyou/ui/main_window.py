@@ -948,10 +948,23 @@ class MainWindow(QMainWindow):
             logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
             
             # 顧客情報取得を実行
-            self.fetch_cti_data()
-            
+            data = self.cti_service.get_all_fields_data()
+            if data:
+                # 入力フィールドに設定
+                self.postal_code_input.setText(data.postal_code)
+                self.address_input.setText(data.address)
+                logging.info("CTIデータの取得に成功しました")
+                
+                # 提供判定検索を実行
+                QTimer.singleShot(500, self.search_service_area)  # 0.5秒後に検索を開始
+                logging.info("提供判定検索を開始します")
+            else:
+                logging.warning("CTIデータの取得に失敗しました")
+                QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
+                
         except Exception as e:
             logging.error(f"発信中→通話中の自動処理でエラーが発生: {str(e)}")
+            QMessageBox.critical(self, "エラー", f"自動処理中にエラーが発生しました: {str(e)}")
 
     def on_cti_talking_started(self):
         """通話中状態開始時のコールバック処理"""
