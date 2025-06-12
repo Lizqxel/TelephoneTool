@@ -1628,16 +1628,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             # メインスレッドでUIを更新
             self.update_form_with_data(self.cti_service.get_all_fields_data())
             return True
-        elif event.type() == QEvent.User + 1:
-            # メインスレッドでプレビューを更新
-            try:
-                preview_text = self.generate_preview_text()
-                if preview_text:
-                    self.preview_text.setText(preview_text)
-            except Exception as e:
-                logging.error(f"プレビュー更新中にエラー: {e}")
-                self.preview_text.setText("プレビューの更新に失敗しました")
-            return True
         return super().event(event)
 
     def validate_contractor_name(self, text):
@@ -1759,8 +1749,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     def update_preview(self):
         """プレビューを更新"""
         try:
-            # メインスレッドでプレビューを更新
-            QApplication.instance().postEvent(self, QEvent(QEvent.User + 1))
+            # 直接プレビューテキストを生成して設定（QEventを使わない）
+            preview_text = self.generate_preview_text()
+            if preview_text and hasattr(self, 'preview_text'):
+                self.preview_text.setText(preview_text)
         except Exception as e:
             logging.error(f"プレビュー更新中にエラー: {e}")
 
@@ -2347,8 +2339,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             elif text == "③携帯ありで番号がわからない":
                 self.available_time_input.setText("携帯不明")
         
-        # プレビューを更新
-        self.update_preview()
+        # パターン変更時のみプレビューを更新（リアルタイム更新は削除）
 
     def format_mobile_number_part(self):
         """
@@ -2394,8 +2385,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             # 一部だけ入力されている場合は空にする
             self.available_time_input.setText("")
         
-        # プレビューを更新
-        self.update_preview()
+        # リアルタイムプレビュー更新を削除（営業コメント作成ボタンを押した時のみ更新）
 
 
 class ServiceAreaSearchWorker(QObject):

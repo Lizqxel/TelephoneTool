@@ -1768,7 +1768,7 @@ class OrdererInputDialog(QDialog):
             # 一部だけ入力されている場合は空にする
             self.available_time_input.setText("")
         
-        # 入力フィールドチェックを実行
+        # 入力フィールドチェックを実行（リアルタイムプレビュー更新は削除）
         self.check_input_fields()
 
 class OrderInfoDialog(QDialog):
