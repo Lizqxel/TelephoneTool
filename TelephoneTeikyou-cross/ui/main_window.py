@@ -1134,92 +1134,53 @@ class MainWindow(QMainWindow):
             logging.error(f"検索回数表示更新エラー: {str(e)}")
     
     def refresh_webview(self):
-        """
-        WebViewを再初期化してreCAPTCHA対策を行う
-        より強力なreCAPTCHA対策として以下の機能を追加：
-        - User-Agentのランダム設定
-        - 検索間隔の調整
-        - キャッシュとCookieのクリア
-        """
+        """WebViewを再初期化する"""
         try:
-            import time
-            import random
+            self.setup_webview()
+            logging.debug("WebViewを再初期化しました")
+        except Exception as e:
+            logging.error(f"WebViewの再初期化中にエラー: {str(e)}")
+
+    def setup_webview(self):
+        """WebViewの初期化"""
+        try:
+            from PySide6.QtCore import Qt
             
-            # 短時間の間隔を空けてreCAPTCHA対策
-            time.sleep(random.uniform(1.0, 2.0))
+            # 外部ブラウザ設定を確認
+            use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
             
+            # WebViewのレイアウトを取得または作成
+            if not hasattr(self, 'webview_layout'):
+                self.webview_layout = QVBoxLayout()
+                self.right_layout.addLayout(self.webview_layout)
+            else:
+                # 既存のウィジェットをクリア
+                while self.webview_layout.count():
+                    item = self.webview_layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+            
+            # 既存のWebViewをクリア
             if hasattr(self, 'web_view') and self.web_view is not None:
-                # 現在のWebViewを削除
                 self.web_view.setParent(None)
                 self.web_view.deleteLater()
-                logging.info("既存のWebViewを削除しました")
-                # 削除後に少し待機
-                time.sleep(0.5)
+                self.web_view = None
             
-            # 新しいWebViewを作成
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-            self.web_view = QWebEngineView()
-            
-            # 新しいプロファイルを作成（セッション・Cookie・キャッシュをクリア）
-            profile = QWebEngineProfile("google_search_profile")
-            profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.NoCache)
-            profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.NoPersistentCookies)
-            
-            # User-Agentをランダムに設定
-            user_agents = [
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ]
-            selected_ua = random.choice(user_agents)
-            profile.setHttpUserAgent(selected_ua)
-            logging.info(f"User-Agentを設定: {selected_ua[:50]}...")
-            
-            # WebViewを作成
-            self.web_view = QWebEngineView()
-            
-            # プロファイルを設定
-            page = self.web_view.page()
-            page.setProfile(profile)
-            
-            # 各種設定
-            self.web_view.setVisible(False)
-            self.web_view.setMinimumHeight(300)
-            self.web_view.setMaximumHeight(500)
-            self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            
-            # JavaScript、画像の有効化
-            settings = page.settings()
-            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-            settings.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True)
-            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, False)
-            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
-            
-            # 住所情報グループのレイアウトを取得してWebViewを追加
-            address_group = self.findChild(QGroupBox, "address_group")
-            if address_group:
-                address_layout = address_group.layout()
-                if address_layout:
-                    address_layout.addWidget(self.web_view)
-            
-            logging.info("WebViewを強化されたreCAPTCHA対策で再初期化しました")
+            # 外部ブラウザ設定が無効の場合のみWebViewを作成
+            if not use_external_browser:
+                self.web_view = QWebEngineView()
+                self.web_view.setUrl("about:blank")
+                self.webview_layout.addWidget(self.web_view)
+                logging.debug("WebViewを初期化しました")
+            else:
+                # 外部ブラウザ設定が有効な場合は代わりにメッセージを表示
+                message_label = QLabel("電話番号検索は外部ブラウザで開く設定になっています")
+                message_label.setAlignment(Qt.AlignCenter)
+                self.webview_layout.addWidget(message_label)
+                logging.debug("外部ブラウザ設定が有効のため、WebViewは無効化されています")
             
         except Exception as e:
-            logging.error(f"WebView再初期化エラー: {str(e)}")
-            # フォールバック：基本的なWebView作成
-            self.web_view = QWebEngineView()
-            self.web_view.setVisible(False)
-            self.web_view.setMinimumHeight(300)
-            self.web_view.setMaximumHeight(500)
-            self.web_view.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            
-            address_group = self.findChild(QGroupBox, "address_group")
-            if address_group:
-                address_layout = address_group.layout()
-                if address_layout:
-                    address_layout.addWidget(self.web_view)
+            logging.error(f"WebViewの初期化中にエラー: {str(e)}")
 
     def start_google_search_embed(self, phone, address):
         """
@@ -1234,7 +1195,7 @@ class MainWindow(QMainWindow):
             
             # 検索回数をカウント
             self.google_search_count += 1
-            logging.info(f"Google検索実行: {self.google_search_count}回目")
+            logging.debug(f"Google検索実行: {self.google_search_count}回目")
             
             # 検索回数表示を更新
             self.update_search_count_display()
@@ -1250,45 +1211,47 @@ class MainWindow(QMainWindow):
                 search_query = address
             
             url = f"https://www.google.com/search?q={search_query}"
-            logging.info(f"Google検索URL: {url}")
+            logging.debug(f"Google検索URL: {url}")
             
-            # 外部ブラウザで開く設定かどうかを確認
+            # 外部ブラウザ設定を確認
             use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
             
             if use_external_browser:
                 # 外部ブラウザで開く
-                logging.info("外部ブラウザで検索を実行します")
+                logging.debug("外部ブラウザで検索を実行します")
                 webbrowser.open(url)
-            else:
-                # 連続検索の間隔調整（reCAPTCHA対策）
-                if self.google_search_count > 1:
-                    # 2回目以降は少し間隔を空ける
-                    delay = random.uniform(0.5, 1.5)
-                    time.sleep(delay)
-                    logging.info(f"検索間隔調整: {delay:.1f}秒待機")
-                
-                # 指定件数ごとにWebViewを再初期化
-                if self.google_search_count % self.webview_refresh_interval == 0:
-                    logging.info(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
-                    self.refresh_webview()
-                
-                if self.web_view is None:
-                    logging.error("QWebEngineViewが初期化されていません")
-                    return
-                
-                self.web_view.setVisible(False)
-                self.web_view.setUrl(url)
-                self.web_view.setVisible(True)
-                
-                def scroll_to_osrp_blk():
-                    js = """
-                        (function(){
-                            var blk = document.querySelector('.osrp-blk');
-                            if (blk) blk.scrollIntoView({behavior: 'auto', block: 'nearest', inline: 'end'});
-                        })();
-                    """
-                    self.web_view.page().runJavaScript(js)
-                self.web_view.loadFinished.connect(scroll_to_osrp_blk)
+                return
+            
+            # WebViewが無効な場合は処理を終了
+            if not hasattr(self, 'web_view') or self.web_view is None:
+                logging.debug("WebViewが無効なため、検索を中止します")
+                return
+            
+            # 連続検索の間隔調整（reCAPTCHA対策）
+            if self.google_search_count > 1:
+                # 2回目以降は少し間隔を空ける
+                delay = random.uniform(0.5, 1.5)
+                time.sleep(delay)
+                logging.debug(f"検索間隔調整: {delay:.1f}秒待機")
+            
+            # 指定件数ごとにWebViewを再初期化
+            if self.google_search_count % self.webview_refresh_interval == 0:
+                logging.debug(f"{self.webview_refresh_interval}回目の検索のため、WebViewを再初期化します")
+                self.refresh_webview()
+            
+            self.web_view.setVisible(False)
+            self.web_view.setUrl(url)
+            self.web_view.setVisible(True)
+            
+            def scroll_to_osrp_blk():
+                js = """
+                    (function(){
+                        var blk = document.querySelector('.osrp-blk');
+                        if (blk) blk.scrollIntoView({behavior: 'auto', block: 'nearest', inline: 'end'});
+                    })();
+                """
+                self.web_view.page().runJavaScript(js)
+            self.web_view.loadFinished.connect(scroll_to_osrp_blk)
             
         except Exception as e:
             logging.error(f"Google検索埋め込み処理エラー: {str(e)}")
@@ -1321,8 +1284,9 @@ class MainWindow(QMainWindow):
         try:
             if not self.is_auto_processing:
                 self.is_auto_processing = True
-                logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
-                logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+                # 重要な状態変化なのでINFOレベルで出力
+                logging.info("CTI状態変化検出: 発信中 → 通話中")
+                logging.debug("自動処理を開始します: 顧客情報取得 → 提供判定検索")
                 
                 # 顧客情報を取得
                 data = self.cti_service.get_all_fields_data()
@@ -1331,11 +1295,11 @@ class MainWindow(QMainWindow):
                     self.postal_code_input.setText(data.postal_code)
                     self.address_input.setText(data.address)
                     self.phone_input.setText(data.phone)
-                    logging.info("CTIデータの取得に成功しました")
+                    logging.debug("CTIデータの取得に成功しました")
                     
                     # メインスレッドで提供判定検索を実行するようにシグナルを発行
                     self.trigger_service_area_search.emit()
-                    logging.info("提供判定検索を要求しました")
+                    logging.debug("提供判定検索を要求しました")
                 else:
                     logging.warning("CTIデータの取得に失敗しました")
                     QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
@@ -1346,17 +1310,18 @@ class MainWindow(QMainWindow):
             self.is_auto_processing = False
 
     def on_cti_call_ended(self):
-        """通話終了時（通話中→待ち受け中）のコールバック処理"""
+        """通話終了時のコールバック処理"""
         try:
-            logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
-            self.is_auto_processing = False
+            # 通話終了は重要な状態変化なのでINFOレベルで出力
+            logging.info("通話が終了しました")
         except Exception as e:
             logging.error(f"通話終了時の処理でエラーが発生: {str(e)}")
 
     def on_cti_talking_started(self):
         """通話中状態開始時のコールバック処理"""
         try:
-            logging.info("★★★ 通話中状態を検出 ★★★")
+            # 通話開始は頻繁に発生するのでDEBUGレベルで出力
+            logging.debug("通話中状態を検出")
         except Exception as e:
             logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
 
