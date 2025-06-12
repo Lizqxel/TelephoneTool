@@ -12,6 +12,7 @@
   },
   "mode": "simple",
   "show_mode_selection": false,
+  "enable_cti_monitoring": true,
   "enable_auto_cti_processing": true,
   "cti_monitor_interval": 0.2,
   "cti_auto_processing_cooldown": 3.0

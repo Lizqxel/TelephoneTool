@@ -208,14 +208,22 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
         
-        # CTI状態監視の初期化と開始（重複初期化を防ぐ）
-        if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
-            self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
-            self.cti_status_monitor.start_monitoring()
-            
-            # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
-            if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
-                self.trigger_auto_search.connect(self.auto_search_service_area)
+        # CTI状態監視の初期化と開始（設定に基づいて制御）
+        cti_monitoring_enabled = self.settings.get('enable_cti_monitoring', True)
+        logging.info(f"CTI監視設定: {cti_monitoring_enabled}")
+        
+        if cti_monitoring_enabled:
+            if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
+                self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+                self.cti_status_monitor.start_monitoring()
+                logging.info("CTI状態監視を開始しました")
+                
+                # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
+                if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
+                    self.trigger_auto_search.connect(self.auto_search_service_area)
+        else:
+            logging.info("CTI監視が設定で無効になっています")
+            self.cti_status_monitor = None
         
         # 自動処理の重複実行防止用フラグ
         if not hasattr(self, 'is_auto_processing'):
@@ -299,6 +307,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             show_again: 次回から表示するかどうか
         """
         try:
+            # 初期設定ファイル生成かどうかをチェック
+            is_initial_setup = not os.path.exists(self.settings_file)
+            
             # 設定ファイルの読み込み
             settings = {}
             if os.path.exists(self.settings_file):
@@ -309,11 +320,73 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             settings['mode'] = mode
             settings['show_mode_selection'] = show_again
             
+            # 初期設定ファイル生成時のデフォルト値を設定
+            if is_initial_setup:
+                logging.info("初期設定ファイルを生成します（CTI監視設定を含む）")
+                # デフォルトのフォーマットテンプレート
+                default_format = """対応者（お客様の名前）：{operator}
+工事希望日
+★出やすい時間帯：{available_time} 
+★電話取次：アナログ→光電話
+★電話OP：
+★無線
+契約者(書類名義)：{contractor}
+フリガナ：{furigana}
+生年月日：{birth_date}
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+"""
+                
+                # 初期設定のデフォルト値を設定
+                settings.update({
+                    'format_template': default_format,
+                    'font_size': 9,
+                    'delay_seconds': 0,
+                    'browser_settings': {
+                        'headless': False,
+                        'disable_images': True,
+                        'show_popup': True,
+                        'auto_close': True,
+                        'page_load_timeout': 30,
+                        'script_timeout': 30
+                    },
+                    # CTI監視設定のデフォルト値（オンに設定）
+                    'enable_cti_monitoring': True,
+                    'enable_auto_cti_processing': True,
+                    'cti_monitor_interval': 0.2,
+                    'cti_auto_processing_cooldown': 3.0
+                })
+            
             # 設定ファイルに保存
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
             
             logging.info(f"モード設定を保存しました: mode={mode}, show_mode_selection={show_again}")
+            if is_initial_setup:
+                logging.info("CTI監視設定を有効にして初期設定ファイルを生成しました")
+                
         except Exception as e:
             logging.error(f"モード設定の保存中にエラーが発生しました: {e}")
     
@@ -1551,10 +1624,44 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     def show_settings(self):
         """設定ダイアログを表示"""
+        # 変更前のCTI監視設定を保存
+        old_cti_monitoring = self.settings.get('enable_cti_monitoring', True)
+        
         dialog = SettingsDialog(self)
         if dialog.exec():
             # ダイアログがOKで閉じられた場合、設定を再読み込み
             self.load_settings()
+            
+            # CTI監視設定が変更された場合の処理
+            new_cti_monitoring = self.settings.get('enable_cti_monitoring', True)
+            if old_cti_monitoring != new_cti_monitoring:
+                logging.info(f"CTI監視設定が変更されました: {old_cti_monitoring} → {new_cti_monitoring}")
+                
+                if new_cti_monitoring:
+                    # CTI監視を有効にする
+                    if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
+                        self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+                        self.cti_status_monitor.start_monitoring()
+                        logging.info("CTI状態監視を開始しました")
+                        
+                        # CTI自動処理用のシグナル・スロット接続
+                        if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
+                            self.trigger_auto_search.connect(self.auto_search_service_area)
+                    elif hasattr(self.cti_status_monitor, 'start_monitoring'):
+                        self.cti_status_monitor.start_monitoring()
+                        logging.info("CTI状態監視を再開しました")
+                else:
+                    # CTI監視を無効にする
+                    if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
+                        self.cti_status_monitor.stop_monitoring()
+                        logging.info("CTI状態監視を停止しました")
+            
+            # 既存のCTI監視サービスの設定を更新
+            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
+                if hasattr(self.cti_status_monitor, 'update_settings'):
+                    self.cti_status_monitor.update_settings()
+                    logging.info("CTI監視サービスの設定を更新しました")
+            
             # フォントサイズを適用
             self.apply_font_size()
             # ウィジェットを更新
@@ -1566,7 +1673,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 else:
                     widget.update()
             logging.info("設定を更新しました")
-            
+    
     def update_countdown(self):
         """カウントダウン表示を更新"""
         try:
