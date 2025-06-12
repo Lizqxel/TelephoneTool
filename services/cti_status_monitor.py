@@ -53,9 +53,16 @@ class CTIStatusMonitor:
             on_dialing_to_talking_callback: 発信中→通話中の状態変化時のコールバック関数
         """
         self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
+        
+        # 状態管理
         self.current_status = CTIStatus.UNKNOWN
-        self.cti_window_handle = None
-        self.status_control_handle = None
+        self.previous_status = CTIStatus.UNKNOWN
+        
+        # ウィンドウハンドル
+        self.window_handle = None  # CTIメインウィンドウのハンドル
+        self.status_text_handle = None  # 状態表示コントロールのハンドル
+        
+        # 監視制御
         self.is_monitoring = False
         self.monitor_thread = None
         self.monitor_interval = 0.2  # 監視間隔（秒）
@@ -66,11 +73,7 @@ class CTIStatusMonitor:
         self.status_change_cooldown = 2.0  # 同じ状態変化の検出間隔（秒）
         self.last_dialing_to_talking_time = 0  # 発信中→通話中の最後の検出時刻
         
-        self.window_handle = None
-        self.status_text_handle = None
-        self.is_monitoring = False
-        self.monitor_thread = None
-        self.previous_status = CTIStatus.UNKNOWN
+        # 監視制御
         self.last_detection_time = 0
         self.window_redetect_interval = 5  # ウィンドウ再検出間隔（秒）
         self.last_window_redetect_time = 0
@@ -109,15 +112,36 @@ class CTIStatusMonitor:
                     title = win32gui.GetWindowText(hwnd)
                     if "CTIメイン" in title:
                         self.window_handle = hwnd
-                        logging.debug(f"CTIメインウィンドウを検出: handle={hwnd}, title='{title}'")
+                        
+                        # ウィンドウの詳細情報をログ出力
+                        class_name = win32gui.GetClassName(hwnd)
+                        is_visible = win32gui.IsWindowVisible(hwnd)
+                        is_enabled = win32gui.IsWindowEnabled(hwnd)
+                        
+                        logging.info(f"CTIメインウィンドウを検出: handle={hwnd}")
+                        logging.info(f"CTIメインウィンドウの詳細:")
+                        logging.info(f"- テキスト: {title}")
+                        logging.info(f"- クラス名: {class_name}")
+                        logging.info(f"- 可視状態: {is_visible}")
+                        logging.info(f"- 有効状態: {is_enabled}")
+                        
                         return False
                 except Exception:
                     pass
             return True
             
         try:
+            # 既存のハンドルをクリア
+            self.window_handle = None
             win32gui.EnumWindows(callback, None)
-            return self.window_handle is not None
+            
+            if self.window_handle:
+                logging.info(f"CTIメインウィンドウの検出に成功しました")
+                return True
+            else:
+                logging.debug("CTIメインウィンドウが見つかりませんでした")
+                return False
+                
         except Exception as e:
             logging.error(f"CTIウィンドウの検索中にエラー: {str(e)}")
             return False
@@ -242,21 +266,30 @@ class CTIStatusMonitor:
         CTI状態の変化をチェック
         """
         try:
-            if not self.cti_window_handle or not win32gui.IsWindow(self.cti_window_handle):
+            # ウィンドウハンドルの確認と再検出
+            if not self.window_handle or not win32gui.IsWindow(self.window_handle):
                 # ウィンドウが無効になった場合、再検出を試行
-                self._find_cti_window()
-                if not self.cti_window_handle:
+                if self.find_cti_window():
+                    logging.info("CTIウィンドウを再検出しました")
+                else:
+                    # デバッグレベルでログ出力（頻繁な出力を避ける）
+                    logging.debug("CTIウィンドウが見つかりません")
                     return
                     
-            # 状態表示コントロールを取得
-            if not self.status_control_handle:
-                self._find_status_control()
-                if not self.status_control_handle:
+            # 状態表示コントロールの確認と再検出
+            if not self.status_text_handle:
+                if self.find_status_text_control():
+                    logging.info("CTI状態表示コントロールを再検出しました")
+                else:
+                    logging.debug("CTI状態表示コントロールが見つかりません")
                     return
                     
-            # 状態テキストを取得
+            # 状態テキストを取得して状態判定
             try:
-                status_text = win32gui.GetWindowText(self.status_control_handle).strip()
+                status_text = win32gui.GetWindowText(self.status_text_handle).strip()
+                
+                if not status_text:
+                    return
                 
                 # テキストから状態を判定
                 if status_text == "待ち受け中":
@@ -271,11 +304,16 @@ class CTIStatusMonitor:
                 # 状態変化を検出
                 self._detect_status_change(new_status)
                     
+            except win32gui.error as e:
+                # Win32 APIエラーの場合、コントロールハンドルをクリア
+                logging.debug(f"状態テキスト取得でWin32エラー: {str(e)}")
+                self.status_text_handle = None
             except Exception as e:
                 logging.debug(f"状態テキスト取得中にエラー: {str(e)}")
                 
         except Exception as e:
-            logging.error(f"CTI状態チェック中にエラーが発生: {str(e)}")
+            # 重要なエラーのみINFOレベルで出力
+            logging.info(f"CTI状態チェック中にエラーが発生: {str(e)}")
     
     def _handle_dialing_to_talking(self):
         """発信中→通話中の変化時の処理"""
