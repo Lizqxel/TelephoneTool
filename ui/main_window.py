@@ -43,6 +43,7 @@ from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowE
 from ui.main_window_functions import MainWindowFunctions
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
+from services.cti_status_monitor import CTIStatusMonitor
 from utils.format_utils import format_phone_number, format_phone_number_without_hyphen, format_postal_code
 from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
 from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
@@ -200,9 +201,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         else:
             self.init_easy_mode()
         
-        # 電話ボタン監視の初期化
-        self.phone_monitor = PhoneButtonMonitor(self)
+        # 電話ボタン監視の初期化と開始
+        self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
+        
+        # CTI状態監視の初期化と開始
+        self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+        self.cti_status_monitor.start_monitoring()
         
         # フォントサイズの設定
         font_size = self.settings.get('font_size', 10)
@@ -421,6 +426,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
         
+        # CTI状態監視の初期化と開始
+        self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+        self.cti_status_monitor.start_monitoring()
+        
         # カウントダウン表示用のラベル
         self.countdown_label = QLabel()
         self.countdown_label.setStyleSheet("""
@@ -528,6 +537,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
         
+        # CTI状態監視の初期化と開始
+        self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+        self.cti_status_monitor.start_monitoring()
+
         self.init_menu()
     
     def start_easy_mode(self):
@@ -1741,6 +1754,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             if hasattr(self, 'phone_monitor'):
                 self.phone_monitor.stop_monitoring()
                 
+            # CTI状態監視を停止
+            if hasattr(self, 'cti_status_monitor'):
+                self.cti_status_monitor.stop_monitoring()
+                
             event.accept()
         except Exception as e:
             logging.error(f"アプリケーション終了処理中にエラー: {e}")
@@ -2386,6 +2403,81 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.available_time_input.setText("")
         
         # リアルタイムプレビュー更新を削除（営業コメント作成ボタンを押した時のみ更新）
+
+    def on_cti_dialing_to_talking(self):
+        """
+        CTI状態が「発信中」→「通話中」に変化した時の自動処理
+        
+        1. 顧客情報を自動取得
+        2. 提供判定検索を自動実行
+        """
+        try:
+            logging.info("CTI状態変化による自動処理を開始します")
+            
+            # 1. 顧客情報取得を実行（既存のfetch_cti_dataメソッドを呼び出し）
+            logging.info("1. 顧客情報の自動取得を開始")
+            self.fetch_cti_data()
+            
+            # 2. 顧客情報取得が完了してから提供判定検索を実行
+            # 少し待機してからUIの更新を確認
+            QTimer.singleShot(1000, self.auto_search_service_area)
+            
+        except Exception as e:
+            logging.error(f"CTI自動処理中にエラーが発生: {str(e)}")
+            
+    def auto_search_service_area(self):
+        """
+        自動提供判定検索を実行
+        """
+        try:
+            logging.info("2. 提供判定検索の自動実行を開始")
+            
+            # 郵便番号と住所が入力されているかチェック
+            postal_code = ""
+            address = ""
+            
+            # シンプルモードと誘導モードで異なる入力フィールドを参照
+            if hasattr(self, 'postal_code_input'):
+                postal_code = self.postal_code_input.text().strip()
+            if hasattr(self, 'address_input'):
+                address = self.address_input.text().strip()
+                
+            # 入力データが不足している場合の処理
+            if not postal_code or not address:
+                logging.warning("郵便番号または住所が未入力のため、提供判定検索をスキップしました")
+                return
+                
+            # 既存の検索メソッドを呼び出し
+            self.search_service_area()
+            
+            logging.info("CTI自動処理が完了しました")
+            
+        except Exception as e:
+            logging.error(f"自動提供判定検索中にエラーが発生: {str(e)}")
+            
+    def closeEvent(self, event):
+        """ウィンドウを閉じる際の処理"""
+        try:
+            # すべてのアクティブな検索スレッドを停止
+            if hasattr(self, 'active_search_threads'):
+                for thread in self.active_search_threads:
+                    if thread and thread.isRunning():
+                        logging.info("アクティブな検索スレッドを停止します")
+                        thread.stop()
+                self.active_search_threads.clear()
+            
+            # 電話ボタン監視を停止
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.stop_monitoring()
+                
+            # CTI状態監視を停止
+            if hasattr(self, 'cti_status_monitor'):
+                self.cti_status_monitor.stop_monitoring()
+                
+            event.accept()
+        except Exception as e:
+            logging.error(f"アプリケーション終了処理中にエラー: {e}")
+            event.accept()
 
 
 class ServiceAreaSearchWorker(QObject):
