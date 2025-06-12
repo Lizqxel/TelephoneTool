@@ -16,6 +16,7 @@ import re
 import os
 import time
 from enum import Enum
+from datetime import datetime, timedelta
 
 # ログレベルをINFOに設定
 logging.getLogger().setLevel(logging.DEBUG)
@@ -58,6 +59,9 @@ class OneClickService:
         }
         # 前回のCTI状態を保持
         self._previous_status = ""
+        # ログ出力の制御用
+        self.last_log_time = datetime.now()
+        self.log_interval = timedelta(minutes=1)  # ログ出力の間隔（1分）
         logging.debug("OneClickService initialized")
 
     def find_cti_window(self) -> bool:
@@ -105,7 +109,11 @@ class OneClickService:
                 logging.info(f"フィールド情報を {len(self.field_info)} 個収集")
                 return True
             else:
-                logging.warning("CTIメインウィンドウが見つかりません")
+                # 前回のログ出力から指定時間が経過している場合のみログを出力
+                now = datetime.now()
+                if now - self.last_log_time >= self.log_interval:
+                    logging.warning("CTIメインウィンドウが見つかりません")
+                    self.last_log_time = now
                 return False
                 
         except Exception as e:
