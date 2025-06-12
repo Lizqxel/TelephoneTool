@@ -15,5 +15,21 @@
   "enable_cti_monitoring": true,
   "enable_auto_cti_processing": true,
   "cti_monitor_interval": 0.2,
-  "cti_auto_processing_cooldown": 3.0
+  "cti_auto_processing_cooldown": 3.0,
+  "update_history": [
+    {
+      "version": "1.8.0",
+      "check_time": "2025-06-12 19:35:05",
+      "status": "最新版"
+    },
+    {
+      "version": "1.8.0",
+      "check_time": "2025-06-12 19:35:02",
+      "status": "最新版"
+    }
+  ],
+  "update_settings": {
+    "auto_check": true,
+    "check_interval": 86400
+  }
 }

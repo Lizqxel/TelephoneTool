@@ -881,6 +881,20 @@ class OrdererInputDialog(QDialog):
         
         orderer_layout.addWidget(self.mobile_number_widget)
         
+        # 出やすい時間帯入力欄
+        self.time_preference_widget = QWidget()
+        time_preference_layout = QHBoxLayout(self.time_preference_widget)
+        time_preference_layout.setContentsMargins(0, 0, 0, 0)
+        
+        time_preference_layout.addWidget(QLabel("出やすい時間帯："))
+        self.time_preference_input = QLineEdit()
+        self.time_preference_input.setPlaceholderText("例：午前中")
+        self.time_preference_input.textChanged.connect(self.update_available_time_from_mobile_parts)
+        time_preference_layout.addWidget(self.time_preference_input)
+        
+        orderer_layout.addWidget(self.time_preference_widget)
+        self.time_preference_widget.hide()  # 初期状態では非表示
+        
         # 従来の出やすい時間帯入力欄（互換性のため保持、非表示）
         self.available_time_input = QLineEdit()
         self.available_time_input.textChanged.connect(self.check_input_fields)
@@ -889,6 +903,7 @@ class OrdererInputDialog(QDialog):
         # 初期状態の設定
         self.mobile_pattern_combo.setCurrentText("②携帯なし")
         self.mobile_number_widget.hide()
+        self.time_preference_widget.hide()
         self.available_time_input.setText("携帯なし")
         
         # 契約者名
@@ -1290,9 +1305,11 @@ class OrdererInputDialog(QDialog):
                 if converted_time == "携帯なし":
                     self.mobile_pattern_combo.setCurrentText("②携帯なし")
                     self.mobile_number_widget.hide()
+                    self.time_preference_widget.hide()
                 elif converted_time == "携帯不明":
                     self.mobile_pattern_combo.setCurrentText("③携帯ありで番号がわからない")
                     self.mobile_number_widget.hide()
+                    self.time_preference_widget.hide()
                 elif "-" in converted_time and len(converted_time.replace("-", "")) == 11:
                     # 携帯番号の形式の場合
                     parts = converted_time.split("-")
@@ -1302,15 +1319,19 @@ class OrdererInputDialog(QDialog):
                         self.mobile_part1_input.setText(parts[0])
                         self.mobile_part2_input.setText(parts[1])
                         self.mobile_part3_input.setText(parts[2])
+                        self.time_preference_widget.show()
+                        self.time_preference_input.setText(parts[3])
                     else:
                         # 形式が正しくない場合はデフォルトに設定
                         self.mobile_pattern_combo.setCurrentText("②携帯なし")
                         self.mobile_number_widget.hide()
+                        self.time_preference_widget.hide()
                         self.available_time_input.setText("携帯なし")
                 else:
                     # その他の場合はデフォルトに設定
                     self.mobile_pattern_combo.setCurrentText("②携帯なし")
                     self.mobile_number_widget.hide()
+                    self.time_preference_widget.hide()
                     self.available_time_input.setText("携帯なし")
             
             # 契約者名
@@ -1704,17 +1725,20 @@ class OrdererInputDialog(QDialog):
             text (str): 選択されたテキスト
         """
         if text == "①携帯ありで番号がわかる":
-            # 携帯番号入力欄を表示
+            # 携帯番号入力欄と時間帯入力欄を表示
             self.mobile_number_widget.show()
+            self.time_preference_widget.show()
             # 入力欄をクリア
             self.mobile_part1_input.clear()
             self.mobile_part2_input.clear()
             self.mobile_part3_input.clear()
+            self.time_preference_input.clear()
             # フォーカスを最初の入力欄に設定
             self.mobile_part1_input.setFocus()
         else:
-            # 携帯番号入力欄を非表示
+            # 携帯番号入力欄と時間帯入力欄を非表示
             self.mobile_number_widget.hide()
+            self.time_preference_widget.hide()
             # パターンに応じてavailable_time_inputを更新
             if text == "②携帯なし":
                 self.available_time_input.setText("携帯なし")
@@ -1754,16 +1778,20 @@ class OrdererInputDialog(QDialog):
     
     def update_available_time_from_mobile_parts(self):
         """
-        携帯番号の各部分から完全な携帯番号を組み立ててavailable_time_inputを更新
+        携帯番号の各部分と時間帯から完全な情報を組み立ててavailable_time_inputを更新
         """
         part1 = self.mobile_part1_input.text().strip()
         part2 = self.mobile_part2_input.text().strip()
         part3 = self.mobile_part3_input.text().strip()
+        time_pref = self.time_preference_input.text().strip()
         
         if part1 and part2 and part3:
             # 3つの部分がすべて入力されている場合
             mobile_number = f"{part1}-{part2}-{part3}"
-            self.available_time_input.setText(mobile_number)
+            if time_pref:
+                self.available_time_input.setText(f"{time_pref}\n{mobile_number}")
+            else:
+                self.available_time_input.setText(mobile_number)
         elif part1 or part2 or part3:
             # 一部だけ入力されている場合は空にする
             self.available_time_input.setText("")
