@@ -8,6 +8,7 @@ CtiOutboundSysの状態変化（「発信中」→「通話中」）を監視し
 - CTI状態の常時監視
 - 状態変化の検出（待ち受け中→発信中→通話中）
 - 発信中から通話中への変化時の自動処理実行
+- 通話終了時（通話中→待ち受け中）のイベント通知
 - エラーハンドリングとログ出力
 
 制限事項：
@@ -45,14 +46,17 @@ class StatusChangeEvent:
 class CTIStatusMonitor:
     """CTI状態監視クラス"""
     
-    def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None):
+    def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None,
+                 on_call_ended_callback: Optional[Callable] = None):
         """
         初期化
         
         Args:
             on_dialing_to_talking_callback: 発信中→通話中の状態変化時のコールバック関数
+            on_call_ended_callback: 通話終了時（通話中→待ち受け中）のコールバック関数
         """
         self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
+        self.on_call_ended_callback = on_call_ended_callback
         
         # 状態管理
         self.current_status = CTIStatus.UNKNOWN
@@ -430,6 +434,13 @@ class CTIStatusMonitor:
                     # 処理中フラグをリセット（通話終了により新しい電話に備える）
                     self.is_processing = False
                     logging.info("通話終了により処理中フラグをリセットしました")
+                    
+                    # 通話終了コールバックを実行
+                    if self.on_call_ended_callback:
+                        try:
+                            self.on_call_ended_callback()
+                        except Exception as e:
+                            logging.error(f"通話終了コールバックの実行中にエラー: {str(e)}")
                 
                 # 発信中→通話中の変化を検出（厳密な条件チェック付き）
                 elif (previous_status == CTIStatus.DIALING and 

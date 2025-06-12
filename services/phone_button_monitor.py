@@ -3,6 +3,12 @@
 
 CTIメインウィンドウの緑色電話ボタンをクリックした際に、
 顧客情報の自動取得を行う機能を提供します。
+
+主な機能：
+- 緑色電話ボタンの監視
+- クリック検出と自動処理実行
+- 通話終了後の一時停止機能（2秒間）
+- エラーハンドリングとログ出力
 """
 
 import win32gui
@@ -40,6 +46,11 @@ class PhoneButtonMonitor:
         self.countdown_thread = None  # カウントダウン用スレッド
         self.is_counting_down = False  # カウントダウン中かどうか
         self.settings_file = "settings.json"  # 設定ファイルのパス
+        
+        # 一時停止関連
+        self.is_paused = False
+        self.pause_end_time = 0
+        self.pause_duration = 2.0  # 一時停止時間（秒）
         
         # 設定の読み込み
         self.load_settings()
@@ -243,10 +254,37 @@ class PhoneButtonMonitor:
         
         logging.info("電話ボタン監視を開始しました")
 
+    def pause_monitoring(self):
+        """監視を一時停止（2秒間）"""
+        self.is_paused = True
+        self.pause_end_time = time.time() + self.pause_duration
+        logging.info(f"電話ボタン監視を{self.pause_duration}秒間一時停止します")
+
+    def _check_pause_status(self) -> bool:
+        """
+        一時停止状態をチェック
+        
+        Returns:
+            bool: 一時停止中ならTrue
+        """
+        if self.is_paused:
+            current_time = time.time()
+            if current_time >= self.pause_end_time:
+                self.is_paused = False
+                logging.info("電話ボタン監視の一時停止が終了しました")
+                return False
+            return True
+        return False
+
     def _monitor_loop(self):
-        """マウス監視ループ"""
+        """監視ループ"""
         while self.is_monitoring:
             try:
+                # 一時停止中はスキップ
+                if self._check_pause_status():
+                    time.sleep(0.1)
+                    continue
+                    
                 # マウスクリックをチェック（GetAsyncKeyStateは高速）
                 if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
                     current_time = time.time()
