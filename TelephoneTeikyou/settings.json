@@ -1,5 +1,10 @@
 {
   "font_size": 11,
+  "cti_settings": {
+    "enable_cti": true,
+    "enable_auto_cti_processing": true,
+    "cti_monitor_interval": 0.2
+  },
   "browser_settings": {
     "headless": false,
     "disable_images": true,
