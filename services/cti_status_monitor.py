@@ -45,26 +45,35 @@ class StatusChangeEvent:
 class CTIStatusMonitor:
     """CTI状態監視クラス"""
     
-    def __init__(self, on_dialing_to_talking: Callable[[], None]):
+    def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None):
         """
         初期化
         
         Args:
-            on_dialing_to_talking: 発信中→通話中の変化時に実行するコールバック関数
+            on_dialing_to_talking_callback: 発信中→通話中の状態変化時のコールバック関数
         """
-        self.on_dialing_to_talking = on_dialing_to_talking
+        self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
+        self.current_status = CTIStatus.UNKNOWN
+        self.cti_window_handle = None
+        self.status_control_handle = None
+        self.is_monitoring = False
+        self.monitor_thread = None
+        self.monitor_interval = 0.2  # 監視間隔（秒）
+        
+        # 重複実行防止用
+        self.is_processing = False
+        self.last_status_change_time = 0
+        self.status_change_cooldown = 2.0  # 同じ状態変化の検出間隔（秒）
+        self.last_dialing_to_talking_time = 0  # 発信中→通話中の最後の検出時刻
+        
         self.window_handle = None
         self.status_text_handle = None
         self.is_monitoring = False
         self.monitor_thread = None
-        self.current_status = CTIStatus.UNKNOWN
         self.previous_status = CTIStatus.UNKNOWN
         self.last_detection_time = 0
-        self.detection_interval = 0.2  # 監視間隔（秒）
         self.window_redetect_interval = 5  # ウィンドウ再検出間隔（秒）
         self.last_window_redetect_time = 0
-        self.is_processing = False  # 処理中フラグ（重複実行防止）
-        self.settings_file = "settings.json"
         self.enable_auto_processing = True  # 自動処理の有効/無効
         
         # 設定の読み込み
@@ -75,18 +84,18 @@ class CTIStatusMonitor:
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
+            if os.path.exists("settings.json"):
+                with open("settings.json", 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     self.enable_auto_processing = settings.get('enable_auto_cti_processing', True)
-                    self.detection_interval = settings.get('cti_monitor_interval', 0.2)
+                    self.monitor_interval = settings.get('cti_monitor_interval', 0.2)
             else:
                 self.enable_auto_processing = True
-                self.detection_interval = 0.2
+                self.monitor_interval = 0.2
         except Exception as e:
             logging.error(f"CTI監視設定の読み込みに失敗しました: {str(e)}")
             self.enable_auto_processing = True
-            self.detection_interval = 0.2
+            self.monitor_interval = 0.2
             
     def update_settings(self):
         """設定を更新する"""
@@ -218,7 +227,7 @@ class CTIStatusMonitor:
                     self.last_window_redetect_time = current_time
                 
                 # 状態チェック間隔を制御
-                if current_time - self.last_detection_time >= self.detection_interval:
+                if current_time - self.last_detection_time >= self.monitor_interval:
                     self._check_status_change()
                     self.last_detection_time = current_time
                     
@@ -229,24 +238,45 @@ class CTIStatusMonitor:
             time.sleep(0.05)
             
     def _check_status_change(self):
-        """状態変化をチェック"""
-        if not self.enable_auto_processing:
-            return
-            
-        new_status = self.get_current_status()
-        
-        # 状態が変化した場合
-        if new_status != self.current_status:
-            self.previous_status = self.current_status
-            self.current_status = new_status
-            
-            logging.info(f"CTI状態が変化: {self.previous_status.value} → {self.current_status.value}")
-            
-            # 発信中→通話中の変化を検出
-            if (self.previous_status == CTIStatus.DIALING and 
-                self.current_status == CTIStatus.TALKING):
-                self._handle_dialing_to_talking()
+        """
+        CTI状態の変化をチェック
+        """
+        try:
+            if not self.cti_window_handle or not win32gui.IsWindow(self.cti_window_handle):
+                # ウィンドウが無効になった場合、再検出を試行
+                self._find_cti_window()
+                if not self.cti_window_handle:
+                    return
+                    
+            # 状態表示コントロールを取得
+            if not self.status_control_handle:
+                self._find_status_control()
+                if not self.status_control_handle:
+                    return
+                    
+            # 状態テキストを取得
+            try:
+                status_text = win32gui.GetWindowText(self.status_control_handle).strip()
                 
+                # テキストから状態を判定
+                if status_text == "待ち受け中":
+                    new_status = CTIStatus.WAITING
+                elif status_text == "発信中":
+                    new_status = CTIStatus.DIALING
+                elif status_text == "通話中":
+                    new_status = CTIStatus.TALKING
+                else:
+                    new_status = CTIStatus.UNKNOWN
+                    
+                # 状態変化を検出
+                self._detect_status_change(new_status)
+                    
+            except Exception as e:
+                logging.debug(f"状態テキスト取得中にエラー: {str(e)}")
+                
+        except Exception as e:
+            logging.error(f"CTI状態チェック中にエラーが発生: {str(e)}")
+    
     def _handle_dialing_to_talking(self):
         """発信中→通話中の変化時の処理"""
         if self.is_processing:
@@ -260,8 +290,8 @@ class CTIStatusMonitor:
             logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
             
             # コールバック関数を実行
-            if self.on_dialing_to_talking:
-                self.on_dialing_to_talking()
+            if self.on_dialing_to_talking_callback:
+                self.on_dialing_to_talking_callback()
                 
         except Exception as e:
             logging.error(f"発信中→通話中の自動処理中にエラーが発生: {str(e)}")
@@ -289,4 +319,104 @@ class CTIStatusMonitor:
     def set_auto_processing(self, enabled: bool):
         """自動処理の有効/無効を設定"""
         self.enable_auto_processing = enabled
-        logging.info(f"CTI自動処理を{'有効' if enabled else '無効'}にしました") 
+        logging.info(f"CTI自動処理を{'有効' if enabled else '無効'}にしました")
+        
+    def _detect_status_change(self, new_status: CTIStatus):
+        """
+        状態変化を検出し、必要に応じてコールバックを実行
+        
+        Args:
+            new_status: 新しい状態
+        """
+        try:
+            current_time = time.time()
+            
+            # 状態が変化した場合のみ処理
+            if new_status != self.current_status:
+                previous_status = self.current_status
+                self.current_status = new_status
+                
+                logging.info(f"CTI状態が変化: {previous_status.value} → {new_status.value}")
+                
+                # 発信中→通話中の変化を検出
+                if (previous_status == CTIStatus.DIALING and 
+                    new_status == CTIStatus.TALKING):
+                    
+                    # 重複実行防止チェック
+                    if self._should_trigger_auto_processing(current_time):
+                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                        logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+                        
+                        # 最後の実行時刻を更新
+                        self.last_dialing_to_talking_time = current_time
+                        
+                        # 自動処理を実行
+                        self._trigger_auto_processing()
+                    else:
+                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                        logging.info("重複実行防止により自動処理をスキップしました")
+                        
+        except Exception as e:
+            logging.error(f"状態変化検出中にエラーが発生: {str(e)}")
+    
+    def _should_trigger_auto_processing(self, current_time: float) -> bool:
+        """
+        自動処理を実行すべきかどうかを判定
+        
+        Args:
+            current_time: 現在時刻
+            
+        Returns:
+            bool: 実行すべきならTrue
+        """
+        # 自動処理が無効の場合
+        if not self.enable_auto_processing:
+            logging.debug("自動処理が無効に設定されています")
+            return False
+            
+        # 現在処理中の場合
+        if self.is_processing:
+            logging.debug("既に自動処理が実行中です")
+            return False
+            
+        # 前回の発信中→通話中検出から短時間の場合
+        if (current_time - self.last_dialing_to_talking_time) < self.status_change_cooldown:
+            time_since_last = current_time - self.last_dialing_to_talking_time
+            logging.debug(f"前回の自動処理から{time_since_last:.2f}秒しか経過していません（最小間隔: {self.status_change_cooldown}秒）")
+            return False
+            
+        return True 
+
+    def _trigger_auto_processing(self):
+        """
+        自動処理を実行する
+        """
+        try:
+            # 処理中フラグを設定
+            self.is_processing = True
+            
+            if not self.enable_auto_processing:
+                logging.info("自動処理が無効に設定されているため、処理をスキップします")
+                return
+                
+            if self.on_dialing_to_talking_callback is None:
+                logging.warning("コールバック関数が設定されていません")
+                return
+                
+            # コールバック関数を実行
+            if self.on_dialing_to_talking_callback:
+                self.on_dialing_to_talking_callback()
+                
+        except Exception as e:
+            logging.error(f"自動処理の実行中にエラーが発生: {str(e)}")
+        finally:
+            # 処理完了後、一定時間後にフラグをリセット
+            import threading
+            def reset_processing_flag():
+                time.sleep(5.0)  # 5秒後にリセット
+                self.is_processing = False
+                logging.debug("処理中フラグをリセットしました")
+                
+            timer = threading.Timer(5.0, reset_processing_flag)
+            timer.daemon = True
+            timer.start() 

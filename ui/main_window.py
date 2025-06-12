@@ -208,12 +208,19 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
         self.phone_monitor.start_monitoring()
         
-        # CTI状態監視の初期化と開始
-        self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
-        self.cti_status_monitor.start_monitoring()
+        # CTI状態監視の初期化と開始（重複初期化を防ぐ）
+        if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
+            self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
+            self.cti_status_monitor.start_monitoring()
+            
+            # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
+            if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
+                self.trigger_auto_search.connect(self.auto_search_service_area)
         
-        # CTI自動処理用のシグナル・スロット接続
-        self.trigger_auto_search.connect(self.auto_search_service_area)
+        # 自動処理の重複実行防止用フラグ
+        if not hasattr(self, 'is_auto_processing'):
+            self.is_auto_processing = False
+            self.last_auto_processing_time = 0
         
         # フォントサイズの設定
         font_size = self.settings.get('font_size', 10)
@@ -2424,6 +2431,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         2. 提供判定検索を自動実行
         """
         try:
+            import time
+            current_time = time.time()
+            
+            # 重複実行防止チェック
+            if hasattr(self, 'is_auto_processing') and self.is_auto_processing:
+                logging.info("CTI自動処理が既に実行中のため、重複実行をスキップします")
+                return
+                
+            # 前回実行から短時間の場合はスキップ
+            if hasattr(self, 'last_auto_processing_time'):
+                time_since_last = current_time - self.last_auto_processing_time
+                if time_since_last < 3.0:  # 3秒以内の重複実行を防ぐ
+                    logging.info(f"前回の自動処理から{time_since_last:.2f}秒しか経過していないため、重複実行をスキップします")
+                    return
+            
+            # 処理中フラグを設定
+            self.is_auto_processing = True
+            self.last_auto_processing_time = current_time
+            
             logging.info("CTI状態変化による自動処理を開始します")
             
             # 1. 顧客情報取得を実行（既存のfetch_cti_dataメソッドを呼び出し）
@@ -2439,6 +2465,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     logging.debug("提供判定検索のシグナルを送信しました")
                 except Exception as e:
                     logging.error(f"シグナル送信中にエラー: {str(e)}")
+                finally:
+                    # 処理完了後にフラグをリセット
+                    time.sleep(2.0)  # 2秒後にリセット
+                    self.is_auto_processing = False
+                    logging.debug("自動処理フラグをリセットしました")
                     
             timer = threading.Timer(1.0, delayed_trigger)
             timer.daemon = True
@@ -2446,7 +2477,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             
         except Exception as e:
             logging.error(f"CTI自動処理中にエラーが発生: {str(e)}")
-            
+            # エラー時もフラグをリセット
+            if hasattr(self, 'is_auto_processing'):
+                self.is_auto_processing = False
+    
     @Slot()
     def auto_search_service_area(self):
         """
