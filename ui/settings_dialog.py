@@ -205,6 +205,83 @@ ND：{nd}
         mode_group.setLayout(mode_layout)
         content_layout.addWidget(mode_group)
         
+        # CTI監視設定グループ
+        cti_monitor_group = QGroupBox("CTI監視設定")
+        cti_monitor_layout = QVBoxLayout()
+        
+        # CTI監視設定の説明
+        cti_monitor_description = QLabel("CTI状態変化の監視と自動処理の設定を行います。")
+        cti_monitor_description.setWordWrap(True)
+        cti_monitor_layout.addWidget(cti_monitor_description)
+        
+        # CTI監視有効/無効設定
+        self.cti_monitoring_checkbox = QCheckBox("CTI状態監視を有効にする")
+        self.cti_monitoring_checkbox.setToolTip("有効にするとCTI状態の変化を監視し、発信中から通話中への変化時に自動で顧客情報取得と提供判定を実行します")
+        
+        # 現在のCTI監視設定を読み込み
+        if hasattr(parent, 'settings'):
+            current_cti_enabled = parent.settings.get('enable_cti_monitoring', True)
+            current_cti_interval = parent.settings.get('cti_monitor_interval', 0.2)
+            current_cti_cooldown = parent.settings.get('cti_auto_processing_cooldown', 3.0)
+        else:
+            current_cti_enabled = True
+            current_cti_interval = 0.2
+            current_cti_cooldown = 3.0
+            
+        self.cti_monitoring_checkbox.setChecked(current_cti_enabled)
+        cti_monitor_layout.addWidget(self.cti_monitoring_checkbox)
+        
+        # CTI自動処理有効/無効設定
+        self.cti_auto_processing_checkbox = QCheckBox("CTI自動処理を有効にする")
+        self.cti_auto_processing_checkbox.setToolTip("有効にするとCTI状態変化時に自動で顧客情報取得と提供判定を実行します")
+        
+        # 現在のCTI自動処理設定を読み込み
+        if hasattr(parent, 'settings'):
+            current_auto_processing = parent.settings.get('enable_auto_cti_processing', True)
+        else:
+            current_auto_processing = True
+            
+        self.cti_auto_processing_checkbox.setChecked(current_auto_processing)
+        cti_monitor_layout.addWidget(self.cti_auto_processing_checkbox)
+        
+        # CTI監視間隔設定
+        cti_interval_layout = QHBoxLayout()
+        cti_interval_layout.addWidget(QLabel("監視間隔:"))
+        
+        self.cti_interval_spin = QSpinBox()
+        self.cti_interval_spin.setRange(100, 2000)  # 100ms-2000ms
+        self.cti_interval_spin.setValue(int(current_cti_interval * 1000))  # 秒をミリ秒に変換
+        self.cti_interval_spin.setSuffix(" ms")
+        self.cti_interval_spin.setToolTip("CTI状態をチェックする間隔です。短いほど反応が良くなりますが、CPU負荷が高くなります")
+        cti_interval_layout.addWidget(self.cti_interval_spin)
+        
+        cti_monitor_layout.addLayout(cti_interval_layout)
+        
+        # CTI自動処理クールダウン時間設定
+        cti_cooldown_layout = QHBoxLayout()
+        cti_cooldown_layout.addWidget(QLabel("自動処理クールダウン:"))
+        
+        self.cti_cooldown_spin = QSpinBox()
+        self.cti_cooldown_spin.setRange(1, 30)  # 1-30秒
+        self.cti_cooldown_spin.setValue(int(current_cti_cooldown))
+        self.cti_cooldown_spin.setSuffix(" 秒")
+        self.cti_cooldown_spin.setToolTip("同じ状態変化の重複実行を防ぐための最小間隔です")
+        cti_cooldown_layout.addWidget(self.cti_cooldown_spin)
+        
+        cti_monitor_layout.addLayout(cti_cooldown_layout)
+        
+        # CTI設定リセットボタン
+        cti_reset_layout = QHBoxLayout()
+        cti_reset_layout.addStretch()
+        
+        self.cti_reset_btn = QPushButton("CTI設定をデフォルトに戻す")
+        self.cti_reset_btn.clicked.connect(self.reset_cti_settings)
+        cti_reset_layout.addWidget(self.cti_reset_btn)
+        
+        cti_monitor_layout.addLayout(cti_reset_layout)
+        cti_monitor_group.setLayout(cti_monitor_layout)
+        content_layout.addWidget(cti_monitor_group)
+        
         # ブラウザ設定グループ
         browser_group = QGroupBox("ブラウザ設定")
         browser_layout = QVBoxLayout()
@@ -345,6 +422,13 @@ ND：{nd}
         self.page_timeout_spin.setValue(self.default_browser_settings["page_load_timeout"])
         self.script_timeout_spin.setValue(self.default_browser_settings["script_timeout"])
     
+    def reset_cti_settings(self):
+        """CTI設定をデフォルトに戻す"""
+        self.cti_monitoring_checkbox.setChecked(True)  # デフォルトは有効
+        self.cti_auto_processing_checkbox.setChecked(True)  # デフォルトは有効
+        self.cti_interval_spin.setValue(200)  # デフォルトは200ms (0.2秒)
+        self.cti_cooldown_spin.setValue(3)  # デフォルトは3秒
+    
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
@@ -357,9 +441,21 @@ ND：{nd}
                     browser_settings = settings.get('browser_settings', self.default_browser_settings)
                     mode = settings.get('mode', 'simple')
                     
+                    # CTI監視設定の読み込み
+                    cti_monitoring_enabled = settings.get('enable_cti_monitoring', True)
+                    cti_auto_processing_enabled = settings.get('enable_auto_cti_processing', True)
+                    cti_monitor_interval = settings.get('cti_monitor_interval', 0.2)
+                    cti_auto_processing_cooldown = settings.get('cti_auto_processing_cooldown', 3.0)
+                    
                     self.format_edit.setText(format_template)
                     self.font_size_slider.setValue(font_size)
                     self.delay_spin.setValue(delay_seconds)
+                    
+                    # CTI監視設定の設定
+                    self.cti_monitoring_checkbox.setChecked(cti_monitoring_enabled)
+                    self.cti_auto_processing_checkbox.setChecked(cti_auto_processing_enabled)
+                    self.cti_interval_spin.setValue(int(cti_monitor_interval * 1000))  # 秒をミリ秒に変換
+                    self.cti_cooldown_spin.setValue(int(cti_auto_processing_cooldown))
                     
                     # モード設定の読み込み
                     if mode == 'simple':
@@ -380,6 +476,7 @@ ND：{nd}
                 self.delay_spin.setValue(self.default_delay)
                 self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
                 self.reset_browser_settings()
+                self.reset_cti_settings()  # CTI設定もデフォルトに
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
@@ -387,6 +484,7 @@ ND：{nd}
             self.delay_spin.setValue(self.default_delay)
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
             self.reset_browser_settings()
+            self.reset_cti_settings()  # CTI設定もデフォルトに
     
     def save_settings(self):
         """設定をファイルに保存する"""
@@ -416,7 +514,12 @@ ND：{nd}
                 'delay_seconds': self.delay_spin.value(),
                 'browser_settings': browser_settings,
                 'mode': new_mode,
-                'show_mode_selection': False  # モード選択ダイアログを次回から表示しない
+                'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
+                # CTI監視設定を追加
+                'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
+                'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
+                'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
+                'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value())
             }
             
             with open(self.settings_file, 'w', encoding='utf-8') as f:
@@ -445,6 +548,7 @@ ND：{nd}
         self.delay_spin.setValue(self.default_delay)
         self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
         self.reset_browser_settings()
+        self.reset_cti_settings()  # CTI設定もデフォルトに戻す
     
     def accept(self):
         """ダイアログを受け入れる（OKボタン）"""
@@ -471,5 +575,10 @@ ND：{nd}
             'delay_seconds': self.delay_spin.value(),
             'browser_settings': browser_settings,
             'mode': mode,
-            'show_mode_selection': False  # モード選択ダイアログを次回から表示しない
+            'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
+            # CTI監視設定を追加
+            'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
+            'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
+            'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
+            'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value())
         } 
