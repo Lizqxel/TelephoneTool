@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QSizePolicy, QProgressBar, QListView)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices
+from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QRect, QPoint
+from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
@@ -69,6 +69,9 @@ class NoWheelComboBox(QComboBox):
 
 class MainWindow(QMainWindow, MainWindowFunctions):
     """メインウィンドウクラス"""
+    
+    # カスタムシグナル：CTI自動処理用
+    trigger_auto_search = Signal()
     
     def set_font_size(self, size):
         """
@@ -208,6 +211,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # CTI状態監視の初期化と開始
         self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
         self.cti_status_monitor.start_monitoring()
+        
+        # CTI自動処理用のシグナル・スロット接続
+        self.trigger_auto_search.connect(self.auto_search_service_area)
         
         # フォントサイズの設定
         font_size = self.settings.get('font_size', 10)
@@ -430,6 +436,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
         self.cti_status_monitor.start_monitoring()
         
+        # CTI自動処理用のシグナル・スロット接続
+        self.trigger_auto_search.connect(self.auto_search_service_area)
+        
         # カウントダウン表示用のラベル
         self.countdown_label = QLabel()
         self.countdown_label.setStyleSheet("""
@@ -540,6 +549,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # CTI状態監視の初期化と開始
         self.cti_status_monitor = CTIStatusMonitor(self.on_cti_dialing_to_talking)
         self.cti_status_monitor.start_monitoring()
+        
+        # CTI自動処理用のシグナル・スロット接続
+        self.trigger_auto_search.connect(self.auto_search_service_area)
 
         self.init_menu()
     
@@ -2419,12 +2431,23 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.fetch_cti_data()
             
             # 2. 顧客情報取得が完了してから提供判定検索を実行
-            # 少し待機してからUIの更新を確認
-            QTimer.singleShot(1000, self.auto_search_service_area)
+            # シグナルを使用してメインスレッドで実行（スレッドセーフ）
+            import threading
+            def delayed_trigger():
+                try:
+                    self.trigger_auto_search.emit()
+                    logging.debug("提供判定検索のシグナルを送信しました")
+                except Exception as e:
+                    logging.error(f"シグナル送信中にエラー: {str(e)}")
+                    
+            timer = threading.Timer(1.0, delayed_trigger)
+            timer.daemon = True
+            timer.start()
             
         except Exception as e:
             logging.error(f"CTI自動処理中にエラーが発生: {str(e)}")
             
+    @Slot()
     def auto_search_service_area(self):
         """
         自動提供判定検索を実行
