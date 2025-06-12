@@ -216,7 +216,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
                 self.cti_status_monitor = CTIStatusMonitor(
                     on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-                    on_call_ended_callback=self.on_cti_call_ended
+                    on_call_ended_callback=self.on_cti_call_ended,
+                    on_talking_started_callback=self.on_cti_talking_started
                 )
                 self.cti_status_monitor.start_monitoring()
                 logging.info("CTI状態監視を開始しました")
@@ -518,7 +519,8 @@ ND：{nd}
         # CTI状態監視の初期化と開始
         self.cti_status_monitor = CTIStatusMonitor(
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-            on_call_ended_callback=self.on_cti_call_ended
+            on_call_ended_callback=self.on_cti_call_ended,
+            on_talking_started_callback=self.on_cti_talking_started
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -635,7 +637,8 @@ ND：{nd}
         # CTI状態監視の初期化と開始
         self.cti_status_monitor = CTIStatusMonitor(
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-            on_call_ended_callback=self.on_cti_call_ended
+            on_call_ended_callback=self.on_cti_call_ended,
+            on_talking_started_callback=self.on_cti_talking_started
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -1651,7 +1654,8 @@ ND：{nd}
                     if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
                         self.cti_status_monitor = CTIStatusMonitor(
                             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-                            on_call_ended_callback=self.on_cti_call_ended
+                            on_call_ended_callback=self.on_cti_call_ended,
+                            on_talking_started_callback=self.on_cti_talking_started
                         )
                         self.cti_status_monitor.start_monitoring()
                         logging.info("CTI状態監視を開始しました")
@@ -2658,11 +2662,30 @@ ND：{nd}
     def on_cti_call_ended(self):
         """通話終了時（通話中→待ち受け中）のコールバック処理"""
         try:
-            logging.info("★★★ 通話終了を検出: 電話ボタン監視を一時停止します ★★★")
+            logging.info("★★★ 通話終了を検出: 2秒後に電話ボタン監視を再開します ★★★")
             if hasattr(self, 'phone_monitor'):
-                self.phone_monitor.pause_monitoring()
+                # 2秒後に監視を再開するタイマーを設定
+                QTimer.singleShot(2000, self.restart_phone_monitoring)
         except Exception as e:
             logging.error(f"通話終了時の処理でエラーが発生: {str(e)}")
+
+    def restart_phone_monitoring(self):
+        """電話ボタン監視を再開"""
+        try:
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.start_monitoring()
+                logging.info("電話ボタン監視を再開しました")
+        except Exception as e:
+            logging.error(f"電話ボタン監視の再開でエラーが発生: {str(e)}")
+
+    def on_cti_talking_started(self):
+        """通話中状態開始時のコールバック処理"""
+        try:
+            logging.info("★★★ 通話中状態を検出: 電話ボタン監視を停止します ★★★")
+            if hasattr(self, 'phone_monitor'):
+                self.phone_monitor.stop_monitoring()
+        except Exception as e:
+            logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
 
 
 class ServiceAreaSearchWorker(QObject):
