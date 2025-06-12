@@ -955,9 +955,19 @@ class MainWindow(QMainWindow):
                 self.address_input.setText(data.address)
                 logging.info("CTIデータの取得に成功しました")
                 
-                # 提供判定検索を実行
-                QTimer.singleShot(500, self.search_service_area)  # 0.5秒後に検索を開始
-                logging.info("提供判定検索を開始します")
+                # 提供判定検索ボタンを自動クリック（0.5秒後）
+                def click_search_button():
+                    try:
+                        if self.postal_code_input.text().strip() and self.address_input.text().strip():
+                            logging.info("提供判定検索を自動実行します")
+                            self.area_search_btn.click()
+                        else:
+                            logging.warning("郵便番号または住所が空のため、提供判定検索をスキップします")
+                    except Exception as e:
+                        logging.error(f"提供判定検索ボタンのクリック時にエラー: {str(e)}")
+                
+                QTimer.singleShot(500, click_search_button)
+                logging.info("提供判定検索を開始します（0.5秒後）")
             else:
                 logging.warning("CTIデータの取得に失敗しました")
                 QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
