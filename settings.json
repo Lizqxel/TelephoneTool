@@ -11,5 +11,7 @@
     "script_timeout": 30
   },
   "mode": "simple",
-  "show_mode_selection": false
+  "show_mode_selection": false,
+  "enable_auto_cti_processing": true,
+  "cti_monitor_interval": 0.2
 }
