@@ -2506,16 +2506,17 @@ ND：{nd}
             # フォーカスを最初の入力欄に設定
             self.mobile_part1_input.setFocus()
         else:
-            # 携帯番号入力欄と時間帯入力欄を非表示
+            # 携帯番号入力欄を非表示、時間帯入力欄は表示
             self.mobile_number_widget.hide()
-            self.time_preference_widget.hide()
+            self.time_preference_widget.show()
+            # 時間帯入力欄をクリア
+            self.time_preference_input.clear()
             # パターンに応じてavailable_time_inputを更新
             if text == "②携帯なし":
                 self.available_time_input.setText("携帯なし")
             elif text == "③携帯ありで番号がわからない":
                 self.available_time_input.setText("携帯不明")
         
-        # パターン変更時のみプレビューを更新（リアルタイム更新は削除）
 
     def format_mobile_number_part(self):
         """
@@ -2554,18 +2555,29 @@ ND：{nd}
         part3 = self.mobile_part3_input.text().strip()
         time_pref = self.time_preference_input.text().strip()
         
-        if part1 and part2 and part3:
-            # 3つの部分がすべて入力されている場合
-            mobile_number = f"{part1}-{part2}-{part3}"
+        if self.mobile_pattern_combo.currentText() == "①携帯ありで番号がわかる":
+            if part1 and part2 and part3:
+                # 3つの部分がすべて入力されている場合
+                mobile_number = f"{part1}-{part2}-{part3}"
+                if time_pref:
+                    self.available_time_input.setText(f"{time_pref}\n{mobile_number}")
+                else:
+                    self.available_time_input.setText(mobile_number)
+            elif part1 or part2 or part3:
+                # 一部だけ入力されている場合は空にする
+                self.available_time_input.setText("")
+        else:
+            # 携帯なしまたは携帯不明の場合
             if time_pref:
-                self.available_time_input.setText(f"{time_pref}\n{mobile_number}")
+                if self.mobile_pattern_combo.currentText() == "②携帯なし":
+                    self.available_time_input.setText(f"{time_pref}\n携帯なし")
+                else:  # 携帯ありで番号がわからない
+                    self.available_time_input.setText(f"{time_pref}\n携帯不明")
             else:
-                self.available_time_input.setText(mobile_number)
-        elif part1 or part2 or part3:
-            # 一部だけ入力されている場合は空にする
-            self.available_time_input.setText("")
-        
-        # リアルタイムプレビュー更新を削除（営業コメント作成ボタンを押した時のみ更新）
+                if self.mobile_pattern_combo.currentText() == "②携帯なし":
+                    self.available_time_input.setText("携帯なし")
+                else:  # 携帯ありで番号がわからない
+                    self.available_time_input.setText("携帯不明")
 
     def on_cti_dialing_to_talking(self):
         """
