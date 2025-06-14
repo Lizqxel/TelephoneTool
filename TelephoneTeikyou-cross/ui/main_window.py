@@ -257,15 +257,12 @@ class MainWindow(QMainWindow):
                 logging.info("CTI状態監視を開始しました")
                 
                 # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
-                if not hasattr(self, 'trigger_auto_search'):
-                    self.trigger_auto_search = Signal()
-                if not hasattr(self, 'trigger_auto_search'):
-                    self.trigger_auto_search = Signal()
                 try:
                     self.trigger_auto_search.disconnect()
                 except:
                     pass
                 self.trigger_auto_search.connect(self.auto_search_service_area)
+                logging.info("- trigger_auto_search シグナル・スロット接続を設定しました")
         else:
             logging.info("CTI監視が設定で無効になっています")
             self.cti_status_monitor = None
@@ -1348,8 +1345,9 @@ class MainWindow(QMainWindow):
                     logging.debug("CTIデータの取得に成功しました")
                     
                     # 自動検索シグナルを発行
+                    logging.info("★★★ trigger_auto_search.emit() を実行します ★★★")
                     self.trigger_auto_search.emit()
-                    logging.debug("自動提供判定検索を要求しました")
+                    logging.info("★★★ trigger_auto_search.emit() を実行しました ★★★")
                 else:
                     logging.warning("CTIデータの取得に失敗しました")
                     QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
@@ -1464,7 +1462,8 @@ class MainWindow(QMainWindow):
         自動提供判定検索（UIボタン経由で統一）
         """
         try:
-            logging.info("★★★ auto_search_service_area が呼び出されました ★★★")
+            logging.info("★★★★★ auto_search_service_area が呼び出されました ★★★★★")
+            logging.info("★★★★★ シグナル・スロット接続が正常に動作しています ★★★★★")
             
             # 入力データの確認
             postal_code = self.postal_code_input.text().strip()
