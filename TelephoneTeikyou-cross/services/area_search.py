@@ -45,11 +45,18 @@ class CancellationError(Exception):
     """検索キャンセル時に発生する例外"""
     pass
 
-def set_cancel_flag():
-    """キャンセルフラグを設定"""
+def set_cancel_flag(value=True):
+    """キャンセルフラグを設定
+    
+    Args:
+        value (bool): 設定する値（デフォルト: True）
+    """
     global _global_cancel_flag
-    _global_cancel_flag = True
-    logging.info("★★★ エリア検索のキャンセルフラグを設定しました ★★★")
+    _global_cancel_flag = value
+    if value:
+        logging.info("★★★ エリア検索のキャンセルフラグを設定しました ★★★")
+    else:
+        logging.info("エリア検索のキャンセルフラグをクリアしました")
 
 def clear_cancel_flag():
     """キャンセルフラグをクリア"""
