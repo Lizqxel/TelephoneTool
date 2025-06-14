@@ -1331,37 +1331,69 @@ class MainWindow(QMainWindow):
     def on_cti_dialing_to_talking(self):
         """発信中→通話中の状態変化時のコールバック処理"""
         try:
+            import time
+            current_time = time.time()
+            
             logging.info("★★★ on_cti_dialing_to_talking コールバックが呼び出されました ★★★")
             logging.info(f"- 自動処理中フラグ: {self.is_auto_processing}")
             
-            if not self.is_auto_processing:
-                self.is_auto_processing = True
-                # 重要な状態変化なのでINFOレベルで出力
-                logging.info("CTI状態変化検出: 発信中 → 通話中")
-                logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+            # 重複実行防止チェック
+            if hasattr(self, 'is_auto_processing') and self.is_auto_processing:
+                logging.info("CTI自動処理が既に実行中のため、重複実行をスキップします")
+                return
                 
-                # 顧客情報を取得
-                data = self.cti_service.get_all_fields_data()
-                if data:
-                    # 入力フィールドに設定
-                    self.postal_code_input.setText(data.postal_code)
-                    self.address_input.setText(data.address)
-                    self.phone_input.setText(data.phone)
-                    logging.debug("CTIデータの取得に成功しました")
-                    
-                    # 自動検索シグナルを発行
-                    logging.info("★★★ trigger_auto_search.emit() を実行します ★★★")
-                    # メインスレッドでシグナルを発行するためにQTimer.singleShotを使用
-                    QTimer.singleShot(0, lambda: self.trigger_auto_search.emit())
-                    logging.info("★★★ trigger_auto_search.emit() を実行しました ★★★")
-                else:
-                    logging.warning("CTIデータの取得に失敗しました")
-                    QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
+            # 前回実行から短時間の場合はスキップ
+            if hasattr(self, 'last_auto_processing_time'):
+                time_since_last = current_time - self.last_auto_processing_time
+                if time_since_last < 3.0:  # 3秒以内の重複実行を防ぐ
+                    logging.info(f"前回の自動処理から{time_since_last:.2f}秒しか経過していないため、重複実行をスキップします")
+                    return
+            
+            # 処理中フラグを設定
+            self.is_auto_processing = True
+            self.last_auto_processing_time = current_time
+            
+            logging.info("CTI状態変化による自動処理を開始します")
+            
+            # 重要な状態変化なのでINFOレベルで出力
+            logging.info("CTI状態変化検出: 発信中 → 通話中")
+            logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+            
+                        # 顧客情報を取得
+            data = self.cti_service.get_all_fields_data()
+            if data:
+                # 入力フィールドに設定
+                self.postal_code_input.setText(data.postal_code)
+                self.address_input.setText(data.address)
+                self.phone_input.setText(data.phone)
+                logging.debug("CTIデータの取得に成功しました")
+                
+                # 自動検索シグナルを発行（TelephoneToolと同じ方式）
+                logging.info("★★★ trigger_auto_search.emit() を実行します ★★★")
+                # 1秒後にシグナルを発行（TelephoneToolと同じタイミング）
+                import threading
+                def delayed_trigger():
+                    try:
+                        self.trigger_auto_search.emit()
+                        logging.info("★★★ trigger_auto_search.emit() を実行しました ★★★")
+                    except Exception as e:
+                        logging.error(f"シグナル送信中にエラー: {str(e)}")
+                        # エラー時はフラグをリセット
+                        self.is_auto_processing = False
+                        logging.debug("自動処理フラグをリセットしました")
+                        
+                timer = threading.Timer(1.0, delayed_trigger)
+                timer.daemon = True
+                timer.start()
+            else:
+                logging.warning("CTIデータの取得に失敗しました")
+                QMessageBox.warning(self, "エラー", "CTIデータの取得に失敗しました。\nCTIメインウィンドウが開いているか確認してください。")
                 
         except Exception as e:
             logging.error(f"発信中→通話中の処理でエラーが発生: {str(e)}")
-        finally:
-            self.is_auto_processing = False
+            # エラー時もフラグをリセット
+            if hasattr(self, 'is_auto_processing'):
+                self.is_auto_processing = False
 
     def on_cti_call_ended(self):
         """通話終了時のコールバック処理"""
