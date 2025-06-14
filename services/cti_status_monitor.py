@@ -87,6 +87,10 @@ class CTIStatusMonitor:
         self.last_window_redetect_time = 0
         self.enable_auto_processing = True  # 自動処理の有効/無効
         
+        # 通話時間設定
+        self.call_duration_threshold = 0  # 通話時間の閾値（秒）
+        self.talking_start_time = 0  # 通話開始時刻
+        
         # 設定の読み込み
         self.load_settings()
         
@@ -100,6 +104,7 @@ class CTIStatusMonitor:
                     settings = json.load(f)
                     self.enable_auto_processing = settings.get('enable_auto_cti_processing', True)
                     self.monitor_interval = settings.get('cti_monitor_interval', 0.2)
+                    self.call_duration_threshold = settings.get('call_duration_threshold', 0)
             else:
                 self.enable_auto_processing = True
                 self.monitor_interval = 0.2
@@ -434,6 +439,8 @@ class CTIStatusMonitor:
                 # 通話中状態への遷移を検出
                 if new_status == CTIStatus.TALKING:
                     logging.info("★★★ 通話中状態を検出 ★★★")
+                    # 通話開始時刻を記録
+                    self.talking_start_time = current_time
                     if self.on_talking_started_callback:
                         try:
                             self.on_talking_started_callback()
@@ -462,13 +469,17 @@ class CTIStatusMonitor:
                     # 重複実行防止チェック
                     if self._should_trigger_auto_processing(current_time):
                         logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
-                        logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
                         
-                        # 最後の実行時刻を更新
-                        self.last_dialing_to_talking_time = current_time
-                        
-                        # 自動処理を実行
-                        self._trigger_auto_processing()
+                        # 通話時間の閾値が0秒の場合は即時実行
+                        if self.call_duration_threshold == 0:
+                            logging.info("通話時間閾値が0秒のため、即時実行します")
+                            self._trigger_auto_processing()
+                        else:
+                            logging.info(f"通話時間閾値（{self.call_duration_threshold}秒）を待機します")
+                            # 通話開始時刻を記録
+                            self.talking_start_time = current_time
+                            # 一定時間後に自動処理を実行
+                            threading.Timer(self.call_duration_threshold, self._check_and_trigger_auto_processing).start()
                     else:
                         logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
                         logging.info("重複実行防止により自動処理をスキップしました")
@@ -553,3 +564,21 @@ class CTIStatusMonitor:
             timer = threading.Timer(10.0, reset_processing_flag)  # 10秒後にバックアップリセット
             timer.daemon = True
             timer.start() 
+
+    def _check_and_trigger_auto_processing(self):
+        """
+        通話時間をチェックし、条件を満たす場合に自動処理を実行
+        """
+        try:
+            current_time = time.time()
+            elapsed_time = current_time - self.talking_start_time
+            
+            # 通話中状態で、かつ通話時間が閾値を超えている場合
+            if (self.current_status == CTIStatus.TALKING and 
+                elapsed_time >= self.call_duration_threshold):
+                logging.info(f"通話時間が閾値（{self.call_duration_threshold}秒）を超えました")
+                self._trigger_auto_processing()
+            else:
+                logging.info(f"通話時間が閾値に達していないため、自動処理をスキップします（経過時間: {elapsed_time:.1f}秒）")
+        except Exception as e:
+            logging.error(f"通話時間チェック中にエラーが発生: {str(e)}") 

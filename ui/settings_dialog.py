@@ -96,10 +96,12 @@ ND：{nd}
             self.current_font_size = parent.settings.get('font_size', self.default_font_size)
             self.current_delay = parent.settings.get('delay_seconds', self.default_delay)
             self.current_browser_settings = parent.settings.get('browser_settings', self.default_browser_settings)
+            current_call_duration = parent.settings.get('call_duration_threshold', 0)  # デフォルトは0秒
         else:
             self.current_font_size = self.default_font_size
             self.current_delay = self.default_delay
             self.current_browser_settings = self.default_browser_settings
+            current_call_duration = 0
         
         # メインレイアウト
         main_layout = QVBoxLayout(self)
@@ -223,10 +225,12 @@ ND：{nd}
             current_cti_enabled = parent.settings.get('enable_cti_monitoring', True)
             current_cti_interval = parent.settings.get('cti_monitor_interval', 0.2)
             current_cti_cooldown = parent.settings.get('cti_auto_processing_cooldown', 3.0)
+            current_call_duration = parent.settings.get('call_duration_threshold', 0)  # デフォルトは0秒
         else:
             current_cti_enabled = True
             current_cti_interval = 0.2
             current_cti_cooldown = 3.0
+            current_call_duration = 0
             
         self.cti_monitoring_checkbox.setChecked(current_cti_enabled)
         cti_monitor_layout.addWidget(self.cti_monitoring_checkbox)
@@ -269,6 +273,19 @@ ND：{nd}
         cti_cooldown_layout.addWidget(self.cti_cooldown_spin)
         
         cti_monitor_layout.addLayout(cti_cooldown_layout)
+        
+        # 通話時間設定
+        call_duration_layout = QHBoxLayout()
+        call_duration_layout.addWidget(QLabel("通話時間設定:"))
+        
+        self.call_duration_spin = QSpinBox()
+        self.call_duration_spin.setRange(0, 300)  # 0-300秒
+        self.call_duration_spin.setValue(int(current_call_duration))
+        self.call_duration_spin.setSuffix(" 秒")
+        self.call_duration_spin.setToolTip("「発信中」→「通話中」に変化した時に、この時間以上経過した場合に自動実行します。0秒の場合は即時実行します。")
+        call_duration_layout.addWidget(self.call_duration_spin)
+        
+        cti_monitor_layout.addLayout(call_duration_layout)
         
         # CTI設定リセットボタン
         cti_reset_layout = QHBoxLayout()
@@ -424,10 +441,11 @@ ND：{nd}
     
     def reset_cti_settings(self):
         """CTI設定をデフォルトに戻す"""
-        self.cti_monitoring_checkbox.setChecked(True)  # デフォルトは有効
-        self.cti_auto_processing_checkbox.setChecked(True)  # デフォルトは有効
-        self.cti_interval_spin.setValue(200)  # デフォルトは200ms (0.2秒)
-        self.cti_cooldown_spin.setValue(3)  # デフォルトは3秒
+        self.cti_monitoring_checkbox.setChecked(True)
+        self.cti_auto_processing_checkbox.setChecked(True)
+        self.cti_interval_spin.setValue(200)  # 0.2秒
+        self.cti_cooldown_spin.setValue(3)  # 3秒
+        self.call_duration_spin.setValue(0)  # 0秒
     
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
@@ -446,6 +464,7 @@ ND：{nd}
                     cti_auto_processing_enabled = settings.get('enable_auto_cti_processing', True)
                     cti_monitor_interval = settings.get('cti_monitor_interval', 0.2)
                     cti_auto_processing_cooldown = settings.get('cti_auto_processing_cooldown', 3.0)
+                    current_call_duration = settings.get('call_duration_threshold', 0)  # デフォルトは0秒
                     
                     self.format_edit.setText(format_template)
                     self.font_size_slider.setValue(font_size)
@@ -519,7 +538,8 @@ ND：{nd}
                 'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
                 'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
                 'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
-                'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value())
+                'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
+                'call_duration_threshold': self.call_duration_spin.value()
             }
             
             with open(self.settings_file, 'w', encoding='utf-8') as f:
@@ -580,5 +600,6 @@ ND：{nd}
             'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
             'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
             'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
-            'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value())
+            'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
+            'call_duration_threshold': self.call_duration_spin.value()
         } 

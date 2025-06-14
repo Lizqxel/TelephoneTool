@@ -2720,6 +2720,36 @@ ND：{nd}
         except Exception as e:
             logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
 
+    def apply_cti_settings(self):
+        """CTI監視設定を適用する"""
+        try:
+            cti_settings = self.settings.get('cti_settings', {})
+            
+            # CTI監視の有効/無効を設定
+            if cti_settings.get('enable_cti', True):
+                if not self.cti_status_monitor.is_monitoring:
+                    self.cti_status_monitor.start_monitoring()
+                    logging.info("CTI監視を開始しました")
+            else:
+                if self.cti_status_monitor.is_monitoring:
+                    self.cti_status_monitor.stop_monitoring()
+                    logging.info("CTI監視を停止しました")
+            
+            # 自動処理の有効/無効を設定
+            self.cti_status_monitor.enable_auto_processing = cti_settings.get('enable_auto_cti_processing', True)
+            
+            # 監視間隔を設定
+            self.cti_status_monitor.monitor_interval = cti_settings.get('cti_monitor_interval', 0.2)
+            
+            # 通話時間の閾値を設定
+            self.cti_status_monitor.call_duration_threshold = cti_settings.get('call_duration_threshold', 0)
+            
+            logging.info("CTI監視設定を適用しました")
+            
+        except Exception as e:
+            logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
+            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}")
+
 
 class ServiceAreaSearchWorker(QObject):
     """
@@ -2953,33 +2983,38 @@ class CancellationError(Exception):
             return None
 
     def load_settings(self):
-        """設定を読み込む"""
+        """設定ファイルを読み込む"""
         try:
-            # 設定ファイルの読み込み
+            # 初期設定を設定
+            self.settings = {
+                'font_size': 11,
+                'cti_settings': {
+                    'enable_cti': True,
+                    'enable_auto_cti_processing': True,
+                    'cti_monitor_interval': 0.2,
+                    'call_duration_threshold': 0  # 通話時間の閾値（デフォルトは0秒）
+                },
+                'browser_settings': {
+                    'headless': True,
+                    'disable_images': True,
+                    'show_popup': True,
+                    'auto_close': True,
+                    'page_load_timeout': 60,
+                    'script_timeout': 60
+                }
+            }
+            
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    self.settings = json.load(f)
-                    logging.info("設定ファイルを読み込みました")
-                    logging.info(f"設定内容: {self.settings}")
+                    loaded_settings = json.load(f)
+                    # 既存の設定を更新
+                    self.settings.update(loaded_settings)
             else:
-                self.settings = {}
-                logging.warning("設定ファイルが存在しません")
+                # デフォルト設定をファイルに保存
+                self.save_settings()
             
-            # フォーマットテンプレートの確認
-            if 'format_template' not in self.settings or not self.settings['format_template']:
-                logging.error("フォーマットテンプレートが設定されていません")
-                QMessageBox.warning(self, "警告", "フォーマットテンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
-                return
-            
-            logging.info(f"フォーマットテンプレート: {self.settings['format_template']}")
-            
-            # フォントサイズの設定
-            font_size = self.settings.get('font_size', 10)
-            logging.info(f"フォントサイズを {font_size} に設定しました")
-            
-            # 電話ボタン監視の設定
-            if hasattr(self, 'phone_monitor'):
-                self.phone_monitor.update_settings()
+            logging.info("設定ファイルを読み込みました")
+            logging.info(f"設定内容: {self.settings}")
             
         except Exception as e:
             logging.error(f"設定の読み込み中にエラーが発生しました: {e}", exc_info=True)
