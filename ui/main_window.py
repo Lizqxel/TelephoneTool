@@ -1429,6 +1429,12 @@ ND：{nd}
         area_result_layout.setContentsMargins(0, 0, 0, 0)
         area_result_layout.setSpacing(2)
 
+        # 結果表示とリロードボタンを横並びにするコンテナ
+        result_row_container = QWidget()
+        result_row_layout = QHBoxLayout(result_row_container)
+        result_row_layout.setContentsMargins(0, 0, 0, 0)
+        result_row_layout.setSpacing(5)
+
         self.area_result_label = QLabel("提供エリア: 未検索")
         self.area_result_label.setStyleSheet("""
             QLabel {
@@ -1439,7 +1445,59 @@ ND：{nd}
                 background-color: #f8f8f8;
             }
         """)
-        area_result_layout.addWidget(self.area_result_label)
+        result_row_layout.addWidget(self.area_result_label)
+
+        # リロードボタン（初期状態では非表示）
+        self.reload_btn = QPushButton("リロード")
+        self.reload_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                text-align: center;
+                font-size: 12px;
+                border-radius: 4px;
+                min-width: 60px;
+                max-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:pressed {
+                background-color: #E65100;
+            }
+        """)
+        self.reload_btn.clicked.connect(self.reload_application)
+        self.reload_btn.hide()  # 初期状態では非表示
+        result_row_layout.addWidget(self.reload_btn)
+
+        # 再起動ボタン（初期状態では非表示）
+        self.restart_btn = QPushButton("再起動")
+        self.restart_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                text-align: center;
+                font-size: 12px;
+                border-radius: 4px;
+                min-width: 60px;
+                max-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:pressed {
+                background-color: #B71C1C;
+            }
+        """)
+        self.restart_btn.clicked.connect(self.restart_application)
+        self.restart_btn.hide()  # 初期状態では非表示
+        result_row_layout.addWidget(self.restart_btn)
+
+        area_result_layout.addWidget(result_row_container)
 
         # プログレスバー（初期状態では非表示）
         self.progress_bar = QProgressBar()
@@ -2244,10 +2302,19 @@ ND：{nd}
             }
         """)
 
+        # リロード/再起動ボタンを表示（キャンセル中状態で問題が発生した場合の対処用）
+        if hasattr(self, 'reload_btn'):
+            self.reload_btn.show()
+        if hasattr(self, 'restart_btn'):
+            self.restart_btn.show()
+
         # バックエンド処理のキャンセル
         if hasattr(self, 'worker'):
             self.worker.cancel()
             # キャンセル完了を待つため、ボタンとプログレスバーはそのまま維持
+            
+            # 5秒後にキャンセルが完了していない場合の自動リセット処理
+            QTimer.singleShot(5000, self.check_cancel_timeout)
 
     def reset_search_button(self):
         """検索ボタンを初期状態に戻す"""
@@ -2278,6 +2345,12 @@ ND：{nd}
         # 検索ボタンのクリックイベントを元に戻す
         self.area_search_btn.clicked.disconnect()
         self.area_search_btn.clicked.connect(self.search_service_area)
+        
+        # リロード/再起動ボタンを非表示
+        if hasattr(self, 'reload_btn'):
+            self.reload_btn.hide()
+        if hasattr(self, 'restart_btn'):
+            self.restart_btn.hide()
 
     def on_search_completed(self, result):
         """検索完了時の処理"""
@@ -2944,6 +3017,196 @@ ND：{nd}
             except Exception as fallback_error:
                 logging.error(f"エラー時のフォールバック処理も失敗: {str(fallback_error)}")
                 pass
+
+    def reload_application(self):
+        """
+        アプリケーションをリロード（初期状態に戻す）
+        """
+        try:
+            logging.info("★★★ アプリケーションのリロードを開始します ★★★")
+            
+            # 確認ダイアログを表示
+            reply = QMessageBox.question(
+                self, 
+                "リロード確認", 
+                "アプリケーションを初期状態に戻しますか？\n（入力中のデータは失われます）",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # 実行中の処理をキャンセル
+                if hasattr(self, 'cancel_search'):
+                    self.cancel_search()
+                
+                # CTI監視を停止
+                if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                    self.cti_status_monitor.stop_monitoring()
+                
+                # 電話監視を停止
+                if hasattr(self, 'phone_monitor') and self.phone_monitor:
+                    self.phone_monitor.stop_monitoring()
+                
+                # 全ての入力フィールドをクリア
+                self.clear_all_inputs()
+                
+                # 提供エリア検索結果をリセット
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: 未検索")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #ddd;
+                            border-radius: 4px;
+                            background-color: #f8f8f8;
+                        }
+                    """)
+                
+                # 検索ボタンをリセット
+                if hasattr(self, 'reset_search_button'):
+                    self.reset_search_button()
+                
+                # リロード/再起動ボタンを非表示
+                if hasattr(self, 'reload_btn'):
+                    self.reload_btn.hide()
+                if hasattr(self, 'restart_btn'):
+                    self.restart_btn.hide()
+                
+                # プログレスバーを非表示
+                if hasattr(self, 'progress_bar'):
+                    self.progress_bar.hide()
+                    self.progress_bar.setValue(0)
+                
+                # CTI監視を再開
+                if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                    self.cti_status_monitor.start_monitoring()
+                
+                # 電話監視を再開
+                if hasattr(self, 'phone_monitor') and self.phone_monitor:
+                    self.phone_monitor.start_monitoring()
+                
+                logging.info("★★★ アプリケーションのリロードが完了しました ★★★")
+                QMessageBox.information(self, "リロード完了", "アプリケーションが初期状態に戻りました。")
+                
+        except Exception as e:
+            logging.error(f"アプリケーションリロード中にエラー: {str(e)}")
+            QMessageBox.critical(self, "エラー", f"リロード中にエラーが発生しました: {str(e)}")
+
+    def restart_application(self):
+        """
+        アプリケーションを再起動
+        """
+        try:
+            logging.info("★★★ アプリケーションの再起動を開始します ★★★")
+            
+            # 確認ダイアログを表示
+            reply = QMessageBox.question(
+                self, 
+                "再起動確認", 
+                "アプリケーションを再起動しますか？\n（入力中のデータは失われます）",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # 実行中の処理をキャンセル
+                if hasattr(self, 'cancel_search'):
+                    self.cancel_search()
+                
+                # CTI監視を停止
+                if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                    self.cti_status_monitor.stop_monitoring()
+                
+                # 電話監視を停止
+                if hasattr(self, 'phone_monitor') and self.phone_monitor:
+                    self.phone_monitor.stop_monitoring()
+                
+                logging.info("アプリケーションを再起動します...")
+                
+                # Pythonスクリプトを再実行
+                import sys
+                import os
+                
+                # 現在のPythonインタープリターと実行中のスクリプトを取得
+                python_executable = sys.executable
+                script_path = sys.argv[0]
+                
+                # 新しいプロセスでアプリケーションを起動
+                if os.name == 'nt':  # Windows
+                    import subprocess
+                    subprocess.Popen([python_executable, script_path])
+                else:  # Unix/Linux/Mac
+                    os.execv(python_executable, [python_executable] + sys.argv)
+                
+                # 現在のアプリケーションを終了
+                QApplication.quit()
+                
+        except Exception as e:
+            logging.error(f"アプリケーション再起動中にエラー: {str(e)}")
+            QMessageBox.critical(self, "エラー", f"再起動中にエラーが発生しました: {str(e)}")
+
+    def check_cancel_timeout(self):
+        """
+        キャンセル処理のタイムアウトをチェックし、必要に応じて強制リセット
+        """
+        try:
+            # 現在のボタン状態をチェック
+            if (hasattr(self, 'area_search_btn') and 
+                self.area_search_btn.text() == "キャンセル中..." and 
+                not self.area_search_btn.isEnabled()):
+                
+                logging.warning("★★★ キャンセル処理がタイムアウトしました - 強制リセットを実行します ★★★")
+                
+                # 強制的にリセット
+                self.reset_search_button()
+                
+                # 結果表示を更新
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: キャンセルタイムアウト（強制リセット済み）")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #DC3545;
+                            border-radius: 4px;
+                            background-color: #F8D7DA;
+                            color: #721C24;
+                        }
+                    """)
+                
+                # プログレスバーを非表示
+                if hasattr(self, 'progress_bar'):
+                    self.progress_bar.hide()
+                    self.progress_bar.setValue(0)
+                
+                # ワーカーとスレッドを強制終了
+                if hasattr(self, 'worker'):
+                    self.worker = None
+                if hasattr(self, 'thread') and self.thread:
+                    if self.thread.isRunning():
+                        self.thread.quit()
+                        self.thread.wait(1000)  # 1秒待機
+                    self.thread = None
+                
+                # CTI監視システムの処理フラグもリセット
+                if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                    try:
+                        with self.cti_status_monitor.processing_lock:
+                            self.cti_status_monitor.is_processing = False
+                            self.cti_status_monitor.talking_start_time = 0
+                            logging.info("タイムアウト時にCTI監視システムの処理フラグもリセットしました")
+                    except Exception as cti_error:
+                        logging.error(f"CTI監視システムのリセット中にエラー: {str(cti_error)}")
+                
+                # 自動処理フラグもリセット
+                if hasattr(self, 'is_auto_processing'):
+                    self.is_auto_processing = False
+                
+                logging.info("キャンセルタイムアウトによる強制リセットが完了しました")
+                
+        except Exception as e:
+            logging.error(f"キャンセルタイムアウトチェック中にエラー: {str(e)}")
 
 
 class ServiceAreaSearchWorker(QObject):
