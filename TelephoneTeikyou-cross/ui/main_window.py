@@ -1467,6 +1467,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"キャンセル処理要求の処理中にエラー: {str(e)}")
     
+    @Slot()
     def auto_search_service_area(self):
         """
         自動提供判定検索（UIボタン経由で統一）
@@ -1703,13 +1704,16 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logging.debug(f"シグナル切断時の警告（無視可能）: {str(e)}")
             
-            # 新しい接続を設定
+            # 新しい接続を設定（@Slotデコレータ付きメソッドに接続）
             self.trigger_auto_search.connect(
                 self.auto_search_service_area, 
                 Qt.ConnectionType.QueuedConnection
             )
             
-            logging.info("★★★ シグナル・スロット接続を安全に設定しました ★★★")
+            logging.info("★★★ シグナル・スロット接続を安全に設定しました（@Slot付きメソッド） ★★★")
+            
+            # 接続テストを実行
+            QTimer.singleShot(50, self._test_signal_connection)
             
         except Exception as e:
             logging.error(f"シグナル・スロット接続設定中にエラー: {str(e)}")
