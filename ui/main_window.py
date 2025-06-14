@@ -2265,6 +2265,20 @@ ND：{nd}
             # 自動処理フラグをリセット
             self.is_auto_processing = False
             
+            # CTI監視システムにも検索完了を通知（処理フラグリセット用）
+            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                try:
+                    # CTI監視システムの処理フラグもリセット
+                    with self.cti_status_monitor.processing_lock:
+                        if self.cti_status_monitor.is_processing:
+                            self.cti_status_monitor.is_processing = False
+                            self.cti_status_monitor.talking_start_time = 0
+                            logging.info("検索完了によりCTI監視システムの処理フラグもリセットしました")
+                        else:
+                            logging.debug("CTI監視システムの処理フラグは既にリセット済みです")
+                except Exception as cti_error:
+                    logging.error(f"CTI監視システムの処理フラグリセット中にエラー: {str(cti_error)}")
+            
             # プログレスバーを非表示
             if hasattr(self, 'progress_bar'):
                 self.progress_bar.setVisible(False)
@@ -2369,6 +2383,16 @@ ND：{nd}
             if hasattr(self, 'progress_bar'):
                 self.progress_bar.setVisible(False)
                 
+            # エラー時もCTI監視システムのフラグをリセット
+            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
+                try:
+                    with self.cti_status_monitor.processing_lock:
+                        self.cti_status_monitor.is_processing = False
+                        self.cti_status_monitor.talking_start_time = 0
+                        logging.info("エラー時にCTI監視システムの処理フラグもリセットしました")
+                except:
+                    pass
+
     def cleanup_thread(self):
         """スレッドとワーカーをクリーンアップ"""
         try:
