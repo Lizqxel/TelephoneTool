@@ -520,6 +520,57 @@ class MainWindow(QMainWindow):
             }
         """)
         self.result_layout.addWidget(self.result_label)
+        
+        # リロードボタン（初期状態では非表示）
+        self.reload_btn = QPushButton("リロード")
+        self.reload_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                text-align: center;
+                font-size: 12px;
+                border-radius: 4px;
+                min-width: 60px;
+                max-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:pressed {
+                background-color: #E65100;
+            }
+        """)
+        self.reload_btn.clicked.connect(self.reload_application)
+        self.reload_btn.hide()  # 初期状態では非表示
+        self.result_layout.addWidget(self.reload_btn)
+        
+        # 再起動ボタン（初期状態では非表示）
+        self.restart_btn = QPushButton("再起動")
+        self.restart_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                text-align: center;
+                font-size: 12px;
+                border-radius: 4px;
+                min-width: 60px;
+                max-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:pressed {
+                background-color: #B71C1C;
+            }
+        """)
+        self.restart_btn.clicked.connect(self.restart_application)
+        self.restart_btn.hide()  # 初期状態では非表示
+        self.result_layout.addWidget(self.restart_btn)
+        
         self.result_layout.addStretch()  # 右側にスペースを追加
         
         # 結果表示エリアをメインレイアウトに追加
@@ -769,6 +820,12 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        # リロード/再起動ボタンを表示（キャンセル中状態で問題が発生した場合の対処用）
+        if hasattr(self, 'reload_btn'):
+            self.reload_btn.show()
+        if hasattr(self, 'restart_btn'):
+            self.restart_btn.show()
+
         # バックエンド処理のキャンセル
         if hasattr(self, 'worker'):
             self.worker.cancel()
@@ -802,6 +859,12 @@ class MainWindow(QMainWindow):
         """)
         self.area_search_btn.clicked.disconnect()
         self.area_search_btn.clicked.connect(self.search_service_area)
+        
+        # リロード/再起動ボタンを非表示
+        if hasattr(self, 'reload_btn'):
+            self.reload_btn.hide()
+        if hasattr(self, 'restart_btn'):
+            self.restart_btn.hide()
 
     def on_search_completed(self, result):
         """検索完了時の処理"""
@@ -823,8 +886,11 @@ class MainWindow(QMainWindow):
                 }
             """)
             
-            # 復旧ボタンを表示
-            self.show_recovery_buttons()
+            # リロード/再起動ボタンを表示（TelephoneToolと同じ方式）
+            if hasattr(self, 'reload_btn'):
+                self.reload_btn.show()
+            if hasattr(self, 'restart_btn'):
+                self.restart_btn.show()
             
             # 5秒後に強制リセット
             self.recovery_timer.start(5000)
@@ -836,8 +902,11 @@ class MainWindow(QMainWindow):
         # キャンセル以外の完了時の処理
         self.reset_search_button()
         
-        # 復旧ボタンを非表示
-        self.hide_recovery_buttons()
+        # リロード/再起動ボタンを非表示（TelephoneToolと同じ方式）
+        if hasattr(self, 'reload_btn'):
+            self.reload_btn.hide()
+        if hasattr(self, 'restart_btn'):
+            self.restart_btn.hide()
         
         # 復旧タイマーを停止
         if hasattr(self, 'recovery_timer'):
@@ -1119,6 +1188,21 @@ class MainWindow(QMainWindow):
         """
         try:
             logging.info("手動でWebViewをリフレッシュします")
+            
+            # 外部ブラウザ設定を確認
+            use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
+            
+            if use_external_browser:
+                # 外部ブラウザ設定の場合は警告メッセージを表示
+                QMessageBox.information(
+                    self, 
+                    "情報", 
+                    "現在、電話番号検索は外部ブラウザで開く設定になっています。\n"
+                    "埋め込み表示を使用する場合は、設定画面で「電話番号検索を外部ブラウザで開く」のチェックを外してください。"
+                )
+                return
+            
+            # WebViewをリフレッシュ
             self.refresh_webview()
             
             # リフレッシュ後に現在の検索を再実行
@@ -1127,7 +1211,10 @@ class MainWindow(QMainWindow):
             
             if phone or address:
                 # カウンターを減らして再実行（重複カウントを避ける）
-                self.google_search_count -= 1
+                if self.google_search_count > 0:
+                    self.google_search_count -= 1
+                
+                logging.info(f"検索を再実行します - 電話番号: {phone}, 住所: {address}")
                 self.start_google_search_embed(phone, address)
                 logging.info("検索を再実行しました")
             else:
@@ -1191,40 +1278,22 @@ class MainWindow(QMainWindow):
     def setup_webview(self):
         """WebViewの初期化"""
         try:
-            from PySide6.QtCore import Qt
-            
             # 外部ブラウザ設定を確認
             use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
             
-            # WebViewのレイアウトを取得または作成
-            if not hasattr(self, 'webview_layout'):
-                self.webview_layout = QVBoxLayout()
-                self.right_layout.addLayout(self.webview_layout)
-            else:
-                # 既存のウィジェットをクリア
-                while self.webview_layout.count():
-                    item = self.webview_layout.takeAt(0)
-                    if item.widget():
-                        item.widget().deleteLater()
-            
-            # 既存のWebViewをクリア
+            # 既存のWebViewが存在する場合は初期化
             if hasattr(self, 'web_view') and self.web_view is not None:
-                self.web_view.setParent(None)
-                self.web_view.deleteLater()
-                self.web_view = None
-            
-            # 外部ブラウザ設定が無効の場合のみWebViewを作成
-            if not use_external_browser:
-                self.web_view = QWebEngineView()
-                self.web_view.setUrl("about:blank")
-                self.webview_layout.addWidget(self.web_view)
-                logging.debug("WebViewを初期化しました")
+                if not use_external_browser:
+                    # 埋め込み表示の場合：WebViewをリセット
+                    self.web_view.setUrl("about:blank")
+                    self.web_view.setVisible(False)
+                    logging.debug("WebViewをリセットしました")
+                else:
+                    # 外部ブラウザ設定の場合：WebViewを非表示
+                    self.web_view.setVisible(False)
+                    logging.debug("外部ブラウザ設定のため、WebViewを非表示にしました")
             else:
-                # 外部ブラウザ設定が有効な場合は代わりにメッセージを表示
-                message_label = QLabel("電話番号検索は外部ブラウザで開く設定になっています")
-                message_label.setAlignment(Qt.AlignCenter)
-                self.webview_layout.addWidget(message_label)
-                logging.debug("外部ブラウザ設定が有効のため、WebViewは無効化されています")
+                logging.warning("WebViewが存在しません")
             
         except Exception as e:
             logging.error(f"WebViewの初期化中にエラー: {str(e)}")
@@ -1689,8 +1758,11 @@ class MainWindow(QMainWindow):
                 # 入力データをクリア
                 self.clear_all_inputs()
                 
-                # 復旧ボタンを非表示
-                self.hide_recovery_buttons()
+                # リロード/再起動ボタンを非表示
+                if hasattr(self, 'reload_btn'):
+                    self.reload_btn.hide()
+                if hasattr(self, 'restart_btn'):
+                    self.restart_btn.hide()
                 
                 logging.info("★★★ アプリケーションリロードが完了しました ★★★")
                 QMessageBox.information(self, "完了", "アプリケーションが初期状態に戻りました")
