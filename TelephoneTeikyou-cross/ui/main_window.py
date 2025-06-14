@@ -1263,13 +1263,19 @@ class MainWindow(QMainWindow):
             logging.debug(f"Google検索URL: {url}")
             
             # 外部ブラウザ設定を確認
-            use_external_browser = self.settings.get('browser_settings', {}).get('use_external_browser', False)
+            browser_settings = self.settings.get('browser_settings', {})
+            use_external_browser = browser_settings.get('use_external_browser', False)
+            
+            logging.debug(f"外部ブラウザ設定: {use_external_browser}")
+            logging.debug(f"ブラウザ設定全体: {browser_settings}")
             
             if use_external_browser:
                 # 外部ブラウザで開く
-                logging.debug("外部ブラウザで検索を実行します")
+                logging.info("外部ブラウザで検索を実行します")
                 webbrowser.open(url)
                 return
+            else:
+                logging.debug("WebViewで検索を実行します")
             
             # WebViewが無効な場合は処理を終了
             if not hasattr(self, 'web_view') or self.web_view is None:
@@ -1461,43 +1467,113 @@ class MainWindow(QMainWindow):
             logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
             QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}")
     
-    def on_cancel_processing_request(self):
+    def on_cancel_processing_request(self, button_name: str):
         """
-        処理キャンセル要求を受信した時の処理
+        アクションボタンクリック時の処理キャンセル要求を処理
+        TelephoneToolと同じ詳細実装
+        
+        Args:
+            button_name: クリックされたボタンの名前
         """
         try:
-            logging.info("★★★ 処理キャンセル要求を受信しました ★★★")
+            logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
             
-            # エリア検索のキャンセルフラグを設定
-            set_cancel_flag()
-            logging.info("- エリア検索のキャンセルフラグを設定しました")
+            # エリア検索のキャンセルフラグを設定（深いレベルでのキャンセル用）
+            try:
+                set_cancel_flag(True)
+                logging.info(f"- エリア検索のキャンセルフラグを設定しました")
+            except Exception as flag_error:
+                logging.warning(f"エリア検索キャンセルフラグ設定に失敗: {str(flag_error)}")
             
-            # 現在のUIボタン状態をログ出力
+            # UIボタンの状態をログ出力
             if hasattr(self, 'area_search_btn'):
-                button_text = self.area_search_btn.text()
-                button_enabled = self.area_search_btn.isEnabled()
-                logging.info(f"- 現在のUIボタン状態: '{button_text}' (有効: {button_enabled})")
-                
-                # キャンセルボタンが表示されている場合はクリック
-                if button_text == "キャンセル" and button_enabled:
-                    logging.info("- UIキャンセルボタンをプログラム的にクリックします")
-                    self.area_search_btn.click()
-                else:
-                    logging.info("- キャンセルボタンが無効または非表示のため、直接キャンセル処理を実行")
-                    self.cancel_search()
+                current_button_text = self.area_search_btn.text()
+                current_button_enabled = self.area_search_btn.isEnabled()
+                logging.info(f"- 現在のUIボタン状態: '{current_button_text}' (有効: {current_button_enabled})")
+            else:
+                logging.warning("- area_search_btnが存在しません")
+                current_button_text = "ボタンなし"
             
-            # ワーカーとスレッドの状態をログ出力
+            # 検索処理が実行中かどうかを判定（ワーカーとスレッドの存在で判定）
             worker_running = hasattr(self, 'worker') and self.worker is not None
-            thread_running = hasattr(self, 'thread') and self.thread is not None and self.thread.isRunning()
+            thread_running = (hasattr(self, 'thread') and self.thread is not None and 
+                             hasattr(self.thread, 'isRunning') and self.thread.isRunning())
+            
+            is_search_running = worker_running or thread_running
+            
             logging.info(f"- ワーカー実行中: {worker_running}")
             logging.info(f"- スレッド実行中: {thread_running}")
+            logging.info(f"- 検索処理実行中: {is_search_running}")
+            
+            if is_search_running:
+                logging.info(f"- 検索処理が実行中です。強制的にUIキャンセル処理を実行します")
+                
+                # 強制的にcancel_search()を実行
+                if hasattr(self, 'cancel_search'):
+                    logging.info(f"- cancel_searchメソッドを実行します")
+                    self.cancel_search()
+                    logging.info(f"★★★ 「{button_name}」ボタン: 強制UIキャンセル処理を実行しました ★★★")
+                else:
+                    # cancel_searchが存在しない場合の直接処理
+                    logging.warning("cancel_searchメソッドが存在しません。直接キャンセル処理を実行します")
+                    
+                    # ワーカーのキャンセル
+                    if hasattr(self, 'worker') and self.worker:
+                        logging.info(f"- ワーカーをキャンセルします")
+                        self.worker.cancel()
+                        logging.info(f"- 実行中のワーカーをキャンセルしました")
+                    
+                    # UI状態を「キャンセル中」に設定
+                    if hasattr(self, 'area_search_btn'):
+                        self.area_search_btn.setEnabled(False)
+                        self.area_search_btn.setText("キャンセル中...")
+                        logging.info(f"- 検索ボタンを「キャンセル中」に設定しました")
+                    
+                    if hasattr(self, 'result_label'):
+                        self.result_label.setText("提供エリア: キャンセル中...")
+                        self.result_label.setStyleSheet("""
+                            QLabel {
+                                font-size: 14px;
+                                padding: 5px;
+                                border: 1px solid #F39C12;
+                                border-radius: 4px;
+                                background-color: #FFF3E0;
+                                color: #F39C12;
+                            }
+                        """)
+                        logging.info(f"- 結果表示を「キャンセル中」に設定しました")
+                    
+                    logging.info(f"★★★ 「{button_name}」ボタン: 直接キャンセル処理を実行しました ★★★")
+                    
+            else:
+                logging.info(f"- 検索処理が実行されていません")
+                logging.info(f"★★★ 「{button_name}」ボタン: キャンセル対象の処理が実行中ではありません ★★★")
             
             # 自動処理フラグをリセット
             self.is_auto_processing = False
             logging.info("- 自動処理フラグをリセットしました")
             
         except Exception as e:
-            logging.error(f"キャンセル処理要求の処理中にエラー: {str(e)}")
+            logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
+            logging.error(f"エラー詳細: {type(e).__name__}: {str(e)}")
+            
+            # エラー時も基本的なキャンセルを実行
+            try:
+                # エラー時もキャンセルフラグを設定
+                set_cancel_flag(True)
+                logging.info("エラー時にキャンセルフラグを設定しました")
+                
+                # エラー時も強制的にcancel_search実行を試行
+                if hasattr(self, 'cancel_search'):
+                    self.cancel_search()
+                    logging.info("エラー時に強制UIキャンセル処理を実行しました")
+                    
+                # 自動処理フラグをリセット
+                self.is_auto_processing = False
+                logging.info("エラー時に自動処理フラグをリセットしました")
+            except Exception as fallback_error:
+                logging.error(f"エラー時のフォールバック処理も失敗: {str(fallback_error)}")
+                pass
     
     @Slot()
     def auto_search_service_area(self):
@@ -1514,18 +1590,28 @@ class MainWindow(QMainWindow):
             # 入力データの確認
             postal_code = self.postal_code_input.text().strip()
             address = self.address_input.text().strip()
+            phone = self.phone_input.text().strip()
             
             if not postal_code or not address:
                 logging.warning("郵便番号または住所が空のため、自動検索をスキップします")
                 return
             
-            logging.info(f"検索データ - 郵便番号: {postal_code}, 住所: {address}")
+            logging.info(f"検索データ - 郵便番号: {postal_code}, 住所: {address}, 電話番号: {phone}")
             
             # UIボタン経由で検索を実行（手動実行と完全に統一）
             if hasattr(self, 'area_search_btn') and self.area_search_btn.isEnabled():
                 logging.info("★★★ 提供エリア検索ボタンをプログラム的にクリックします ★★★")
                 self.area_search_btn.click()
                 logging.info("★★★ 自動提供判定検索が正常に開始されました ★★★")
+                
+                # Google検索も自動実行（手動実行と同じ処理）
+                if phone or address:
+                    logging.info("★★★ Google検索も自動実行します ★★★")
+                    self.start_google_search_embed(phone, address)
+                    logging.info("★★★ Google検索の自動実行が完了しました ★★★")
+                else:
+                    logging.info("電話番号と住所が両方とも空のため、Google検索をスキップします")
+                    
             else:
                 button_text = self.area_search_btn.text() if hasattr(self, 'area_search_btn') else "不明"
                 button_enabled = self.area_search_btn.isEnabled() if hasattr(self, 'area_search_btn') else False

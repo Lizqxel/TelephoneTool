@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from services.oneclick import OneClickService
 import win32gui
 import win32con
+import win32api
 from datetime import datetime, timedelta
 from threading import Event
 
@@ -56,9 +57,20 @@ class CTIStatusMonitor:
         self.last_log_time = datetime.now()
         self.log_interval = timedelta(minutes=1)  # ログ出力の間隔（1分）
         
-        # アクションボタン監視用
-        self.action_buttons = ["NG", "次", "留守", "担当者不在"]
-        self.previous_button_states = {}
+        # アクションボタン監視用（TelephoneToolと同じ詳細実装）
+        self.next_button_handle = None  # 「次」ボタンのハンドル
+        self.rusu_button_handle = None  # 「留守」ボタンのハンドル
+        self.tantou_fuzai_button_handle = None  # 「担当者不在」ボタンのハンドル
+        self.ng_button_handle = None  # 「NG」ボタンのハンドル
+        self.last_button_click_time = 0
+        self.button_click_interval = 0.5  # ボタンクリック間隔（秒）
+        self.buttons_detected = False
+        
+        # 処理制御用
+        import threading
+        self.processing_lock = threading.Lock()
+        self.processing_thread = None
+        self.talking_start_time = 0
         
         # 通話時間監視用
         self.call_start_time = None
@@ -101,8 +113,8 @@ class CTIStatusMonitor:
                 # CTI状態変化をチェック（_check_status_changeメソッドを使用）
                 self._check_status_change()
                 
-                # アクションボタンの状態をチェック
-                self._check_action_buttons()
+                # アクションボタンのクリックをチェック（TelephoneToolと同じ実装）
+                self._check_action_button_click()
                 
             except Exception as e:
                 logging.error(f"CTI状態監視中にエラー: {str(e)}")
@@ -131,46 +143,219 @@ class CTIStatusMonitor:
         except Exception as e:
             logging.error(f"自動処理実行チェック中にエラー: {str(e)}")
     
-    def _check_action_buttons(self):
+    def _check_action_button_click(self):
         """
-        アクションボタンの状態をチェックし、クリックを検出
+        アクションボタン（「次」「留守」「担当者不在」「NG」）のクリックをチェック
+        TelephoneToolと同じ詳細実装
         """
         try:
-            for button_name in self.action_buttons:
-                current_state = self._get_button_state(button_name)
-                previous_state = self.previous_button_states.get(button_name, False)
-                
-                # ボタンがクリックされた（False→True）を検出
-                if current_state and not previous_state:
-                    logging.info(f"★★★ 「{button_name}」ボタンクリックを検出 ★★★")
-                    if self.on_cancel_processing_callback:
-                        logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
-                        self.on_cancel_processing_callback()
-                    else:
-                        logging.warning("MainWindowのキャンセルコールバックが設定されていません")
-                
-                # 状態を更新
-                self.previous_button_states[button_name] = current_state
-                
+            # ボタンの再検出が必要な場合
+            if not any([
+                self.next_button_handle,
+                self.rusu_button_handle,
+                self.tantou_fuzai_button_handle,
+                self.ng_button_handle
+            ]):
+                if not self.find_action_buttons():
+                    return
+            
+            # マウスクリックをチェック
+            import win32api
+            import win32con
+            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+                current_time = time.time()
+                # 連続クリックを防ぐ
+                if current_time - self.last_button_click_time >= self.button_click_interval:
+                    # マウス座標を取得
+                    x, y = win32api.GetCursorPos()
+                    
+                    # 各ボタンの位置をチェック
+                    clicked_button = None
+                    button_rect = None
+                    
+                    import win32gui
+                    if self.next_button_handle:
+                        rect = win32gui.GetWindowRect(self.next_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "次"
+                            button_rect = rect
+                            
+                    if self.rusu_button_handle:
+                        rect = win32gui.GetWindowRect(self.rusu_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "留守"
+                            button_rect = rect
+                            
+                    if self.tantou_fuzai_button_handle:
+                        rect = win32gui.GetWindowRect(self.tantou_fuzai_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "担当者不在"
+                            button_rect = rect
+                            
+                    if self.ng_button_handle:
+                        rect = win32gui.GetWindowRect(self.ng_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "NG"
+                            button_rect = rect
+                    
+                    if clicked_button:
+                        # 提供判定の実行状態を確認
+                        is_processing = False
+                        with self.processing_lock:
+                            is_processing = self.is_processing or (self.processing_thread and self.processing_thread.is_alive())
+                        
+                        logging.info(f"★★★ 「{clicked_button}」ボタンがクリックされました ★★★")
+                        logging.info(f"- クリック時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        logging.info(f"- マウス座標: x={x}, y={y}")
+                        logging.info(f"- ボタン位置: left={button_rect[0]}, top={button_rect[1]}, right={button_rect[2]}, bottom={button_rect[3]}")
+                        logging.info(f"- 提供判定状態: {'実行中' if is_processing else '未実行'}")
+                        
+                        self.last_button_click_time = current_time
+                        
+                        # 提供判定をキャンセル
+                        self._cancel_processing(clicked_button)
+                        
         except Exception as e:
-            logging.error(f"アクションボタン監視中にエラー: {str(e)}")
-    
-    def _get_button_state(self, button_name):
+            logging.error(f"アクションボタンクリックの検出中にエラー: {str(e)}")
+
+    def _cancel_processing(self, button_name: str):
         """
-        指定されたボタンの状態を取得
+        提供判定をキャンセルし、フラグをリセット
+        TelephoneToolと同じ詳細実装
         
         Args:
-            button_name (str): ボタン名
-            
-        Returns:
-            bool: ボタンが押されている状態ならTrue
+            button_name: クリックされたボタンの名前
         """
         try:
-            # CTIサービスからボタン状態を取得
-            # 実際の実装では、CTIシステムのAPIやウィンドウ監視を使用
-            return self.cti_service.is_button_pressed(button_name)
+            with self.processing_lock:
+                logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセルを開始 ★★★")
+                logging.info(f"- キャンセル開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                # 現在の処理状態を記録
+                was_processing = self.is_processing
+                if self.talking_start_time > 0:
+                    elapsed_time = time.time() - self.talking_start_time
+                    logging.info(f"- 処理開始からの経過時間: {elapsed_time:.1f}秒")
+                
+                # 1. MainWindowの検索処理をキャンセル（最優先で実行）
+                if self.on_cancel_processing_callback:
+                    try:
+                        logging.info("★★★ MainWindowの検索処理キャンセルを実行中... ★★★")
+                        logging.info(f"- コールバック関数: {self.on_cancel_processing_callback}")
+                        self.on_cancel_processing_callback(button_name)
+                        logging.info("★★★ MainWindowの検索処理キャンセルが完了しました ★★★")
+                    except Exception as callback_error:
+                        logging.error(f"検索処理キャンセルコールバックの実行中にエラー: {str(callback_error)}")
+                        logging.error(f"エラー詳細: {type(callback_error).__name__}: {str(callback_error)}")
+                        import traceback
+                        logging.error(f"スタックトレース: {traceback.format_exc()}")
+                else:
+                    logging.warning("★★★ MainWindowのキャンセルコールバックが設定されていません ★★★")
+                    logging.warning(f"- on_cancel_processing_callback: {self.on_cancel_processing_callback}")
+                
+                # 2. CTI監視の処理中フラグを確実にリセット
+                self.is_processing = False
+                self.talking_start_time = 0
+                logging.info("- CTI監視の処理中フラグをリセットしました")
+                
+                # 結果をログ出力
+                if was_processing:
+                    logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセルが完了しました ★★★")
+                    logging.info("- 実行中の処理が正常にキャンセルされました")
+                else:
+                    logging.info(f"★★★ 「{button_name}」ボタンクリックによるフラグリセットが完了しました ★★★")
+                    logging.info("- 処理は実行中ではありませんでしたが、フラグをリセットしました")
+                    
         except Exception as e:
-            logging.debug(f"ボタン状態取得中にエラー ({button_name}): {str(e)}")
+            logging.error(f"処理キャンセル中にエラーが発生: {str(e)}")
+            logging.error(f"エラー詳細: {type(e).__name__}: {str(e)}")
+            import traceback
+            logging.error(f"スタックトレース: {traceback.format_exc()}")
+            
+            # エラー時も確実にフラグをリセット
+            try:
+                self.is_processing = False
+                self.talking_start_time = 0
+                logging.info("- エラー発生時もフラグをリセットしました")
+                
+                # エラー時でもMainWindowのキャンセル処理を試行
+                if self.on_cancel_processing_callback:
+                    logging.info("- エラー時にMainWindowキャンセル処理を再試行します")
+                    self.on_cancel_processing_callback(button_name)
+                    logging.info("- エラー時のMainWindowキャンセル処理が完了しました")
+            except Exception as reset_error:
+                logging.error(f"エラー時のフラグリセット処理でもエラー: {str(reset_error)}")
+                logging.error(f"リセットエラー詳細: {type(reset_error).__name__}: {str(reset_error)}")
+
+    def find_action_buttons(self) -> bool:
+        """
+        アクションボタン（「次」「留守」「担当者不在」「NG」）を検索
+        TelephoneToolと同じ詳細実装
+        
+        Returns:
+            bool: いずれかのボタンが見つかった場合True
+        """
+        try:
+            import win32gui
+            def callback(hwnd, extra):
+                if win32gui.IsWindowVisible(hwnd):
+                    try:
+                        text = win32gui.GetWindowText(hwnd)
+                        if text == "次":
+                            self.next_button_handle = hwnd
+                            rect = win32gui.GetWindowRect(hwnd)
+                            if not self.buttons_detected:
+                                logging.info(f"「次」ボタンを検出: handle={hwnd}, rect={rect}")
+                        elif text == "留守":
+                            self.rusu_button_handle = hwnd
+                            rect = win32gui.GetWindowRect(hwnd)
+                            if not self.buttons_detected:
+                                logging.info(f"「留守」ボタンを検出: handle={hwnd}, rect={rect}")
+                        elif text == "担当者不在":
+                            self.tantou_fuzai_button_handle = hwnd
+                            rect = win32gui.GetWindowRect(hwnd)
+                            if not self.buttons_detected:
+                                logging.info(f"「担当者不在」ボタンを検出: handle={hwnd}, rect={rect}")
+                        elif text == "NG":
+                            self.ng_button_handle = hwnd
+                            rect = win32gui.GetWindowRect(hwnd)
+                            if not self.buttons_detected:
+                                logging.info(f"「NG」ボタンを検出: handle={hwnd}, rect={rect}")
+                    except Exception:
+                        pass
+                return True
+            
+            # 既存のハンドルをクリア
+            self.next_button_handle = None
+            self.rusu_button_handle = None
+            self.tantou_fuzai_button_handle = None
+            self.ng_button_handle = None
+            
+            # CTIメインウィンドウ内の子ウィンドウを列挙
+            if self.window_handle:
+                win32gui.EnumChildWindows(self.window_handle, callback, None)
+            
+            # いずれかのボタンが見つかったかチェック
+            found = any([
+                self.next_button_handle,
+                self.rusu_button_handle,
+                self.tantou_fuzai_button_handle,
+                self.ng_button_handle
+            ])
+            
+            if found and not self.buttons_detected:
+                logging.info("アクションボタンの検出に成功しました")
+                self.buttons_detected = True
+                return True
+            elif not found:
+                self.buttons_detected = False
+                logging.debug("アクションボタンが見つかりませんでした")
+                return False
+            else:
+                return True
+                
+        except Exception as e:
+            logging.error(f"アクションボタンの検索中にエラー: {str(e)}")
             return False
 
     def find_cti_window(self) -> bool:
