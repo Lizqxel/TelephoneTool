@@ -16,5 +16,5 @@
   "enable_auto_cti_processing": true,
   "cti_monitor_interval": 0.2,
   "cti_auto_processing_cooldown": 3.0,
-  "call_duration_threshold": 34
+  "call_duration_threshold": 0
 }
