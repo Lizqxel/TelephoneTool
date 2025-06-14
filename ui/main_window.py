@@ -2715,8 +2715,43 @@ ND：{nd}
         try:
             logging.info("2. 提供判定検索の自動実行を開始")
             
-            # 手動実行と同じ処理を使用（ボタン状態変更、キャンセル機能を含む）
-            self.search_service_area()
+            # 郵便番号と住所の入力チェック
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            
+            if not postal_code or not address:
+                logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")
+                return
+            
+            # UIの提供エリア検索ボタンが存在し、クリック可能な場合は直接クリック
+            if (hasattr(self, 'area_search_btn') and 
+                self.area_search_btn.text() == "提供エリア検索" and 
+                self.area_search_btn.isEnabled()):
+                
+                logging.info("- UIの提供エリア検索ボタンを直接クリックします")
+                # UIの検索ボタンをプログラム的にクリック
+                self.area_search_btn.click()
+                logging.info("★★★ CTI自動処理: UIボタンクリックによる提供判定検索を開始しました ★★★")
+                
+            elif (hasattr(self, 'area_search_btn') and 
+                  self.area_search_btn.text() == "キャンセル"):
+                
+                logging.info("- 既に検索処理中です（キャンセルボタン表示中）")
+                logging.info("★★★ CTI自動処理: 既に検索実行中のため、重複実行をスキップします ★★★")
+                
+            elif (hasattr(self, 'area_search_btn') and 
+                  self.area_search_btn.text() == "キャンセル中..."):
+                
+                logging.info("- 既にキャンセル処理中です")
+                logging.info("★★★ CTI自動処理: キャンセル処理中のため、実行をスキップします ★★★")
+                
+            else:
+                # UIボタンが利用できない場合のフォールバック（従来の処理）
+                logging.warning("- UIの提供エリア検索ボタンが利用できません。直接検索処理を実行します")
+                
+                # 手動実行と同じ処理を使用（ボタン状態変更、キャンセル機能を含む）
+                self.search_service_area()
+                logging.info("★★★ CTI自動処理: 直接処理による提供判定検索を開始しました ★★★")
             
         except Exception as e:
             logging.error(f"自動検索処理中にエラーが発生: {str(e)}")
@@ -2816,7 +2851,7 @@ ND：{nd}
         try:
             logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
             
-            # エリア検索のキャンセルフラグを設定
+            # エリア検索のキャンセルフラグを設定（深いレベルでのキャンセル用）
             try:
                 from services.area_search import set_cancel_flag
                 set_cancel_flag(True)
@@ -2824,7 +2859,7 @@ ND：{nd}
             except ImportError:
                 logging.warning("エリア検索モジュールのインポートに失敗しました")
             
-            # UIのキャンセルボタンが存在し、キャンセル状態の場合は直接クリック
+            # UIのキャンセルボタンをクリック（統一されたキャンセル処理）
             if (hasattr(self, 'area_search_btn') and 
                 self.area_search_btn.text() == "キャンセル" and 
                 self.area_search_btn.isEnabled()):
@@ -2832,60 +2867,36 @@ ND：{nd}
                 logging.info(f"- UIキャンセルボタンを直接クリックします")
                 # UIのキャンセルボタンをプログラム的にクリック
                 self.area_search_btn.click()
-                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました（UIボタンクリック） ★★★")
+                logging.info(f"★★★ 「{button_name}」ボタン: UIキャンセルボタンクリックによるキャンセル処理完了 ★★★")
                 
             elif (hasattr(self, 'area_search_btn') and 
                   self.area_search_btn.text() == "キャンセル中..."):
                 
                 logging.info(f"- 既にキャンセル処理中です")
-                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル要求を受信しましたが、既にキャンセル中です ★★★")
+                logging.info(f"★★★ 「{button_name}」ボタン: 既にキャンセル中のため処理をスキップ ★★★")
+                
+            elif (hasattr(self, 'area_search_btn') and 
+                  self.area_search_btn.text() == "提供エリア検索"):
+                
+                logging.info(f"- 検索処理が実行されていません（検索ボタン状態）")
+                logging.info(f"★★★ 「{button_name}」ボタン: キャンセル対象の処理が実行中ではありません ★★★")
                 
             else:
-                # キャンセルボタンが存在しない場合は従来の処理
-                logging.info(f"- UIキャンセルボタンが利用できません。直接キャンセル処理を実行します")
-                
-                # ワーカーのキャンセル
-                if hasattr(self, 'worker') and self.worker:
-                    self.worker.cancel()
-                    logging.info(f"- 実行中のワーカーをキャンセルしました")
-                
-                # UI状態を「キャンセル中」に設定
-                if hasattr(self, 'area_search_btn'):
-                    self.area_search_btn.setEnabled(False)
-                    self.area_search_btn.setText("キャンセル中...")
-                    logging.info(f"- 検索ボタンを「キャンセル中」に設定しました")
-                
-                if hasattr(self, 'area_result_label'):
-                    self.area_result_label.setText("提供エリア: キャンセル中...")
-                    self.area_result_label.setStyleSheet("""
-                        QLabel {
-                            font-size: 14px;
-                            padding: 5px;
-                            border: 1px solid #F39C12;
-                            border-radius: 4px;
-                            background-color: #FFF3E0;
-                            color: #F39C12;
-                        }
-                    """)
-                    logging.info(f"- 結果表示を「キャンセル中」に設定しました")
-                
-                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました（直接処理） ★★★")
+                # UIボタンの状態が不明な場合
+                logging.warning(f"- UIボタンの状態が不明です: {getattr(self.area_search_btn, 'text', lambda: 'ボタンなし')()}")
+                logging.info(f"★★★ 「{button_name}」ボタン: UIボタン状態不明のためキャンセル処理をスキップ ★★★")
             
         except Exception as e:
             logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
             
             # エラー時も基本的なキャンセルを実行
             try:
-                if hasattr(self, 'worker') and self.worker:
-                    self.worker.cancel()
                 # エラー時もキャンセルフラグを設定
-                try:
-                    from services.area_search import set_cancel_flag
-                    set_cancel_flag(True)
-                except:
-                    pass
-            except Exception as reset_error:
-                logging.error(f"エラー時のキャンセル処理中にエラー: {str(reset_error)}")
+                from services.area_search import set_cancel_flag
+                set_cancel_flag(True)
+                logging.info("エラー時にキャンセルフラグを設定しました")
+            except:
+                pass
 
 
 class ServiceAreaSearchWorker(QObject):
