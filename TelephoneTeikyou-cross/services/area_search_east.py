@@ -34,7 +34,7 @@ from datetime import datetime
 from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
 from utils.address_utils import normalize_address
-from services.area_search import take_full_page_screenshot
+from services.area_search import take_full_page_screenshot, check_cancellation, CancellationError
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
@@ -606,6 +606,9 @@ def search_service_area(postal_code, address, progress_callback=None):
     if progress_callback:
         progress_callback("住所情報を解析中...")
     
+    # キャンセルチェック
+    check_cancellation()
+    
     address_parts = split_address(address)
     if not address_parts:
         logging.error("住所の分割に失敗しました")
@@ -679,6 +682,9 @@ def search_service_area(postal_code, address, progress_callback=None):
         if progress_callback:
             progress_callback("サイトにアクセス中...")
         
+        # キャンセルチェック
+        check_cancellation()
+        
         driver.get("https://flets.com/app2/search_c.html")
         logging.info("サイトにアクセスしました")
         
@@ -695,6 +701,9 @@ def search_service_area(postal_code, address, progress_callback=None):
         
         # 郵便番号入力フィールドを探す
         try:
+            # キャンセルチェック
+            check_cancellation()
+            
             # 郵便番号前半3桁を入力
             postal_code_first_input = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.NAME, "FIELD_ZIP1"))
@@ -739,6 +748,9 @@ def search_service_area(postal_code, address, progress_callback=None):
         try:
             if progress_callback:
                 progress_callback("住所候補を検索中...")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # 住所候補リストが表示されるまで待機
             WebDriverWait(driver, 10).until(
@@ -876,6 +888,9 @@ def search_service_area(postal_code, address, progress_callback=None):
             logging.error(f"住所選択処理中にエラー: {str(e)}")
             return {"status": "error", "message": f"住所選択処理中にエラーが発生しました: {str(e)}"}
             
+    except CancellationError as e:
+        logging.info("★★★ 提供エリア検索がキャンセルされました ★★★")
+        return {"status": "cancelled", "message": "検索がキャンセルされました"}
     except Exception as e:
         logging.error(f"検索処理中にエラー: {str(e)}")
         return {"status": "error", "message": f"検索処理中にエラーが発生しました: {str(e)}"}

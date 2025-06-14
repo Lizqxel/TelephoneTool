@@ -102,6 +102,21 @@ class SettingsDialog(QDialog):
         interval_layout.addWidget(self.cti_interval_spin)
         cti_group_layout.addLayout(interval_layout)
         
+        # 通話時間閾値設定
+        call_duration_layout = QHBoxLayout()
+        self.call_duration_spin = QSpinBox()
+        self.call_duration_spin.setRange(0, 60)
+        self.call_duration_spin.setSuffix(" 秒")
+        self.call_duration_spin.setSpecialValueText("即座に実行")
+        call_duration_layout.addWidget(QLabel("自動処理開始までの通話時間:"))
+        call_duration_layout.addWidget(self.call_duration_spin)
+        cti_group_layout.addLayout(call_duration_layout)
+        
+        # 説明ラベル
+        help_label = QLabel("※ 0秒の場合は通話開始と同時に自動処理を実行します")
+        help_label.setStyleSheet("color: #666666; font-size: 10px;")
+        cti_group_layout.addWidget(help_label)
+        
         cti_group.setLayout(cti_group_layout)
         cti_layout.addWidget(cti_group)
         
@@ -182,6 +197,9 @@ class SettingsDialog(QDialog):
         self.enable_auto_cti_check.setChecked(cti_settings.get('enable_auto_cti_processing', True))
         self.cti_interval_spin.setValue(cti_settings.get('cti_monitor_interval', 0.2))
         
+        # 通話時間閾値設定（メイン設定から取得）
+        self.call_duration_spin.setValue(settings.get('call_duration_threshold', 0))
+        
         # ブラウザ設定
         browser_settings = settings.get('browser_settings', self.default_browser_settings)
         self.headless_check.setChecked(browser_settings.get('headless', False))
@@ -196,6 +214,7 @@ class SettingsDialog(QDialog):
         """UIの設定を取得"""
         return {
             'font_size': self.font_size_spin.value(),
+            'call_duration_threshold': self.call_duration_spin.value(),
             'cti_settings': {
                 'enable_cti': self.enable_cti_check.isChecked(),
                 'enable_auto_cti_processing': self.enable_auto_cti_check.isChecked(),
