@@ -2261,108 +2261,139 @@ ND：{nd}
 
     def on_search_completed(self, result):
         """検索完了時の処理"""
-        # プログレスバーを非表示
-        self.progress_bar.setVisible(False)
-        
-        status = result.get("status", "failure")
-        
-        if status == "cancelled":
-            self.area_result_label.setText("提供エリア: 検索がキャンセルされました")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
-            # キャンセル完了後に検索ボタンを初期状態に戻す
-            self.reset_search_button()
-            return
-        
-        # キャンセル以外の完了時の処理
-        self.reset_search_button()
-        
-        if status == "available":
-            self.area_result_label.setText("提供エリア: 提供可能")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #27AE60;
-                    border-radius: 4px;
-                    background-color: #E8F5E9;
-                    color: #27AE60;
-                }
-            """)
-            self.judgment_combo.setCurrentText("○")
-        elif status == "unavailable":
-            self.area_result_label.setText("提供エリア: 未提供")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #E74C3C;
-                    border-radius: 4px;
-                    background-color: #FFEBEE;
-                    color: #E74C3C;
-                }
-            """)
-            self.judgment_combo.setCurrentText("×")
-        elif status == "apartment":
-            # 集合住宅の場合は明示的に表示
-            self.area_result_label.setText("提供エリア: 集合住宅（アパート・マンション等）")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #FF9800;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #E65100;
-                }
-            """)
-            self.judgment_combo.setCurrentText("○")
-        else:
-            self.area_result_label.setText("提供エリア: 判定失敗")
-            self.area_result_label.setStyleSheet("""
-                QLabel {
-                    font-size: 14px;
-                    padding: 5px;
-                    border: 1px solid #F39C12;
-                    border-radius: 4px;
-                    background-color: #FFF3E0;
-                    color: #F39C12;
-                }
-            """)
-            self.judgment_combo.setCurrentText("")
-
-        # スクリーンショットの更新
-        if "screenshot" in result:
-            self.update_screenshot_button(result["screenshot"])
-
-        # 詳細情報の表示
-        if "details" in result and result.get("show_popup", True):
-            details = result["details"]
-            details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
-            QMessageBox.information(self, "検索結果", details_text)
-
-    def cleanup_thread(self):
-        """
-        スレッドのクリーンアップを行う
-        """
         try:
-            if self.thread and isinstance(self.thread, QThread):
-                if self.thread.isRunning():
-                    self.thread.quit()
-                    self.thread.wait()
-                self.thread.deleteLater()
-                self.thread = None
+            # 自動処理フラグをリセット
+            self.is_auto_processing = False
+            
+            # プログレスバーを非表示
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setVisible(False)
+            
+            # 検索ボタンをリセット
+            self.reset_search_button()
+            
+            if result["status"] == "cancelled":
+                # キャンセルされた場合
+                logging.info("提供エリア検索がキャンセルされました")
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: キャンセルされました")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #F39C12;
+                            border-radius: 4px;
+                            background-color: #FFF3E0;
+                            color: #F39C12;
+                        }
+                    """)
+                return
+            
+            # 結果表示
+            if result["status"] == "available":
+                # 提供可能
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: 〇提供可能")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #28A745;
+                            border-radius: 4px;
+                            background-color: #D4EDDA;
+                            color: #155724;
+                        }
+                    """)
+                logging.info("提供判定結果: 提供可能")
+                
+            elif result["status"] == "unavailable":
+                # 提供不可
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: ×提供不可")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #DC3545;
+                            border-radius: 4px;
+                            background-color: #F8D7DA;
+                            color: #721C24;
+                        }
+                    """)
+                logging.info("提供判定結果: 提供不可")
+                
+            elif result["status"] == "error":
+                # エラー
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: エラーが発生しました")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #FFC107;
+                            border-radius: 4px;
+                            background-color: #FFF3CD;
+                            color: #856404;
+                        }
+                    """)
+                logging.error(f"提供判定結果: エラー - {result.get('message', '不明なエラー')}")
+                QMessageBox.critical(self, "エラー", result.get("message", "不明なエラーが発生しました"))
+                
+            else:
+                # その他・不明
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: 判定不能")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #6C757D;
+                            border-radius: 4px;
+                            background-color: #E2E3E5;
+                            color: #383D41;
+                        }
+                    """)
+                logging.warning(f"提供判定結果: 不明な状態 - {result}")
+                
+            # スクリーンショットの表示（設定で有効な場合）
+            if result.get("show_popup", False) and "screenshot" in result:
+                screenshot_path = result["screenshot"]
+                if os.path.exists(screenshot_path):
+                    self.show_screenshot_window(screenshot_path)
+                    
         except Exception as e:
-            logging.error(f"スレッドのクリーンアップ中にエラー: {str(e)}")
-            # エラーが発生しても、スレッドをNoneに設定して続行
+            logging.error(f"検索完了処理中にエラーが発生: {str(e)}")
+            # エラー時も確実にフラグをリセット
+            self.is_auto_processing = False
+            self.reset_search_button()
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setVisible(False)
+                
+    def cleanup_thread(self):
+        """スレッドとワーカーをクリーンアップ"""
+        try:
+            # ワーカーをキャンセル
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.cancel()
+                logging.debug("ワーカーをキャンセルしました")
+                
+            # スレッドを終了
+            if hasattr(self, 'thread') and self.thread and self.thread.isRunning():
+                self.thread.quit()
+                if not self.thread.wait(2000):  # 最大2秒待機
+                    logging.warning("スレッドが正常に終了しませんでした")
+                    self.thread.terminate()
+                else:
+                    logging.debug("スレッドを終了しました")
+                    
+            # 参照をクリア
+            self.worker = None
+            self.thread = None
+            
+        except Exception as e:
+            logging.error(f"スレッドクリーンアップ中にエラー: {str(e)}")
+            # エラー時でも参照をクリア
+            self.worker = None
             self.thread = None
 
     def get_template(self):
@@ -2639,35 +2670,66 @@ ND：{nd}
     
     @Slot()
     def auto_search_service_area(self):
-        """
-        自動提供判定検索を実行
-        """
+        """CTI自動処理から呼び出される提供エリア検索"""
         try:
             logging.info("2. 提供判定検索の自動実行を開始")
             
-            # 郵便番号と住所が入力されているかチェック
-            postal_code = ""
-            address = ""
+            # 重複実行防止
+            if hasattr(self, 'is_auto_processing') and self.is_auto_processing:
+                logging.warning("自動処理が既に実行中のため、重複実行をスキップします")
+                return
             
-            # シンプルモードと誘導モードで異なる入力フィールドを参照
-            if hasattr(self, 'postal_code_input'):
-                postal_code = self.postal_code_input.text().strip()
-            if hasattr(self, 'address_input'):
-                address = self.address_input.text().strip()
-                
-            # 入力データが不足している場合の処理
+            # 自動処理フラグを設定
+            self.is_auto_processing = True
+            
+            # 郵便番号と住所の取得
+            postal_code = self.postal_code_input.text().strip()
+            address = self.address_input.text().strip()
+            
             if not postal_code or not address:
-                logging.warning("郵便番号または住所が未入力のため、提供判定検索をスキップしました")
+                logging.warning("郵便番号または住所が入力されていません")
+                QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
                 self.is_auto_processing = False
                 return
-                
-            # 既存の検索メソッドを呼び出し
-            self.search_service_area()
             
+            # 既存のワーカーとスレッドをクリーンアップ
+            self.cleanup_thread()
+            
+            # 検索ボタンの状態を変更
+            if hasattr(self, 'area_search_btn'):
+                self.area_search_btn.setText("検索中...")
+                self.area_search_btn.setEnabled(False)
+            
+            # プログレスバーを表示
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setVisible(True)
+                self.progress_bar.setValue(0)
+            
+            # 新しいスレッドとワーカーを作成
+            self.thread = QThread()
+            self.worker = ServiceAreaSearchWorker(postal_code, address)
+            self.worker.moveToThread(self.thread)
+            
+            # シグナル・スロットの接続
+            self.thread.started.connect(self.worker.run)
+            self.worker.finished.connect(self.on_search_completed)
+            self.worker.progress.connect(self.update_search_progress)
+            self.worker.finished.connect(self.thread.quit)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.thread.finished.connect(self.thread.deleteLater)
+            
+            # スレッド終了時のクリーンアップ
+            self.thread.finished.connect(lambda: self.cleanup_thread())
+            
+            # 検索開始
+            self.thread.start()
             logging.info("CTI自動処理が完了しました")
             
         except Exception as e:
-            logging.error(f"自動提供判定検索中にエラーが発生: {str(e)}")
+            logging.error(f"自動検索処理中にエラーが発生: {str(e)}")
+            self.is_auto_processing = False
+            if hasattr(self, 'area_search_btn'):
+                self.reset_search_button()
         finally:
             # 提供判定検索が完了したらフラグをリセット
             self.is_auto_processing = False
