@@ -197,8 +197,9 @@ class SettingsDialog(QDialog):
         self.enable_auto_cti_check.setChecked(cti_settings.get('enable_auto_cti_processing', True))
         self.cti_interval_spin.setValue(cti_settings.get('cti_monitor_interval', 0.2))
         
-        # 通話時間閾値設定（メイン設定から取得）
-        self.call_duration_spin.setValue(settings.get('call_duration_threshold', 0))
+        # 通話時間閾値設定（CTI設定から取得、後方互換性のためメイン設定もチェック）
+        call_duration_threshold = cti_settings.get('call_duration_threshold', settings.get('call_duration_threshold', 0))
+        self.call_duration_spin.setValue(call_duration_threshold)
         
         # ブラウザ設定
         browser_settings = settings.get('browser_settings', self.default_browser_settings)
@@ -214,11 +215,11 @@ class SettingsDialog(QDialog):
         """UIの設定を取得"""
         return {
             'font_size': self.font_size_spin.value(),
-            'call_duration_threshold': self.call_duration_spin.value(),
             'cti_settings': {
                 'enable_cti': self.enable_cti_check.isChecked(),
                 'enable_auto_cti_processing': self.enable_auto_cti_check.isChecked(),
-                'cti_monitor_interval': self.cti_interval_spin.value()
+                'cti_monitor_interval': self.cti_interval_spin.value(),
+                'call_duration_threshold': self.call_duration_spin.value()  # CTI設定内に移動
             },
             'browser_settings': {
                 'headless': self.headless_check.isChecked(),

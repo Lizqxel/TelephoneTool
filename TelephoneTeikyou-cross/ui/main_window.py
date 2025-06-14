@@ -245,8 +245,9 @@ class MainWindow(QMainWindow):
                     on_talking_started_callback=self.on_cti_talking_started,
                     on_cancel_processing_callback=self.on_cancel_processing_request
                 )
-                # 通話時間閾値を設定
-                call_duration_threshold = self.settings.get('call_duration_threshold', 0)
+                # 通話時間閾値を設定（CTI設定から取得、後方互換性のためメイン設定もチェック）
+                cti_settings = self.settings.get('cti_settings', {})
+                call_duration_threshold = cti_settings.get('call_duration_threshold', self.settings.get('call_duration_threshold', 0))
                 self.cti_status_monitor.set_call_duration_threshold(call_duration_threshold)
                 
                 # 自動処理設定を反映
@@ -581,17 +582,14 @@ class MainWindow(QMainWindow):
     def load_settings(self):
         """設定ファイルを読み込む"""
         try:
-            # 初期設定を設定
+            # 初期設定を設定（TelephoneToolと同じ構造に統一）
             self.settings = {
                 'font_size': 11,
-                'call_duration_threshold': 0,
-                'enable_cti_monitoring': True,
-                'enable_auto_cti_processing': True,
-                'cti_monitor_interval': 0.5,
                 'cti_settings': {
                     'enable_cti': True,
                     'enable_auto_cti_processing': True,
-                    'cti_monitor_interval': 0.5
+                    'cti_monitor_interval': 0.2,  # TelephoneToolと同じ値に変更
+                    'call_duration_threshold': 0  # CTI設定内に移動
                 },
                 'browser_settings': {
                     'headless': True,
@@ -600,7 +598,7 @@ class MainWindow(QMainWindow):
                     'auto_close': True,
                     'page_load_timeout': 60,
                     'script_timeout': 60,
-                    'use_external_browser': False
+                    'use_external_browser': False  # TelephoneTeikyou-cross独自の設定として維持
                 }
             }
             
@@ -1431,8 +1429,9 @@ class MainWindow(QMainWindow):
                         on_talking_started_callback=self.on_cti_talking_started,
                         on_cancel_processing_callback=self.on_cancel_processing_request
                     )
-                    # 通話時間閾値を設定
-                    call_duration_threshold = self.settings.get('call_duration_threshold', 0)
+                    # 通話時間閾値を設定（CTI設定から取得、後方互換性のためメイン設定もチェック）
+                    cti_settings = self.settings.get('cti_settings', {})
+                    call_duration_threshold = cti_settings.get('call_duration_threshold', self.settings.get('call_duration_threshold', 0))
                     self.cti_status_monitor.set_call_duration_threshold(call_duration_threshold)
                     
                     # シグナル・スロット接続を設定（apply_cti_settingsでも必要）
