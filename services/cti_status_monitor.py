@@ -566,19 +566,28 @@ class CTIStatusMonitor:
             timer.start() 
 
     def _check_and_trigger_auto_processing(self):
-        """
-        通話時間をチェックし、条件を満たす場合に自動処理を実行
-        """
+        """通話時間をチェックし、閾値を超えた場合に自動処理を実行"""
         try:
-            current_time = time.time()
-            elapsed_time = current_time - self.talking_start_time
+            if not self.talking_start_time:
+                return
+                
+            elapsed_time = time.time() - self.talking_start_time
+            logging.info(f"通話時間が閾値に達していないため、自動処理をスキップします（経過時間: {elapsed_time:.1f}秒）")
             
-            # 通話中状態で、かつ通話時間が閾値を超えている場合
-            if (self.current_status == CTIStatus.TALKING and 
-                elapsed_time >= self.call_duration_threshold):
-                logging.info(f"通話時間が閾値（{self.call_duration_threshold}秒）を超えました")
-                self._trigger_auto_processing()
-            else:
-                logging.info(f"通話時間が閾値に達していないため、自動処理をスキップします（経過時間: {elapsed_time:.1f}秒）")
+            if elapsed_time >= self.call_duration_threshold:
+                if self.enable_auto_processing:
+                    logging.info(f"通話時間が閾値（{self.call_duration_threshold}秒）を超えました。自動処理を実行します。")
+                    # メインスレッドで実行するためにQTimerを使用
+                    threading.Timer(0, self._execute_auto_processing).start()
+                    
         except Exception as e:
-            logging.error(f"通話時間チェック中にエラーが発生: {str(e)}") 
+            logging.error(f"通話時間チェック中にエラーが発生: {str(e)}")
+
+    def _execute_auto_processing(self):
+        """自動処理を実行"""
+        try:
+            if self.on_dialing_to_talking_callback:
+                # メインスレッドで実行するためにQTimerを使用
+                threading.Timer(0, self.on_dialing_to_talking_callback).start()
+        except Exception as e:
+            logging.error(f"自動処理実行中にエラーが発生: {str(e)}") 
