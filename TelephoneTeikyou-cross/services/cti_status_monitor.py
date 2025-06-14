@@ -71,6 +71,7 @@ class CTIStatusMonitor:
         self.processing_lock = threading.Lock()
         self.processing_thread = None
         self.talking_start_time = 0
+        self.is_processing = False  # 処理中フラグ（アクションボタンクリック検出で使用）
         
         # 通話時間監視用
         self.call_start_time = None
@@ -135,7 +136,53 @@ class CTIStatusMonitor:
                 if call_duration >= self.call_duration_threshold:
                     logging.info(f"★★★ 通話時間{call_duration:.1f}秒が閾値{self.call_duration_threshold}秒を超えたため自動処理を実行 ★★★")
                     if self.on_dialing_to_talking_callback:
-                        self.on_dialing_to_talking_callback()
+                        # 前回の処理フラグをチェック（新しい電話での処理開始前）
+                        if self.is_processing:
+                            logging.warning("前回の処理が完了していません。フラグをリセットして新しい処理を開始します")
+                            logging.info(f"- 前回処理の通話開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.talking_start_time)) if self.talking_start_time > 0 else '不明'}")
+                            if self.talking_start_time > 0:
+                                elapsed_time = time.time() - self.talking_start_time
+                                logging.info(f"- 前回処理からの経過時間: {elapsed_time:.1f}秒")
+                            # 前回のフラグをリセット
+                            self.is_processing = False
+                            self.talking_start_time = 0
+                            logging.info("- 前回の処理フラグをリセットしました")
+                        
+                        # 新しい処理を開始
+                        self.is_processing = True
+                        logging.info("- 新しい自動処理を開始します")
+                        
+                        try:
+                            self.on_dialing_to_talking_callback()
+                        except Exception as e:
+                            logging.error(f"自動処理の実行中にエラーが発生: {str(e)}")
+                            # エラー時はフラグをリセット
+                            self.is_processing = False
+                            self.talking_start_time = 0
+                        finally:
+                            # 処理完了後、バックアップとして一定時間後にフラグをリセット（念のため）
+                            def backup_reset_processing_flag():
+                                try:
+                                    # 長時間経過した場合のバックアップリセット（異常終了対策）
+                                    if self.is_processing and self.talking_start_time > 0:
+                                        elapsed_time = time.time() - self.talking_start_time
+                                        if elapsed_time > 300:  # 5分以上経過した場合
+                                            logging.warning(f"処理開始から{elapsed_time:.0f}秒経過：バックアップ処理でフラグをリセットします")
+                                            self.is_processing = False
+                                            self.talking_start_time = 0
+                                        else:
+                                            logging.debug(f"処理継続中（経過時間: {elapsed_time:.1f}秒）")
+                                    else:
+                                        logging.debug("バックアップチェック：処理は既に完了済みです")
+                                except Exception as e:
+                                    logging.error(f"バックアップフラグリセット中にエラー: {str(e)}")
+                                    # エラーが発生した場合は強制的にリセット
+                                    self.is_processing = False
+                                    self.talking_start_time = 0
+                                    
+                            timer = threading.Timer(300.0, backup_reset_processing_flag)  # 5分後にバックアップチェック
+                            timer.daemon = True
+                            timer.start()
                 else:
                     logging.info(f"通話時間{call_duration:.1f}秒が閾値{self.call_duration_threshold}秒未満のため自動処理をスキップ")
             else:
@@ -143,6 +190,7 @@ class CTIStatusMonitor:
         except Exception as e:
             logging.error(f"自動処理実行チェック中にエラー: {str(e)}")
     
+
     def _check_action_button_click(self):
         """
         アクションボタン（「次」「留守」「担当者不在」「NG」）のクリックをチェック
@@ -462,8 +510,55 @@ class CTIStatusMonitor:
                             ).start()
                         else:
                             logging.info("★★★ 即座に自動処理を実行します ★★★")
+                            
+                            # 前回の処理フラグをチェック（新しい電話での処理開始前）
+                            if self.is_processing:
+                                logging.warning("前回の処理が完了していません。フラグをリセットして新しい処理を開始します")
+                                logging.info(f"- 前回処理の通話開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.talking_start_time)) if self.talking_start_time > 0 else '不明'}")
+                                if self.talking_start_time > 0:
+                                    elapsed_time = time.time() - self.talking_start_time
+                                    logging.info(f"- 前回処理からの経過時間: {elapsed_time:.1f}秒")
+                                # 前回のフラグをリセット
+                                self.is_processing = False
+                                self.talking_start_time = 0
+                                logging.info("- 前回の処理フラグをリセットしました")
+                            
+                            # 新しい処理を開始
+                            self.is_processing = True
+                            logging.info("- 新しい自動処理を開始します")
+                            
                             # 即座に自動処理を実行
-                            self.on_dialing_to_talking_callback()
+                            try:
+                                self.on_dialing_to_talking_callback()
+                            except Exception as e:
+                                logging.error(f"自動処理の実行中にエラーが発生: {str(e)}")
+                                # エラー時はフラグをリセット
+                                self.is_processing = False
+                                self.talking_start_time = 0
+                            finally:
+                                # 処理完了後、バックアップとして一定時間後にフラグをリセット（念のため）
+                                def backup_reset_processing_flag():
+                                    try:
+                                        # 長時間経過した場合のバックアップリセット（異常終了対策）
+                                        if self.is_processing and self.talking_start_time > 0:
+                                            elapsed_time = time.time() - self.talking_start_time
+                                            if elapsed_time > 300:  # 5分以上経過した場合
+                                                logging.warning(f"処理開始から{elapsed_time:.0f}秒経過：バックアップ処理でフラグをリセットします")
+                                                self.is_processing = False
+                                                self.talking_start_time = 0
+                                            else:
+                                                logging.debug(f"処理継続中（経過時間: {elapsed_time:.1f}秒）")
+                                        else:
+                                            logging.debug("バックアップチェック：処理は既に完了済みです")
+                                    except Exception as e:
+                                        logging.error(f"バックアップフラグリセット中にエラー: {str(e)}")
+                                        # エラーが発生した場合は強制的にリセット
+                                        self.is_processing = False
+                                        self.talking_start_time = 0
+                                        
+                                timer = threading.Timer(300.0, backup_reset_processing_flag)  # 5分後にバックアップチェック
+                                timer.daemon = True
+                                timer.start()
                     else:
                         if not self.on_dialing_to_talking_callback:
                             logging.warning("発信中→通話中コールバックが設定されていません")
@@ -477,7 +572,20 @@ class CTIStatusMonitor:
                 
                 # 通話終了を検出
                 if self.previous_status == "talking" and current_status != "talking":
+                    logging.info("通話が終了しました")
                     self.call_start_time = None  # 通話時間をリセット
+                    
+                    # 処理中フラグはリセットしない（実際の処理状態を維持）
+                    # アクションボタンによるキャンセルを可能にするため
+                    if self.is_processing:
+                        logging.info("処理中フラグは維持します（アクションボタンによるキャンセルを可能にするため）")
+                        logging.info(f"- 現在の処理状態: 実行中")
+                        if self.talking_start_time > 0:
+                            elapsed_time = time.time() - self.talking_start_time
+                            logging.info(f"- 処理開始からの経過時間: {elapsed_time:.1f}秒")
+                    else:
+                        logging.info("処理中フラグは既にリセット済みです")
+                    
                     if self.on_call_ended_callback:
                         self.on_call_ended_callback()
                 
