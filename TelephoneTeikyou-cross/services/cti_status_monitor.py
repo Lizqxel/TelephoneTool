@@ -63,6 +63,10 @@ class CTIStatusMonitor:
         # 通話時間監視用
         self.call_start_time = None
         self.call_duration_threshold = 0  # デフォルト値（設定で変更可能）
+        
+        # ウィンドウハンドル関連の初期化
+        self.window_handle = None
+        self.status_text_handle = None
     
     def set_call_duration_threshold(self, threshold_seconds):
         """
@@ -112,7 +116,7 @@ class CTIStatusMonitor:
         """
         try:
             # 現在も通話中かチェック
-            current_status = self.cti_service.get_status()
+            current_status = self.get_current_status()
             if current_status == "talking" and self.call_start_time:
                 # 通話時間を計算
                 call_duration = (datetime.now() - self.call_start_time).total_seconds()
