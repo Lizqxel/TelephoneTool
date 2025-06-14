@@ -43,6 +43,12 @@ class CTIStatusMonitor:
         self.enable_auto_processing = True
         self.monitor_interval = 0.5  # 0.2秒から0.5秒に変更（CPU負荷軽減）
         
+        # 初期化ログ
+        logging.info("★★★ CTIStatusMonitor 初期化完了 ★★★")
+        logging.info(f"- 発信中→通話中コールバック: {self.on_dialing_to_talking_callback is not None}")
+        logging.info(f"- 自動処理有効: {self.enable_auto_processing}")
+        logging.info(f"- 監視間隔: {self.monitor_interval}秒")
+        
         # 前回の状態を保持
         self.previous_status = None
         
@@ -93,24 +99,33 @@ class CTIStatusMonitor:
                 
                 if current_status and self.previous_status:
                     # 発信中→通話中の状態変化を検出
-                    if (self.previous_status == "dialing" and
-                        current_status == "talking" and
-                        self.on_dialing_to_talking_callback and
-                        self.enable_auto_processing):
+                    if (self.previous_status == "dialing" and current_status == "talking"):
+                        logging.info(f"★★★ 発信中→通話中の状態変化を検出 ★★★")
+                        logging.info(f"- コールバック設定: {self.on_dialing_to_talking_callback is not None}")
+                        logging.info(f"- 自動処理有効: {self.enable_auto_processing}")
+                        logging.info(f"- 通話時間閾値: {self.call_duration_threshold}秒")
                         
-                        # 通話開始時間を記録
-                        self.call_start_time = datetime.now()
-                        
-                        # 通話時間閾値をチェック
-                        if self.call_duration_threshold > 0:
-                            # 指定秒数待機してから自動処理を実行
-                            threading.Timer(
-                                self.call_duration_threshold,
-                                self._check_and_execute_auto_processing
-                            ).start()
+                        if (self.on_dialing_to_talking_callback and self.enable_auto_processing):
+                            # 通話開始時間を記録
+                            self.call_start_time = datetime.now()
+                            
+                            # 通話時間閾値をチェック
+                            if self.call_duration_threshold > 0:
+                                logging.info(f"★★★ {self.call_duration_threshold}秒後に自動処理を実行予定 ★★★")
+                                # 指定秒数待機してから自動処理を実行
+                                threading.Timer(
+                                    self.call_duration_threshold,
+                                    self._check_and_execute_auto_processing
+                                ).start()
+                            else:
+                                logging.info("★★★ 即座に自動処理を実行します ★★★")
+                                # 即座に自動処理を実行
+                                self.on_dialing_to_talking_callback()
                         else:
-                            # 即座に自動処理を実行
-                            self.on_dialing_to_talking_callback()
+                            if not self.on_dialing_to_talking_callback:
+                                logging.warning("発信中→通話中コールバックが設定されていません")
+                            if not self.enable_auto_processing:
+                                logging.warning("自動処理が無効になっています")
                     
                     # 通話中→待ち受け中（通話終了）の状態変化を検出
                     elif (self.previous_status == "talking" and
