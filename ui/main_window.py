@@ -2859,35 +2859,73 @@ ND：{nd}
             except ImportError:
                 logging.warning("エリア検索モジュールのインポートに失敗しました")
             
-            # UIのキャンセルボタンをクリック（統一されたキャンセル処理）
-            if (hasattr(self, 'area_search_btn') and 
-                self.area_search_btn.text() == "キャンセル" and 
-                self.area_search_btn.isEnabled()):
-                
-                logging.info(f"- UIキャンセルボタンを直接クリックします")
-                # UIのキャンセルボタンをプログラム的にクリック
-                self.area_search_btn.click()
-                logging.info(f"★★★ 「{button_name}」ボタン: UIキャンセルボタンクリックによるキャンセル処理完了 ★★★")
-                
-            elif (hasattr(self, 'area_search_btn') and 
-                  self.area_search_btn.text() == "キャンセル中..."):
-                
-                logging.info(f"- 既にキャンセル処理中です")
-                logging.info(f"★★★ 「{button_name}」ボタン: 既にキャンセル中のため処理をスキップ ★★★")
-                
-            elif (hasattr(self, 'area_search_btn') and 
-                  self.area_search_btn.text() == "提供エリア検索"):
-                
-                logging.info(f"- 検索処理が実行されていません（検索ボタン状態）")
-                logging.info(f"★★★ 「{button_name}」ボタン: キャンセル対象の処理が実行中ではありません ★★★")
-                
+            # UIボタンの状態をログ出力
+            if hasattr(self, 'area_search_btn'):
+                current_button_text = self.area_search_btn.text()
+                current_button_enabled = self.area_search_btn.isEnabled()
+                logging.info(f"- 現在のUIボタン状態: '{current_button_text}' (有効: {current_button_enabled})")
             else:
-                # UIボタンの状態が不明な場合
-                logging.warning(f"- UIボタンの状態が不明です: {getattr(self.area_search_btn, 'text', lambda: 'ボタンなし')()}")
-                logging.info(f"★★★ 「{button_name}」ボタン: UIボタン状態不明のためキャンセル処理をスキップ ★★★")
+                logging.warning("- area_search_btnが存在しません")
+                current_button_text = "ボタンなし"
+            
+            # 検索処理が実行中かどうかを判定（ワーカーとスレッドの存在で判定）
+            worker_running = hasattr(self, 'worker') and self.worker is not None
+            thread_running = (hasattr(self, 'thread') and self.thread is not None and 
+                             hasattr(self.thread, 'isRunning') and self.thread.isRunning())
+            
+            is_search_running = worker_running or thread_running
+            
+            logging.info(f"- ワーカー実行中: {worker_running}")
+            logging.info(f"- スレッド実行中: {thread_running}")
+            logging.info(f"- 検索処理実行中: {is_search_running}")
+            
+            if is_search_running:
+                logging.info(f"- 検索処理が実行中です。強制的にUIキャンセル処理を実行します")
+                
+                # 強制的にcancel_search()を実行
+                if hasattr(self, 'cancel_search'):
+                    logging.info(f"- cancel_searchメソッドを実行します")
+                    self.cancel_search()
+                    logging.info(f"★★★ 「{button_name}」ボタン: 強制UIキャンセル処理を実行しました ★★★")
+                else:
+                    # cancel_searchが存在しない場合の直接処理
+                    logging.warning("cancel_searchメソッドが存在しません。直接キャンセル処理を実行します")
+                    
+                    # ワーカーのキャンセル
+                    if hasattr(self, 'worker') and self.worker:
+                        logging.info(f"- ワーカーをキャンセルします")
+                        self.worker.cancel()
+                        logging.info(f"- 実行中のワーカーをキャンセルしました")
+                    
+                    # UI状態を「キャンセル中」に設定
+                    if hasattr(self, 'area_search_btn'):
+                        self.area_search_btn.setEnabled(False)
+                        self.area_search_btn.setText("キャンセル中...")
+                        logging.info(f"- 検索ボタンを「キャンセル中」に設定しました")
+                    
+                    if hasattr(self, 'area_result_label'):
+                        self.area_result_label.setText("提供エリア: キャンセル中...")
+                        self.area_result_label.setStyleSheet("""
+                            QLabel {
+                                font-size: 14px;
+                                padding: 5px;
+                                border: 1px solid #F39C12;
+                                border-radius: 4px;
+                                background-color: #FFF3E0;
+                                color: #F39C12;
+                            }
+                        """)
+                        logging.info(f"- 結果表示を「キャンセル中」に設定しました")
+                    
+                    logging.info(f"★★★ 「{button_name}」ボタン: 直接キャンセル処理を実行しました ★★★")
+                    
+            else:
+                logging.info(f"- 検索処理が実行されていません")
+                logging.info(f"★★★ 「{button_name}」ボタン: キャンセル対象の処理が実行中ではありません ★★★")
             
         except Exception as e:
             logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
+            logging.error(f"エラー詳細: {type(e).__name__}: {str(e)}")
             
             # エラー時も基本的なキャンセルを実行
             try:
@@ -2895,7 +2933,13 @@ ND：{nd}
                 from services.area_search import set_cancel_flag
                 set_cancel_flag(True)
                 logging.info("エラー時にキャンセルフラグを設定しました")
-            except:
+                
+                # エラー時も強制的にcancel_search実行を試行
+                if hasattr(self, 'cancel_search'):
+                    self.cancel_search()
+                    logging.info("エラー時に強制UIキャンセル処理を実行しました")
+            except Exception as fallback_error:
+                logging.error(f"エラー時のフォールバック処理も失敗: {str(fallback_error)}")
                 pass
 
 

@@ -38,29 +38,45 @@ from utils.address_utils import split_address, normalize_address
 global_driver = None
 global_cancel_flag = False
 
-def set_cancel_flag(cancel: bool = True):
+class CancellationError(Exception):
     """
-    グローバルなキャンセルフラグを設定
+    検索処理がキャンセルされた際に発生する例外
+    """
+    pass
+
+def set_cancel_flag(value: bool):
+    """
+    グローバルキャンセルフラグを設定
     
     Args:
-        cancel: キャンセル状態（True=キャンセル、False=通常）
+        value: キャンセルフラグの値（True: キャンセル要求, False: リセット）
     """
     global global_cancel_flag
-    global_cancel_flag = cancel
-    if cancel:
+    global_cancel_flag = value
+    if value:
         logging.info("★★★ エリア検索のキャンセルフラグが設定されました ★★★")
     else:
         logging.info("エリア検索のキャンセルフラグがリセットされました")
 
-def is_cancelled():
+def get_cancel_flag() -> bool:
     """
-    キャンセル状態をチェック
+    グローバルキャンセルフラグを取得
     
     Returns:
-        bool: キャンセルされている場合True
+        bool: 現在のキャンセルフラグの値
     """
-    global global_cancel_flag
     return global_cancel_flag
+
+def check_cancellation():
+    """
+    キャンセル要求をチェックし、キャンセルされている場合は例外を発生
+    
+    Raises:
+        CancellationError: キャンセルが要求されている場合
+    """
+    if global_cancel_flag:
+        logging.info("★★★ キャンセル要求を検出しました - 処理を中断します ★★★")
+        raise CancellationError("検索がキャンセルされました")
 
 def is_east_japan(address):
     """
@@ -625,9 +641,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     logging.info(f"入力住所（変換前）: {address}")
     
     # キャンセルチェック
-    if is_cancelled():
-        logging.info("検索開始前にキャンセルが検出されました")
-        return {"status": "cancelled", "message": "検索がキャンセルされました"}
+    check_cancellation()
     
     # 郵便番号と住所の正規化
     try:
@@ -644,9 +658,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
         progress_callback("住所情報を解析中...")
     
     # キャンセルチェック
-    if is_cancelled():
-        logging.info("住所分割前にキャンセルが検出されました")
-        return {"status": "cancelled", "message": "検索がキャンセルされました"}
+    check_cancellation()
     
     address_parts = split_address(address)
     if not address_parts:
@@ -720,6 +732,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
         driver.get("https://flets-w.com/cart/")
         logging.info("NTT西日本のサイトにアクセスしています...")
         
+        # キャンセルチェック
+        check_cancellation()
+        
         # 2. 郵便番号を入力
         try:
             # 郵便番号入力フィールドが操作可能になるまで待機
@@ -729,6 +744,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             
             if not zip_field:
                 raise TimeoutException("郵便番号入力フィールドが見つかりませんでした")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # フィールドが表示され、操作可能になるまで短い間隔で確認
             for _ in range(10):  # 最大1秒間試行
@@ -746,9 +764,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             raise
         
         # キャンセルチェック
-        if is_cancelled():
-            logging.info("検索ボタンクリック前にキャンセルが検出されました")
-            return {"status": "cancelled", "message": "検索がキャンセルされました"}
+        check_cancellation()
         
         # 3. 検索ボタンを押す
         try:
@@ -766,11 +782,17 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             if progress_callback:
                 progress_callback("基本住所の候補を検索中...")
             
+            # キャンセルチェック
+            check_cancellation()
+            
             # 住所選択モーダルが表示されるまで待機
             WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.ID, "addressSelectModal"))
             )
             logging.info("住所選択モーダルが表示されました")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # モーダル内のリストが表示されるまで待機
             WebDriverWait(driver, 5).until(
@@ -865,6 +887,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 if progress_callback:
                     progress_callback("番地を入力中...")
                 
+                # キャンセルチェック
+                check_cancellation()
+                
                 # 番地入力ダイアログが表示されるまで待機
                 banchi_dialog = WebDriverWait(driver, 15).until(
                     EC.visibility_of_element_located((By.ID, "DIALOG_ID01"))
@@ -923,12 +948,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         all_buttons = driver.find_elements(By.XPATH, "//dialog[@id='DIALOG_ID01']//a")
                         logging.info(f"全ての番地ボタン数: {len(all_buttons)}")
                         
+                        # キャンセルチェック
+                        check_cancellation()
+                        
                         # 「該当する住所がない」ボタンと目的の番地ボタンを探す
                         banchi_button = None
                         no_address_button = None
                         
                         for button in all_buttons:
                             try:
+                                # キャンセルチェック（ループ内でも確認）
+                                check_cancellation()
+                                
                                 button_text = button.text.strip()
                                 logging.info(f"番地ボタンのテキスト: {button_text}")
                                 
@@ -939,6 +970,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 elif button_text == input_street_number or button_text == zen_street_number:
                                     banchi_button = button
                                     logging.info(f"番地ボタンが見つかりました: {button_text}")
+                            except CancellationError:
+                                # キャンセル例外は再発生
+                                raise
                             except Exception as e:
                                 logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                                 continue
@@ -1021,12 +1055,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     all_buttons = driver.find_elements(By.XPATH, "//dialog[@id='DIALOG_ID02']//a")
                     logging.info(f"全ての号ボタン数: {len(all_buttons)}")
                     
+                    # キャンセルチェック
+                    check_cancellation()
+                    
                     # 「該当する住所がない」ボタンと目的の号ボタンを探す
                     gou_button = None
                     no_address_button = None
                     
                     for button in all_buttons:
                         try:
+                            # キャンセルチェック（ループ内でも確認）
+                            check_cancellation()
+                            
                             button_text = button.text.strip()
                             logging.info(f"号ボタンのテキスト: {button_text}")
                             
@@ -1037,6 +1077,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             elif button_text == input_building_number or button_text == zen_building_number:
                                 gou_button = button
                                 logging.info(f"号ボタンが見つかりました: {button_text}")
+                        except CancellationError:
+                            # キャンセル例外は再発生
+                            raise
                         except Exception as e:
                             logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                             continue
