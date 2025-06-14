@@ -38,6 +38,32 @@ from utils.address_utils import split_address, normalize_address
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
 
+# グローバルキャンセルフラグ
+_global_cancel_flag = False
+
+class CancellationError(Exception):
+    """検索キャンセル時に発生する例外"""
+    pass
+
+def set_cancel_flag():
+    """キャンセルフラグを設定"""
+    global _global_cancel_flag
+    _global_cancel_flag = True
+    logging.info("★★★ エリア検索のキャンセルフラグを設定しました ★★★")
+
+def clear_cancel_flag():
+    """キャンセルフラグをクリア"""
+    global _global_cancel_flag
+    _global_cancel_flag = False
+    logging.info("エリア検索のキャンセルフラグをクリアしました")
+
+def check_cancellation():
+    """キャンセル要求をチェックし、必要に応じて例外を発生"""
+    global _global_cancel_flag
+    if _global_cancel_flag:
+        logging.info("★★★ キャンセル要求を検出：検索を中断します ★★★")
+        raise CancellationError("検索がキャンセルされました")
+
 def is_east_japan(address):
     """
     住所が東日本かどうかを判定する
@@ -639,22 +665,41 @@ def search_service_area(postal_code, address, progress_callback=None):
     Returns:
         dict: 検索結果を含む辞書
     """
-    # 東日本か西日本かを判定
-    if is_east_japan(address):
-        logging.info("東日本の提供エリア検索を実行します")
-        # 東日本の検索機能を動的にインポート
-        from services.area_search_east import search_service_area as search_service_area_east
-        return search_service_area_east(postal_code, address, progress_callback)
-    else:
-        logging.info("西日本の住所が入力されました")
+    try:
+        # キャンセルフラグをクリア（新しい検索開始時）
+        clear_cancel_flag()
+        
+        # キャンセルチェック
+        check_cancellation()
+        
+        # 東日本か西日本かを判定
+        if is_east_japan(address):
+            logging.info("東日本の提供エリア検索を実行します")
+            # 東日本の検索機能を動的にインポート
+            from services.area_search_east import search_service_area as search_service_area_east
+            return search_service_area_east(postal_code, address, progress_callback)
+        else:
+            logging.info("西日本の住所が入力されました")
+            return {
+                "status": "error",
+                "message": "申し訳ありませんが、このツールは東日本の住所のみ対応しています。",
+                "details": {
+                    "判定結果": "NG",
+                    "提供エリア": "未対応エリア",
+                    "備考": "東日本の住所（北海道、青森県、岩手県、宮城県、秋田県、山形県、福島県、茨城県、栃木県、群馬県、埼玉県、千葉県、東京都、神奈川県、新潟県、富山県、石川県、福井県、山梨県、長野県）のみ対応しています。"
+                }
+            }
+    except CancellationError as e:
+        logging.info("★★★ 提供エリア検索がキャンセルされました ★★★")
+        return {
+            "status": "cancelled",
+            "message": "検索がキャンセルされました"
+        }
+    except Exception as e:
+        logging.error(f"提供エリア検索中にエラー: {str(e)}")
         return {
             "status": "error",
-            "message": "申し訳ありませんが、このツールは東日本の住所のみ対応しています。",
-            "details": {
-                "判定結果": "NG",
-                "提供エリア": "未対応エリア",
-                "備考": "東日本の住所（北海道、青森県、岩手県、宮城県、秋田県、山形県、福島県、茨城県、栃木県、群馬県、埼玉県、千葉県、東京都、神奈川県、新潟県、富山県、石川県、福井県、山梨県、長野県）のみ対応しています。"
-            }
+            "message": f"検索処理中にエラーが発生: {str(e)}"
         }
 
 # 西日本の検索機能は無効化

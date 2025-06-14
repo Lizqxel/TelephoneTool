@@ -21,7 +21,8 @@ class CTIStatusMonitor:
     def __init__(self,
                  on_dialing_to_talking_callback: Optional[Callable] = None,
                  on_call_ended_callback: Optional[Callable] = None,
-                 on_talking_started_callback: Optional[Callable] = None):
+                 on_talking_started_callback: Optional[Callable] = None,
+                 on_cancel_processing_callback: Optional[Callable] = None):
         """
         CTI状態監視クラスを初期化
         
@@ -29,16 +30,18 @@ class CTIStatusMonitor:
             on_dialing_to_talking_callback (Callable, optional): 発信中→通話中の状態変化時のコールバック
             on_call_ended_callback (Callable, optional): 通話終了時のコールバック
             on_talking_started_callback (Callable, optional): 通話中状態開始時のコールバック
+            on_cancel_processing_callback (Callable, optional): 処理キャンセル時のコールバック
         """
         self.cti_service = OneClickService()
         self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
         self.on_call_ended_callback = on_call_ended_callback
         self.on_talking_started_callback = on_talking_started_callback
+        self.on_cancel_processing_callback = on_cancel_processing_callback
         
         self.monitor_thread = None
         self.is_monitoring = False
         self.enable_auto_processing = True
-        self.monitor_interval = 0.2
+        self.monitor_interval = 0.5  # 0.2秒から0.5秒に変更（CPU負荷軽減）
         
         # 前回の状態を保持
         self.previous_status = None
@@ -46,6 +49,24 @@ class CTIStatusMonitor:
         # ログ出力の制御用
         self.last_log_time = datetime.now()
         self.log_interval = timedelta(minutes=1)  # ログ出力の間隔（1分）
+        
+        # アクションボタン監視用
+        self.action_buttons = ["NG", "次", "留守", "担当者不在"]
+        self.previous_button_states = {}
+        
+        # 通話時間監視用
+        self.call_start_time = None
+        self.call_duration_threshold = 0  # デフォルト値（設定で変更可能）
+    
+    def set_call_duration_threshold(self, threshold_seconds):
+        """
+        通話時間閾値を設定
+        
+        Args:
+            threshold_seconds (int): 閾値（秒）
+        """
+        self.call_duration_threshold = threshold_seconds
+        logging.info(f"通話時間閾値を{threshold_seconds}秒に設定しました")
     
     def start_monitoring(self):
         """CTI状態監視を開始"""
@@ -76,12 +97,26 @@ class CTIStatusMonitor:
                         current_status == "talking" and
                         self.on_dialing_to_talking_callback and
                         self.enable_auto_processing):
-                        self.on_dialing_to_talking_callback()
+                        
+                        # 通話開始時間を記録
+                        self.call_start_time = datetime.now()
+                        
+                        # 通話時間閾値をチェック
+                        if self.call_duration_threshold > 0:
+                            # 指定秒数待機してから自動処理を実行
+                            threading.Timer(
+                                self.call_duration_threshold,
+                                self._check_and_execute_auto_processing
+                            ).start()
+                        else:
+                            # 即座に自動処理を実行
+                            self.on_dialing_to_talking_callback()
                     
                     # 通話中→待ち受け中（通話終了）の状態変化を検出
                     elif (self.previous_status == "talking" and
                           current_status == "waiting" and
                           self.on_call_ended_callback):
+                        self.call_start_time = None  # 通話時間をリセット
                         self.on_call_ended_callback()
                 
                 # 通話中状態の開始を検出
@@ -89,6 +124,9 @@ class CTIStatusMonitor:
                     self.previous_status != "talking" and
                     self.on_talking_started_callback):
                     self.on_talking_started_callback()
+                
+                # アクションボタンの状態をチェック
+                self._check_action_buttons()
                 
                 # 状態を更新
                 self.previous_status = current_status
@@ -98,6 +136,69 @@ class CTIStatusMonitor:
             
             # 監視間隔分スリープ
             time.sleep(self.monitor_interval)
+    
+    def _check_and_execute_auto_processing(self):
+        """
+        通話時間閾値後の自動処理実行チェック
+        """
+        try:
+            # 現在も通話中かチェック
+            current_status = self.cti_service.get_status()
+            if current_status == "talking" and self.call_start_time:
+                # 通話時間を計算
+                call_duration = (datetime.now() - self.call_start_time).total_seconds()
+                if call_duration >= self.call_duration_threshold:
+                    logging.info(f"★★★ 通話時間{call_duration:.1f}秒が閾値{self.call_duration_threshold}秒を超えたため自動処理を実行 ★★★")
+                    if self.on_dialing_to_talking_callback:
+                        self.on_dialing_to_talking_callback()
+                else:
+                    logging.info(f"通話時間{call_duration:.1f}秒が閾値{self.call_duration_threshold}秒未満のため自動処理をスキップ")
+            else:
+                logging.info("通話が既に終了しているため自動処理をスキップ")
+        except Exception as e:
+            logging.error(f"自動処理実行チェック中にエラー: {str(e)}")
+    
+    def _check_action_buttons(self):
+        """
+        アクションボタンの状態をチェックし、クリックを検出
+        """
+        try:
+            for button_name in self.action_buttons:
+                current_state = self._get_button_state(button_name)
+                previous_state = self.previous_button_states.get(button_name, False)
+                
+                # ボタンがクリックされた（False→True）を検出
+                if current_state and not previous_state:
+                    logging.info(f"★★★ 「{button_name}」ボタンクリックを検出 ★★★")
+                    if self.on_cancel_processing_callback:
+                        logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
+                        self.on_cancel_processing_callback()
+                    else:
+                        logging.warning("MainWindowのキャンセルコールバックが設定されていません")
+                
+                # 状態を更新
+                self.previous_button_states[button_name] = current_state
+                
+        except Exception as e:
+            logging.error(f"アクションボタン監視中にエラー: {str(e)}")
+    
+    def _get_button_state(self, button_name):
+        """
+        指定されたボタンの状態を取得
+        
+        Args:
+            button_name (str): ボタン名
+            
+        Returns:
+            bool: ボタンが押されている状態ならTrue
+        """
+        try:
+            # CTIサービスからボタン状態を取得
+            # 実際の実装では、CTIシステムのAPIやウィンドウ監視を使用
+            return self.cti_service.is_button_pressed(button_name)
+        except Exception as e:
+            logging.debug(f"ボタン状態取得中にエラー ({button_name}): {str(e)}")
+            return False
 
     def find_cti_window(self) -> bool:
         """CTIメインウィンドウを検索"""
