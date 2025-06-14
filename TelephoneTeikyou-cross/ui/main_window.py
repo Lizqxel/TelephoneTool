@@ -254,11 +254,7 @@ class MainWindow(QMainWindow):
                 logging.info(f"- 自動処理設定を反映: {cti_auto_processing_enabled}")
                 
                 # CTI自動処理用のシグナル・スロット接続（CTI監視開始前に設定）
-                try:
-                    self.trigger_auto_search.disconnect()
-                except:
-                    pass
-                self.trigger_auto_search.connect(self.auto_search_service_area, Qt.ConnectionType.QueuedConnection)
+                self._setup_auto_search_signal_connection()
                 logging.info("- trigger_auto_search シグナル・スロット接続を設定しました（QueuedConnection使用）")
                 
                 # 接続状態を確認
@@ -1402,11 +1398,7 @@ class MainWindow(QMainWindow):
                     self.cti_status_monitor.set_call_duration_threshold(call_duration_threshold)
                     
                     # シグナル・スロット接続を設定（apply_cti_settingsでも必要）
-                    try:
-                        self.trigger_auto_search.disconnect()
-                    except:
-                        pass
-                    self.trigger_auto_search.connect(self.auto_search_service_area, Qt.ConnectionType.QueuedConnection)
+                    self._setup_auto_search_signal_connection()
                     logging.info("- trigger_auto_search シグナル・スロット接続を設定しました（apply_cti_settings内）")
                     
                 if not self.cti_status_monitor.is_monitoring:
@@ -1483,6 +1475,9 @@ class MainWindow(QMainWindow):
             logging.info("★★★★★ auto_search_service_area が呼び出されました ★★★★★")
             logging.info("★★★★★ シグナル・スロット接続が正常に動作しています ★★★★★")
             
+            # 自動処理フラグをリセット（処理開始時）
+            self.is_auto_processing = False
+            
             # 入力データの確認
             postal_code = self.postal_code_input.text().strip()
             address = self.address_input.text().strip()
@@ -1495,13 +1490,18 @@ class MainWindow(QMainWindow):
             
             # UIボタン経由で検索を実行（手動実行と完全に統一）
             if hasattr(self, 'area_search_btn') and self.area_search_btn.isEnabled():
-                logging.info("提供エリア検索ボタンをプログラム的にクリックします")
+                logging.info("★★★ 提供エリア検索ボタンをプログラム的にクリックします ★★★")
                 self.area_search_btn.click()
+                logging.info("★★★ 自動提供判定検索が正常に開始されました ★★★")
             else:
-                logging.warning("提供エリア検索ボタンが無効のため、自動検索をスキップします")
+                button_text = self.area_search_btn.text() if hasattr(self, 'area_search_btn') else "不明"
+                button_enabled = self.area_search_btn.isEnabled() if hasattr(self, 'area_search_btn') else False
+                logging.warning(f"提供エリア検索ボタンが無効のため、自動検索をスキップします - ボタン状態: '{button_text}' (有効: {button_enabled})")
                 
         except Exception as e:
             logging.error(f"自動提供判定検索中にエラー: {str(e)}")
+            # エラー時も自動処理フラグをリセット
+            self.is_auto_processing = False
     
     def force_reset_processing(self):
         """
@@ -1687,6 +1687,33 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logging.error(f"復旧ボタン非表示中にエラー: {str(e)}")
 
+    def _setup_auto_search_signal_connection(self):
+        """
+        auto_search用のシグナル・スロット接続を安全に設定する
+        """
+        try:
+            # 既存の接続を安全に切断
+            try:
+                # 接続されているかチェック
+                if hasattr(self.trigger_auto_search, 'disconnect'):
+                    self.trigger_auto_search.disconnect()
+            except RuntimeError:
+                # 既に切断されている場合は無視
+                pass
+            except Exception as e:
+                logging.debug(f"シグナル切断時の警告（無視可能）: {str(e)}")
+            
+            # 新しい接続を設定
+            self.trigger_auto_search.connect(
+                self.auto_search_service_area, 
+                Qt.ConnectionType.QueuedConnection
+            )
+            
+            logging.info("★★★ シグナル・スロット接続を安全に設定しました ★★★")
+            
+        except Exception as e:
+            logging.error(f"シグナル・スロット接続設定中にエラー: {str(e)}")
+    
     def _test_signal_connection(self):
         """
         シグナル・スロット接続をテストする
