@@ -150,7 +150,7 @@ class ServiceAreaSearchWorker(QObject):
 class MainWindow(QMainWindow):
     """メインウィンドウクラス"""
     
-    # カスタムシグナルを追加
+    # カスタムシグナルを追加（PySide6では型を明示的に指定）
     trigger_service_area_search = Signal()
     trigger_auto_search = Signal()
     
@@ -253,16 +253,25 @@ class MainWindow(QMainWindow):
                 self.cti_status_monitor.enable_auto_processing = cti_auto_processing_enabled
                 logging.info(f"- 自動処理設定を反映: {cti_auto_processing_enabled}")
                 
-                self.cti_status_monitor.start_monitoring()
-                logging.info("CTI状態監視を開始しました")
-                
-                # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
+                # CTI自動処理用のシグナル・スロット接続（CTI監視開始前に設定）
                 try:
                     self.trigger_auto_search.disconnect()
                 except:
                     pass
-                self.trigger_auto_search.connect(self.auto_search_service_area)
-                logging.info("- trigger_auto_search シグナル・スロット接続を設定しました")
+                self.trigger_auto_search.connect(self.auto_search_service_area, Qt.ConnectionType.QueuedConnection)
+                logging.info("- trigger_auto_search シグナル・スロット接続を設定しました（QueuedConnection使用）")
+                
+                # 接続状態を確認
+                try:
+                    # テスト用のシグナル発行
+                    logging.info("★★★ シグナル・スロット接続テストを実行します ★★★")
+                    QTimer.singleShot(100, lambda: self._test_signal_connection())
+                except Exception as e:
+                    logging.error(f"シグナル・スロット接続テスト中にエラー: {str(e)}")
+                
+                # シグナル・スロット接続完了後にCTI監視を開始
+                self.cti_status_monitor.start_monitoring()
+                logging.info("CTI状態監視を開始しました")
         else:
             logging.info("CTI監視が設定で無効になっています")
             self.cti_status_monitor = None
@@ -1346,7 +1355,8 @@ class MainWindow(QMainWindow):
                     
                     # 自動検索シグナルを発行
                     logging.info("★★★ trigger_auto_search.emit() を実行します ★★★")
-                    self.trigger_auto_search.emit()
+                    # メインスレッドでシグナルを発行するためにQTimer.singleShotを使用
+                    QTimer.singleShot(0, lambda: self.trigger_auto_search.emit())
                     logging.info("★★★ trigger_auto_search.emit() を実行しました ★★★")
                 else:
                     logging.warning("CTIデータの取得に失敗しました")
@@ -1668,3 +1678,14 @@ class MainWindow(QMainWindow):
                 self.recovery_buttons_widget.setVisible(False)
         except Exception as e:
             logging.error(f"復旧ボタン非表示中にエラー: {str(e)}")
+
+    def _test_signal_connection(self):
+        """
+        シグナル・スロット接続をテストする
+        """
+        try:
+            logging.info("★★★ シグナル・スロット接続テスト開始 ★★★")
+            self.trigger_auto_search.emit()
+            logging.info("★★★ テスト用シグナルを発行しました ★★★")
+        except Exception as e:
+            logging.error(f"シグナル・スロット接続テスト中にエラー: {str(e)}")
