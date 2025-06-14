@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import os
+import traceback
 
 class CTIStatus(Enum):
     """CTI状態の列挙型"""
@@ -292,41 +293,57 @@ class CTIStatusMonitor:
             
     def _check_status_change(self):
         """
-        CTI状態の変化を検出し、適切なコールバックを呼び出す
+        CTI状態の変化をチェック
         """
         try:
-            # 現在のCTI状態を取得
-            current_status = self.get_current_status()
-            
-            # 状態が変化した場合
-            if current_status != self.current_status:
-                logging.info(f"CTI状態が変化: {self.current_status} → {current_status}")
+            # ウィンドウハンドルの確認と再検出
+            if not self.window_handle or not win32gui.IsWindow(self.window_handle):
+                # ウィンドウが無効になった場合、再検出を試行
+                if self.find_cti_window():
+                    logging.info("CTIウィンドウを再検出しました")
+                else:
+                    # デバッグレベルでログ出力（頻繁な出力を避ける）
+                    logging.debug("CTIウィンドウが見つかりません")
+                    return
+                    
+            # 状態表示コントロールの確認と再検出
+            if not self.status_text_handle:
+                if self.find_status_text_control():
+                    logging.info("CTI状態表示コントロールを再検出しました")
+                else:
+                    logging.debug("CTI状態表示コントロールが見つかりません")
+                    return
+                    
+            # 状態テキストを取得して状態判定
+            try:
+                status_text = win32gui.GetWindowText(self.status_text_handle).strip()
                 
-                # 発信中→通話中への変化を検出
-                if self.current_status == CTIStatus.DIALING and current_status == CTIStatus.TALKING:
-                    logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
-                    self.talking_start_time = time.time()
-                    if self.on_dialing_to_talking_callback:
-                        self.on_dialing_to_talking_callback()
+                if not status_text:
+                    return
                 
-                # 通話中→待ち受け中への変化を検出（通話終了）
-                elif self.current_status == CTIStatus.TALKING and current_status == CTIStatus.WAITING:
-                    logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
-                    # 提供判定が実行中でない場合のみフラグをリセット
-                    if not self.is_processing:
-                        logging.info("通話終了により処理中フラグをリセットしました")
-                        self.is_processing = False
-                    if self.on_call_ended_callback:
-                        self.on_call_ended_callback()
-                    logging.info("★★★ 通話終了を検出: 2秒後に電話ボタン監視を再開します ★★★")
-                    time.sleep(2)  # 2秒待機
-                    self.find_action_buttons()
-                
-                # 状態を更新
-                self.current_status = current_status
+                # テキストから状態を判定
+                if status_text == "待ち受け中":
+                    new_status = CTIStatus.WAITING
+                elif status_text == "発信中":
+                    new_status = CTIStatus.DIALING
+                elif status_text == "通話中":
+                    new_status = CTIStatus.TALKING
+                else:
+                    new_status = CTIStatus.UNKNOWN
+                    
+                # 状態変化を検出
+                self._detect_status_change(new_status)
+                    
+            except win32gui.error as e:
+                # Win32 APIエラーの場合、コントロールハンドルをクリア
+                logging.debug(f"状態テキスト取得でWin32エラー: {str(e)}")
+                self.status_text_handle = None
+            except Exception as e:
+                logging.debug(f"状態テキスト取得中にエラー: {str(e)}")
                 
         except Exception as e:
-            logging.error(f"CTI状態変化検出中にエラー: {str(e)}")
+            # 重要なエラーのみINFOレベルで出力
+            logging.info(f"CTI状態チェック中にエラーが発生: {str(e)}")
     
     def _handle_dialing_to_talking(self):
         """発信中→通話中の変化時の処理"""
@@ -372,43 +389,82 @@ class CTIStatusMonitor:
         self.enable_auto_processing = enabled
         logging.info(f"CTI自動処理を{'有効' if enabled else '無効'}にしました")
         
-    def _detect_status_change(self):
+    def _detect_status_change(self, new_status: CTIStatus):
         """
-        CTI状態の変化を検出し、適切なコールバックを呼び出す
+        状態変化を検出し、必要に応じてコールバックを実行
+        
+        Args:
+            new_status: 新しい状態
         """
         try:
-            # 現在のCTI状態を取得
-            current_status = self.get_current_status()
+            current_time = time.time()
             
-            # 状態が変化した場合
-            if current_status != self.current_status:
-                logging.info(f"CTI状態が変化: {self.current_status} → {current_status}")
+            # 状態が変化した場合のみ処理
+            if new_status != self.current_status:
+                previous_status = self.current_status
+                self.current_status = new_status
                 
-                # 発信中→通話中への変化を検出
-                if self.current_status == CTIStatus.DIALING and current_status == CTIStatus.TALKING:
-                    logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
-                    self.talking_start_time = time.time()
-                    if self.on_dialing_to_talking_callback:
-                        self.on_dialing_to_talking_callback()
+                logging.info(f"CTI状態が変化: {previous_status.value} → {new_status.value}")
                 
-                # 通話中→待ち受け中への変化を検出（通話終了）
-                elif self.current_status == CTIStatus.TALKING and current_status == CTIStatus.WAITING:
+                # 通話中状態への遷移を検出
+                if new_status == CTIStatus.TALKING:
+                    logging.info("★★★ 通話中状態を検出 ★★★")
+                    # 通話開始時刻を記録
+                    self.talking_start_time = current_time
+                    if self.on_talking_started_callback:
+                        try:
+                            self.on_talking_started_callback()
+                        except Exception as e:
+                            logging.error(f"通話中状態開始コールバックの実行中にエラー: {str(e)}")
+                
+                # 通話終了の検出（通話中 → 待ち受け中）
+                if (previous_status == CTIStatus.TALKING and 
+                    new_status == CTIStatus.WAITING):
                     logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
-                    # 提供判定が実行中でない場合のみフラグをリセット
-                    if not self.is_processing:
-                        logging.info("通話終了により処理中フラグをリセットしました")
-                        self.is_processing = False
+                    # 処理中フラグをリセット（通話終了により新しい電話に備える）
+                    self.is_processing = False
+                    logging.info("通話終了により処理中フラグをリセットしました")
+                    
+                    # 通話終了コールバックを実行
                     if self.on_call_ended_callback:
-                        self.on_call_ended_callback()
-                    logging.info("★★★ 通話終了を検出: 2秒後に電話ボタン監視を再開します ★★★")
-                    time.sleep(2)  # 2秒待機
-                    self.find_action_buttons()
+                        try:
+                            self.on_call_ended_callback()
+                        except Exception as e:
+                            logging.error(f"通話終了コールバックの実行中にエラー: {str(e)}")
                 
-                # 状態を更新
-                self.current_status = current_status
+                # 発信中→通話中の変化を検出（厳密な条件チェック付き）
+                elif (previous_status == CTIStatus.DIALING and 
+                      new_status == CTIStatus.TALKING):
+                    
+                    # 重複実行防止チェック
+                    if self._should_trigger_auto_processing(current_time):
+                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                        
+                        # 通話時間の閾値が0秒の場合は即時実行
+                        if self.call_duration_threshold == 0:
+                            logging.info("通話時間閾値が0秒のため、即時実行します")
+                            self._trigger_auto_processing()
+                        else:
+                            logging.info(f"通話時間閾値（{self.call_duration_threshold}秒）を待機します")
+                            # 通話開始時刻を記録
+                            self.talking_start_time = current_time
+                            # 一定時間後に自動処理を実行
+                            threading.Timer(self.call_duration_threshold, self._check_and_trigger_auto_processing).start()
+                    else:
+                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                        logging.info("重複実行防止により自動処理をスキップしました")
                 
+                # 不正な状態変化パターンの検出と警告
+                elif (previous_status == CTIStatus.UNKNOWN and 
+                      new_status == CTIStatus.TALKING):
+                    logging.warning("不正な状態変化を検出: 不明 → 通話中（処理をスキップ）")
+                elif (previous_status == CTIStatus.WAITING and 
+                      new_status == CTIStatus.TALKING):
+                    logging.warning("待ち受け中から直接通話中への変化を検出（発信中を経由していない可能性）")
+                    # この場合は自動処理を実行しない
+                        
         except Exception as e:
-            logging.error(f"CTI状態変化検出中にエラー: {str(e)}")
+            logging.error(f"状態変化検出中にエラーが発生: {str(e)}")
     
     def _should_trigger_auto_processing(self, current_time: float) -> bool:
         """
@@ -548,64 +604,101 @@ class CTIStatusMonitor:
 
     def _check_action_button_click(self):
         """
-        アクションボタン（次、留守、担当者不在、NG）のクリックを検出
+        アクションボタン（「次」「留守」「担当者不在」「NG」）のクリックをチェック
         """
         try:
-            # マウスの現在位置を取得
-            x, y = win32api.GetCursorPos()
+            # ボタンの再検出が必要な場合
+            if not any([
+                self.next_button_handle,
+                self.rusu_button_handle,
+                self.tantou_fuzai_button_handle,
+                self.ng_button_handle
+            ]):
+                if not self.find_action_buttons():
+                    return
             
-            # 各ボタンの位置を確認
-            for button_name, button_info in self.action_buttons.items():
-                if button_info['handle']:
-                    rect = button_info['rect']
-                    # マウスがボタンの領域内にあるか確認
-                    if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                        # クリックを検出
-                        logging.info(f"★★★ 「{button_name}」ボタンがクリックされました ★★★")
+            # マウスクリックをチェック
+            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+                current_time = time.time()
+                # 連続クリックを防ぐ
+                if current_time - self.last_button_click_time >= self.button_click_interval:
+                    # マウス座標を取得
+                    x, y = win32api.GetCursorPos()
+                    
+                    # 各ボタンの位置をチェック
+                    clicked_button = None
+                    button_rect = None
+                    
+                    if self.next_button_handle:
+                        rect = win32gui.GetWindowRect(self.next_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "次"
+                            button_rect = rect
+                            
+                    if self.rusu_button_handle:
+                        rect = win32gui.GetWindowRect(self.rusu_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "留守"
+                            button_rect = rect
+                            
+                    if self.tantou_fuzai_button_handle:
+                        rect = win32gui.GetWindowRect(self.tantou_fuzai_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "担当者不在"
+                            button_rect = rect
+                            
+                    if self.ng_button_handle:
+                        rect = win32gui.GetWindowRect(self.ng_button_handle)
+                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                            clicked_button = "NG"
+                            button_rect = rect
+                    
+                    if clicked_button:
+                        logging.info(f"★★★ 「{clicked_button}」ボタンがクリックされました ★★★")
                         logging.info(f"- クリック時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
                         logging.info(f"- マウス座標: x={x}, y={y}")
-                        logging.info(f"- ボタン位置: left={rect[0]}, top={rect[1]}, right={rect[2]}, bottom={rect[3]}")
-                        logging.info(f"- 現在のCTI状態: {self.current_status}")
+                        logging.info(f"- ボタン位置: left={button_rect[0]}, top={button_rect[1]}, right={button_rect[2]}, bottom={button_rect[3]}")
+                        logging.info(f"- 現在のCTI状態: {self.current_status.value}")
                         logging.info(f"- 提供判定状態: {'実行中' if self.is_processing else '未実行'}")
                         
-                        # 提供判定が実行中の場合、キャンセル処理を実行
-                        if self.is_processing:
-                            self._cancel_processing(button_name)
-                        return True
-            return False
-            
+                        self.last_button_click_time = current_time
+                        
+                        # 提供判定をキャンセル
+                        self._cancel_processing(clicked_button)
+                        
         except Exception as e:
-            logging.error(f"アクションボタンクリック検出中にエラー: {str(e)}")
-            return False
+            logging.error(f"アクションボタンクリックの検出中にエラー: {str(e)}")
 
-    def _cancel_processing(self, button_name):
+    def _cancel_processing(self, button_name: str):
         """
-        提供判定をキャンセルする
+        提供判定をキャンセル
+        
+        Args:
+            button_name: クリックされたボタンの名前
         """
         try:
             with self.processing_lock:
                 if self.is_processing:
-                    logging.info(f"★★★ 提供判定をキャンセルします（{button_name}ボタンクリック）★★★")
-                    logging.info(f"- キャンセル時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                    logging.info(f"- 現在のCTI状態: {self.current_status}")
-                    logging.info(f"- 通話開始からの経過時間: {time.time() - self.talking_start_time:.2f}秒")
-                    
-                    # 提供判定の実行状態をリセット
                     self.is_processing = False
+                    logging.info(f"★★★ 「{button_name}」ボタンクリックにより提供判定をキャンセルしました ★★★")
+                    logging.info(f"- キャンセル時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    logging.info(f"- キャンセル時のCTI状態: {self.current_status.value}")
+                    if self.talking_start_time > 0:
+                        logging.info(f"- 通話開始からの経過時間: {time.time() - self.talking_start_time:.1f}秒")
                     
-                    # 通話開始時間をリセット
-                    self.talking_start_time = None
-                    
-                    logging.info("提供判定のキャンセルが完了しました")
+                    # 通話開始時刻をリセット
+                    self.talking_start_time = 0
+                    logging.info("- 通話開始時刻をリセットしました")
                     
         except Exception as e:
             logging.error(f"提供判定のキャンセル中にエラー: {str(e)}")
-            # エラー時も確実にフラグをリセット
-            self.is_processing = False
+            # エラー時も強制的にリセット
+            with self.processing_lock:
+                self.is_processing = False
 
     def find_action_buttons(self) -> bool:
         """
-        アクションボタン（次、留守、担当者不在、NG）を検索
+        アクションボタン（「次」「留守」「担当者不在」「NG」）を検索
         
         Returns:
             bool: いずれかのボタンが見つかった場合True
@@ -671,3 +764,46 @@ class CTIStatusMonitor:
         except Exception as e:
             logging.error(f"アクションボタンの検索中にエラー: {str(e)}")
             return False 
+
+    def _check_cti_status(self):
+        """CTIの状態を監視し、状態変化を検出する"""
+        try:
+            # CTIの状態を取得
+            current_status = self.get_current_status()
+            
+            # 状態が変化した場合
+            if current_status != self.current_status:
+                logging.info(f"CTI状態が変化: {self.current_status} → {current_status}")
+                
+                # 通話終了を検出
+                if self.current_status == "通話中" and current_status == "待ち受け中":
+                    logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
+                    
+                    # 提供判定が実行中でない場合のみフラグをリセット
+                    if not self.is_processing:
+                        logging.info("通話終了により処理中フラグをリセットしました")
+                        self.talking_start_time = 0
+                    
+                    # 電話ボタン監視を再開
+                    logging.info("★★★ 通話終了を検出: 2秒後に電話ボタン監視を再開します ★★★")
+                    threading.Timer(2.0, self._start_phone_button_monitoring).start()
+                
+                # 状態を更新
+                self.current_status = current_status
+                
+                # 状態変化時のコールバックを実行
+                if current_status == "待ち受け中" and self.on_call_ended_callback:
+                    self.on_call_ended_callback()
+                elif current_status == "通話中" and self.on_talking_started_callback:
+                    self.on_talking_started_callback()
+                elif current_status == "発信中" and self.on_dialing_to_talking_callback:
+                    self.on_dialing_to_talking_callback()
+                
+                # 通話開始を検出
+                if current_status == "通話中" and self.current_status == "発信中":
+                    logging.info("★★★ 通話開始を検出: 発信中 → 通話中 ★★★")
+                    self._handle_dialing_to_talking()
+                
+        except Exception as e:
+            logging.error(f"CTI状態監視中にエラーが発生: {str(e)}")
+            logging.error(traceback.format_exc()) 
