@@ -123,15 +123,17 @@ class CTIStatusMonitor:
                 with open("settings.json", 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     self.enable_auto_processing = settings.get('enable_auto_cti_processing', True)
-                    self.monitor_interval = settings.get('cti_monitor_interval', 0.2)
+                    self.monitor_interval = settings.get('cti_monitor_interval', 0.5)
                     self.call_duration_threshold = settings.get('call_duration_threshold', 0)
             else:
                 self.enable_auto_processing = True
-                self.monitor_interval = 0.2
+                self.monitor_interval = 0.5
+                self.call_duration_threshold = 0
         except Exception as e:
             logging.error(f"CTI監視設定の読み込みに失敗しました: {str(e)}")
             self.enable_auto_processing = True
-            self.monitor_interval = 0.2
+            self.monitor_interval = 0.5
+            self.call_duration_threshold = 0
             
     def update_settings(self):
         """設定を更新する"""

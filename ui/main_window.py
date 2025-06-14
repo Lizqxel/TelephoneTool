@@ -380,8 +380,9 @@ ND：{nd}
                     # CTI監視設定のデフォルト値（オンに設定）
                     'enable_cti_monitoring': True,
                     'enable_auto_cti_processing': True,
-                    'cti_monitor_interval': 0.2,
-                    'cti_auto_processing_cooldown': 3.0
+                    'cti_monitor_interval': 0.5,
+                    'cti_auto_processing_cooldown': 3.0,
+                    'call_duration_threshold': 0
                 })
             
             # 設定ファイルに保存
