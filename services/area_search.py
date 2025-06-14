@@ -36,6 +36,31 @@ from utils.address_utils import split_address, normalize_address
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
+global_cancel_flag = False
+
+def set_cancel_flag(cancel: bool = True):
+    """
+    グローバルなキャンセルフラグを設定
+    
+    Args:
+        cancel: キャンセル状態（True=キャンセル、False=通常）
+    """
+    global global_cancel_flag
+    global_cancel_flag = cancel
+    if cancel:
+        logging.info("★★★ エリア検索のキャンセルフラグが設定されました ★★★")
+    else:
+        logging.info("エリア検索のキャンセルフラグがリセットされました")
+
+def is_cancelled():
+    """
+    キャンセル状態をチェック
+    
+    Returns:
+        bool: キャンセルされている場合True
+    """
+    global global_cancel_flag
+    return global_cancel_flag
 
 def is_east_japan(address):
     """
@@ -591,10 +616,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     """
     global global_driver
     
+    # キャンセルフラグをリセット
+    set_cancel_flag(False)
+    
     # デバッグログ：入力値の確認
     logging.info(f"=== 検索開始 ===")
     logging.info(f"入力郵便番号（変換前）: {postal_code}")
     logging.info(f"入力住所（変換前）: {address}")
+    
+    # キャンセルチェック
+    if is_cancelled():
+        logging.info("検索開始前にキャンセルが検出されました")
+        return {"status": "cancelled", "message": "検索がキャンセルされました"}
     
     # 郵便番号と住所の正規化
     try:
@@ -609,6 +642,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     # 住所を分割
     if progress_callback:
         progress_callback("住所情報を解析中...")
+    
+    # キャンセルチェック
+    if is_cancelled():
+        logging.info("住所分割前にキャンセルが検出されました")
+        return {"status": "cancelled", "message": "検索がキャンセルされました"}
     
     address_parts = split_address(address)
     if not address_parts:
@@ -706,6 +744,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
         except Exception as e:
             logging.error(f"郵便番号入力フィールドの操作に失敗: {str(e)}")
             raise
+        
+        # キャンセルチェック
+        if is_cancelled():
+            logging.info("検索ボタンクリック前にキャンセルが検出されました")
+            return {"status": "cancelled", "message": "検索がキャンセルされました"}
         
         # 3. 検索ボタンを押す
         try:

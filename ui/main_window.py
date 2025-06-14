@@ -217,7 +217,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                 self.cti_status_monitor = CTIStatusMonitor(
                     on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                     on_call_ended_callback=self.on_cti_call_ended,
-                    on_talking_started_callback=self.on_cti_talking_started
+                    on_talking_started_callback=self.on_cti_talking_started,
+                    on_cancel_processing_callback=self.on_cancel_processing_request
                 )
                 self.cti_status_monitor.start_monitoring()
                 logging.info("CTI状態監視を開始しました")
@@ -638,7 +639,8 @@ ND：{nd}
         self.cti_status_monitor = CTIStatusMonitor(
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
             on_call_ended_callback=self.on_cti_call_ended,
-            on_talking_started_callback=self.on_cti_talking_started
+            on_talking_started_callback=self.on_cti_talking_started,
+            on_cancel_processing_callback=self.on_cancel_processing_request
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -2728,6 +2730,110 @@ ND：{nd}
         except Exception as e:
             logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
             QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}")
+
+    def init_cti_monitoring(self):
+        """CTI監視機能を初期化"""
+        try:
+            # CTI状態監視を初期化
+            self.cti_status_monitor = CTIStatusMonitor(
+                on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
+                on_call_ended_callback=self.on_cti_call_ended,
+                on_talking_started_callback=self.on_cti_talking_started,
+                on_cancel_processing_callback=self.on_cancel_processing_request
+            )
+            
+            # CTI監視の有効状態をログ出力
+            logging.info(f"CTI監視: {self.cti_status_monitor.enable_auto_processing}")
+            
+            # フォントサイズを設定
+            self.set_font_size(self.font_size)
+            
+            if self.cti_status_monitor.enable_auto_processing:
+                # CTI状態監視を開始
+                self.cti_status_monitor.start_monitoring()
+            
+        except Exception as e:
+            logging.error(f"CTI監視機能の初期化中にエラー: {str(e)}")
+            # エラーが発生してもアプリケーションを継続
+
+    def on_cancel_processing_request(self, button_name: str):
+        """
+        アクションボタンクリック時の処理キャンセル要求を処理
+        
+        Args:
+            button_name: クリックされたボタンの名前
+        """
+        try:
+            logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
+            
+            # エリア検索のキャンセルフラグを設定
+            try:
+                from services.area_search import set_cancel_flag
+                set_cancel_flag(True)
+                logging.info(f"- エリア検索のキャンセルフラグを設定しました")
+            except ImportError:
+                logging.warning("エリア検索モジュールのインポートに失敗しました")
+            
+            # 現在実行中のワーカーをキャンセル
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.cancel()
+                logging.info(f"- 実行中のワーカーをキャンセルしました")
+            
+            # スレッドもクリーンアップ
+            if hasattr(self, 'thread') and self.thread and self.thread.isRunning():
+                self.thread.quit()
+                self.thread.wait(1000)  # 最大1秒待機
+                logging.info(f"- 実行中のスレッドを終了しました")
+            
+            # 検索ボタンの状態をリセット
+            if hasattr(self, 'area_search_btn'):
+                self.reset_search_button()
+                logging.info(f"- 検索ボタンをリセットしました")
+            
+            # 結果表示をリセット
+            if hasattr(self, 'area_result_label'):
+                self.area_result_label.setText("提供エリア: キャンセルされました")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #F39C12;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #F39C12;
+                    }
+                """)
+                logging.info(f"- 結果表示をリセットしました")
+            
+            # プログレスバーを非表示
+            if hasattr(self, 'progress_bar') and self.progress_bar.isVisible():
+                self.progress_bar.setVisible(False)
+                logging.info(f"- プログレスバーを非表示にしました")
+            
+            # 自動処理フラグをリセット
+            if hasattr(self, 'is_auto_processing'):
+                self.is_auto_processing = False
+                logging.info(f"- 自動処理フラグをリセットしました")
+            
+        except Exception as e:
+            logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
+            
+            # エラー時も基本的なリセットを実行
+            try:
+                if hasattr(self, 'is_auto_processing'):
+                    self.is_auto_processing = False
+                if hasattr(self, 'worker') and self.worker:
+                    self.worker.cancel()
+                if hasattr(self, 'area_search_btn'):
+                    self.reset_search_button()
+                # エラー時もキャンセルフラグを設定
+                try:
+                    from services.area_search import set_cancel_flag
+                    set_cancel_flag(True)
+                except:
+                    pass
+            except Exception as reset_error:
+                logging.error(f"エラー時のリセット処理中にエラー: {str(reset_error)}")
 
 
 class ServiceAreaSearchWorker(QObject):
