@@ -728,14 +728,21 @@ class CTIStatusMonitor:
                     elapsed_time = time.time() - self.talking_start_time
                     logging.info(f"- 処理開始からの経過時間: {elapsed_time:.1f}秒")
                 
-                # 1. MainWindowの検索処理をキャンセル
+                # 1. MainWindowの検索処理をキャンセル（最優先で実行）
                 if self.on_cancel_processing_callback:
                     try:
-                        logging.info("- MainWindowの検索処理キャンセルを実行中...")
+                        logging.info("★★★ MainWindowの検索処理キャンセルを実行中... ★★★")
+                        logging.info(f"- コールバック関数: {self.on_cancel_processing_callback}")
                         self.on_cancel_processing_callback(button_name)
-                        logging.info("- MainWindowの検索処理キャンセルが完了しました")
+                        logging.info("★★★ MainWindowの検索処理キャンセルが完了しました ★★★")
                     except Exception as callback_error:
                         logging.error(f"検索処理キャンセルコールバックの実行中にエラー: {str(callback_error)}")
+                        logging.error(f"エラー詳細: {type(callback_error).__name__}: {str(callback_error)}")
+                        import traceback
+                        logging.error(f"スタックトレース: {traceback.format_exc()}")
+                else:
+                    logging.warning("★★★ MainWindowのキャンセルコールバックが設定されていません ★★★")
+                    logging.warning(f"- on_cancel_processing_callback: {self.on_cancel_processing_callback}")
                 
                 # 2. CTI監視の処理中フラグを確実にリセット
                 self.is_processing = False
@@ -752,16 +759,24 @@ class CTIStatusMonitor:
                     
         except Exception as e:
             logging.error(f"処理キャンセル中にエラーが発生: {str(e)}")
+            logging.error(f"エラー詳細: {type(e).__name__}: {str(e)}")
+            import traceback
+            logging.error(f"スタックトレース: {traceback.format_exc()}")
+            
             # エラー時も確実にフラグをリセット
             try:
                 self.is_processing = False
                 self.talking_start_time = 0
                 logging.info("- エラー発生時もフラグをリセットしました")
+                
                 # エラー時でもMainWindowのキャンセル処理を試行
                 if self.on_cancel_processing_callback:
+                    logging.info("- エラー時にMainWindowキャンセル処理を再試行します")
                     self.on_cancel_processing_callback(button_name)
+                    logging.info("- エラー時のMainWindowキャンセル処理が完了しました")
             except Exception as reset_error:
                 logging.error(f"エラー時のフラグリセット処理でもエラー: {str(reset_error)}")
+                logging.error(f"リセットエラー詳細: {type(reset_error).__name__}: {str(reset_error)}")
 
     def find_action_buttons(self) -> bool:
         """
