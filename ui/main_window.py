@@ -2698,13 +2698,8 @@ ND：{nd}
         try:
             logging.info("2. 提供判定検索の自動実行を開始")
             
-            # 重複実行防止
-            if hasattr(self, 'is_auto_processing') and self.is_auto_processing:
-                logging.warning("自動処理が既に実行中のため、重複実行をスキップします")
-                return
-            
-            # 自動処理フラグを設定
-            self.is_auto_processing = True
+            # CTI自動処理の一部として実行されるため、重複チェックは不要
+            # （既にon_cti_dialing_to_talkingで重複チェック済み）
             
             # 郵便番号と住所の取得
             postal_code = self.postal_code_input.text().strip()
@@ -2712,8 +2707,8 @@ ND：{nd}
             
             if not postal_code or not address:
                 logging.warning("郵便番号または住所が入力されていません")
-                QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
-                self.is_auto_processing = False
+                # 自動処理ではメッセージボックスを表示しない
+                logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")
                 return
             
             # 既存のワーカーとスレッドをクリーンアップ
@@ -2747,17 +2742,12 @@ ND：{nd}
             
             # 検索開始
             self.thread.start()
-            logging.info("CTI自動処理が完了しました")
+            logging.info("提供判定検索を開始しました")
             
         except Exception as e:
             logging.error(f"自動検索処理中にエラーが発生: {str(e)}")
-            self.is_auto_processing = False
             if hasattr(self, 'area_search_btn'):
                 self.reset_search_button()
-        finally:
-            # 提供判定検索が完了したらフラグをリセット
-            self.is_auto_processing = False
-            logging.debug("自動処理フラグをリセットしました")
 
     def on_cti_call_ended(self):
         """通話終了時（通話中→待ち受け中）のコールバック処理"""
