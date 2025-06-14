@@ -2143,8 +2143,17 @@ ND：{nd}
         address = self.address_input.text().strip()
         
         if not postal_code or not address:
-            QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
-            return
+            # CTI自動処理中かどうかを判定
+            is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
+            
+            if is_auto_processing:
+                # 自動処理ではメッセージボックスを表示しない
+                logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")
+                return
+            else:
+                # 手動実行時はメッセージボックスを表示
+                QMessageBox.warning(self, "入力エラー", "郵便番号と住所を入力してください。")
+                return
         
         try:
             # 既存のスレッドとワーカーをクリーンアップ
@@ -2202,10 +2211,18 @@ ND：{nd}
             self.thread.finished.connect(self.thread.deleteLater)
             self.thread.start()
             
+            logging.info("提供判定検索を開始しました（ボタンは赤いキャンセルボタンに変更済み）")
+            
         except Exception as e:
             logging.error(f"検索の開始に失敗: {str(e)}")
             self.reset_search_button()
-            QMessageBox.critical(self, "エラー", f"検索の開始に失敗しました: {str(e)}")
+            
+            # CTI自動処理中かどうかを判定
+            is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
+            
+            if not is_auto_processing:
+                # 手動実行時のみメッセージボックスを表示
+                QMessageBox.critical(self, "エラー", f"検索の開始に失敗しました: {str(e)}")
 
     def cancel_search(self):
         """提供エリア検索をキャンセルする"""
@@ -2698,51 +2715,8 @@ ND：{nd}
         try:
             logging.info("2. 提供判定検索の自動実行を開始")
             
-            # CTI自動処理の一部として実行されるため、重複チェックは不要
-            # （既にon_cti_dialing_to_talkingで重複チェック済み）
-            
-            # 郵便番号と住所の取得
-            postal_code = self.postal_code_input.text().strip()
-            address = self.address_input.text().strip()
-            
-            if not postal_code or not address:
-                logging.warning("郵便番号または住所が入力されていません")
-                # 自動処理ではメッセージボックスを表示しない
-                logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")
-                return
-            
-            # 既存のワーカーとスレッドをクリーンアップ
-            self.cleanup_thread()
-            
-            # 検索ボタンの状態を変更
-            if hasattr(self, 'area_search_btn'):
-                self.area_search_btn.setText("検索中...")
-                self.area_search_btn.setEnabled(False)
-            
-            # プログレスバーを表示
-            if hasattr(self, 'progress_bar'):
-                self.progress_bar.setVisible(True)
-                self.progress_bar.setValue(0)
-            
-            # 新しいスレッドとワーカーを作成
-            self.thread = QThread()
-            self.worker = ServiceAreaSearchWorker(postal_code, address)
-            self.worker.moveToThread(self.thread)
-            
-            # シグナル・スロットの接続
-            self.thread.started.connect(self.worker.run)
-            self.worker.finished.connect(self.on_search_completed)
-            self.worker.progress.connect(self.update_search_progress)
-            self.worker.finished.connect(self.thread.quit)
-            self.worker.finished.connect(self.worker.deleteLater)
-            self.thread.finished.connect(self.thread.deleteLater)
-            
-            # スレッド終了時のクリーンアップ
-            self.thread.finished.connect(lambda: self.cleanup_thread())
-            
-            # 検索開始
-            self.thread.start()
-            logging.info("提供判定検索を開始しました")
+            # 手動実行と同じ処理を使用（ボタン状態変更、キャンセル機能を含む）
+            self.search_service_area()
             
         except Exception as e:
             logging.error(f"自動検索処理中にエラーが発生: {str(e)}")
@@ -2850,58 +2824,49 @@ ND：{nd}
             except ImportError:
                 logging.warning("エリア検索モジュールのインポートに失敗しました")
             
-            # 現在実行中のワーカーをキャンセル
-            if hasattr(self, 'worker') and self.worker:
-                self.worker.cancel()
-                logging.info(f"- 実行中のワーカーをキャンセルしました")
+            # UIキャンセルと同じ処理を実行（統一されたキャンセル処理）
+            if hasattr(self, 'cancel_search'):
+                logging.info(f"- UIキャンセル処理を実行します")
+                self.cancel_search()
+            else:
+                # cancel_searchメソッドが存在しない場合のフォールバック
+                logging.warning("cancel_searchメソッドが見つかりません。直接キャンセル処理を実行します")
+                
+                # ワーカーのキャンセル
+                if hasattr(self, 'worker') and self.worker:
+                    self.worker.cancel()
+                    logging.info(f"- 実行中のワーカーをキャンセルしました")
+                
+                # UI状態を「キャンセル中」に設定（UIキャンセルと同じ）
+                if hasattr(self, 'area_search_btn'):
+                    self.area_search_btn.setEnabled(False)
+                    self.area_search_btn.setText("キャンセル中...")
+                    logging.info(f"- 検索ボタンを「キャンセル中」に設定しました")
+                
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: キャンセル中...")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #F39C12;
+                            border-radius: 4px;
+                            background-color: #FFF3E0;
+                            color: #F39C12;
+                        }
+                    """)
+                    logging.info(f"- 結果表示を「キャンセル中」に設定しました")
             
-            # スレッドもクリーンアップ
-            if hasattr(self, 'thread') and self.thread and self.thread.isRunning():
-                self.thread.quit()
-                self.thread.wait(1000)  # 最大1秒待機
-                logging.info(f"- 実行中のスレッドを終了しました")
-            
-            # 検索ボタンの状態をリセット
-            if hasattr(self, 'area_search_btn'):
-                self.reset_search_button()
-                logging.info(f"- 検索ボタンをリセットしました")
-            
-            # 結果表示をリセット
-            if hasattr(self, 'area_result_label'):
-                self.area_result_label.setText("提供エリア: キャンセルされました")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #F39C12;
-                        border-radius: 4px;
-                        background-color: #FFF3E0;
-                        color: #F39C12;
-                    }
-                """)
-                logging.info(f"- 結果表示をリセットしました")
-            
-            # プログレスバーを非表示
-            if hasattr(self, 'progress_bar') and self.progress_bar.isVisible():
-                self.progress_bar.setVisible(False)
-                logging.info(f"- プログレスバーを非表示にしました")
-            
-            # 自動処理フラグをリセット
-            if hasattr(self, 'is_auto_processing'):
-                self.is_auto_processing = False
-                logging.info(f"- 自動処理フラグをリセットしました")
+            logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました ★★★")
+            logging.info(f"- キャンセル完了はon_search_completedで処理されます")
             
         except Exception as e:
             logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
             
-            # エラー時も基本的なリセットを実行
+            # エラー時も基本的なキャンセルを実行
             try:
-                if hasattr(self, 'is_auto_processing'):
-                    self.is_auto_processing = False
                 if hasattr(self, 'worker') and self.worker:
                     self.worker.cancel()
-                if hasattr(self, 'area_search_btn'):
-                    self.reset_search_button()
                 # エラー時もキャンセルフラグを設定
                 try:
                     from services.area_search import set_cancel_flag
@@ -2909,7 +2874,7 @@ ND：{nd}
                 except:
                     pass
             except Exception as reset_error:
-                logging.error(f"エラー時のリセット処理中にエラー: {str(reset_error)}")
+                logging.error(f"エラー時のキャンセル処理中にエラー: {str(reset_error)}")
 
 
 class ServiceAreaSearchWorker(QObject):
