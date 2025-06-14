@@ -2621,9 +2621,7 @@ ND：{nd}
                     logging.debug("提供判定検索のシグナルを送信しました")
                 except Exception as e:
                     logging.error(f"シグナル送信中にエラー: {str(e)}")
-                finally:
-                    # 処理完了後にフラグをリセット
-                    time.sleep(2.0)  # 2秒後にリセット
+                    # エラー時はフラグをリセット
                     self.is_auto_processing = False
                     logging.debug("自動処理フラグをリセットしました")
                     
@@ -2658,6 +2656,7 @@ ND：{nd}
             # 入力データが不足している場合の処理
             if not postal_code or not address:
                 logging.warning("郵便番号または住所が未入力のため、提供判定検索をスキップしました")
+                self.is_auto_processing = False
                 return
                 
             # 既存の検索メソッドを呼び出し
@@ -2667,30 +2666,10 @@ ND：{nd}
             
         except Exception as e:
             logging.error(f"自動提供判定検索中にエラーが発生: {str(e)}")
-            
-    def closeEvent(self, event):
-        """ウィンドウを閉じる際の処理"""
-        try:
-            # すべてのアクティブな検索スレッドを停止
-            if hasattr(self, 'active_search_threads'):
-                for thread in self.active_search_threads:
-                    if thread and thread.isRunning():
-                        logging.info("アクティブな検索スレッドを停止します")
-                        thread.stop()
-                self.active_search_threads.clear()
-            
-            # 電話ボタン監視を停止
-            if hasattr(self, 'phone_monitor'):
-                self.phone_monitor.stop_monitoring()
-                
-            # CTI状態監視を停止
-            if hasattr(self, 'cti_status_monitor'):
-                self.cti_status_monitor.stop_monitoring()
-                
-            event.accept()
-        except Exception as e:
-            logging.error(f"アプリケーション終了処理中にエラー: {e}")
-            event.accept()
+        finally:
+            # 提供判定検索が完了したらフラグをリセット
+            self.is_auto_processing = False
+            logging.debug("自動処理フラグをリセットしました")
 
     def on_cti_call_ended(self):
         """通話終了時（通話中→待ち受け中）のコールバック処理"""
