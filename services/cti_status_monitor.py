@@ -51,7 +51,8 @@ class CTIStatusMonitor:
     
     def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None,
                  on_call_ended_callback: Optional[Callable] = None,
-                 on_talking_started_callback: Optional[Callable] = None):
+                 on_talking_started_callback: Optional[Callable] = None,
+                 on_cancel_processing_callback: Optional[Callable] = None):
         """
         初期化
         
@@ -59,10 +60,12 @@ class CTIStatusMonitor:
             on_dialing_to_talking_callback: 発信中→通話中の状態変化時のコールバック関数
             on_call_ended_callback: 通話終了時（通話中→待ち受け中）のコールバック関数
             on_talking_started_callback: 通話中状態開始時のコールバック関数
+            on_cancel_processing_callback: アクションボタンクリック時の処理キャンセルコールバック関数
         """
         self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
         self.on_call_ended_callback = on_call_ended_callback
         self.on_talking_started_callback = on_talking_started_callback
+        self.on_cancel_processing_callback = on_cancel_processing_callback
         
         # 状態管理
         self.current_status = CTIStatus.UNKNOWN
@@ -683,8 +686,11 @@ class CTIStatusMonitor:
         """
         try:
             with self.processing_lock:
+                cancel_executed = False
+                
                 if self.is_processing:
                     self.is_processing = False
+                    cancel_executed = True
                     logging.info(f"★★★ 「{button_name}」ボタンクリックにより提供判定をキャンセルしました ★★★")
                     logging.info(f"- キャンセル時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
                     logging.info(f"- キャンセル時のCTI状態: {self.current_status.value}")
@@ -694,6 +700,18 @@ class CTIStatusMonitor:
                     # 通話開始時刻をリセット
                     self.talking_start_time = 0
                     logging.info("- 通話開始時刻をリセットしました")
+                
+                # MainWindowの検索処理もキャンセルするためのコールバック実行
+                if self.on_cancel_processing_callback:
+                    try:
+                        self.on_cancel_processing_callback(button_name)
+                        logging.info(f"- MainWindowの検索処理キャンセルコールバックを実行しました")
+                        cancel_executed = True
+                    except Exception as callback_error:
+                        logging.error(f"検索処理キャンセルコールバックの実行中にエラー: {str(callback_error)}")
+                
+                if not cancel_executed:
+                    logging.info(f"「{button_name}」ボタンクリックを検出しましたが、キャンセル対象の処理は実行中ではありませんでした")
                     
         except Exception as e:
             logging.error(f"提供判定のキャンセル中にエラー: {str(e)}")
