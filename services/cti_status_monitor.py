@@ -566,6 +566,10 @@ class CTIStatusMonitor:
                     return
                     
                 self.is_processing = True
+                logging.info("★★★ 提供判定を開始します ★★★")
+                logging.info(f"- 開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.info(f"- 現在のCTI状態: {self.current_status.value}")
+                
                 self.processing_thread = threading.Thread(
                     target=self._execute_auto_processing,
                     name="AutoProcessingThread"
@@ -575,17 +579,14 @@ class CTIStatusMonitor:
                 
         except Exception as e:
             logging.error(f"提供判定スレッドの起動中にエラー: {str(e)}")
-            self.is_processing = False
+            with self.processing_lock:
+                self.is_processing = False
 
     def _execute_auto_processing(self):
         """
         提供判定を実行
         """
         try:
-            logging.info("★★★ 提供判定を開始します ★★★")
-            logging.info(f"- 開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            logging.info(f"- 現在のCTI状態: {self.current_status.value}")
-            
             # 提供判定の実行
             if self.on_dialing_to_talking_callback:
                 self.on_dialing_to_talking_callback()
@@ -598,6 +599,7 @@ class CTIStatusMonitor:
         finally:
             with self.processing_lock:
                 self.is_processing = False
+                logging.info("提供判定の実行状態をリセットしました")
 
     def _check_action_button_click(self):
         """
@@ -689,6 +691,9 @@ class CTIStatusMonitor:
                     
         except Exception as e:
             logging.error(f"提供判定のキャンセル中にエラー: {str(e)}")
+            # エラー時も強制的にリセット
+            with self.processing_lock:
+                self.is_processing = False
 
     def find_action_buttons(self) -> bool:
         """
