@@ -370,7 +370,7 @@ ND：{nd}
                     'font_size': 9,
                     'delay_seconds': 0,
                     'browser_settings': {
-                        'headless': False,
+                        'headless': True,
                         'disable_images': True,
                         'show_popup': True,
                         'auto_close': True,
