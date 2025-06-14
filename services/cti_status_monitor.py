@@ -603,55 +603,27 @@ class CTIStatusMonitor:
                 logging.info("提供判定の実行状態をリセットしました")
 
     def _check_action_button_click(self):
-        """
-        アクションボタン（「次」「留守」「担当者不在」「NG」）のクリックをチェック
-        """
+        """アクションボタンのクリックを検出"""
         try:
-            # ボタンの再検出が必要な場合
-            if not any([
-                self.next_button_handle,
-                self.rusu_button_handle,
-                self.tantou_fuzai_button_handle,
-                self.ng_button_handle
-            ]):
-                if not self.find_action_buttons():
-                    return
+            current_time = time.time()
             
-            # マウスクリックをチェック
-            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
-                current_time = time.time()
-                # 連続クリックを防ぐ
-                if current_time - self.last_button_click_time >= self.button_click_interval:
-                    # マウス座標を取得
-                    x, y = win32api.GetCursorPos()
-                    
-                    # 各ボタンの位置をチェック
-                    clicked_button = None
-                    button_rect = None
-                    
-                    if self.next_button_handle:
-                        rect = win32gui.GetWindowRect(self.next_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "次"
-                            button_rect = rect
-                            
-                    if self.rusu_button_handle:
-                        rect = win32gui.GetWindowRect(self.rusu_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "留守"
-                            button_rect = rect
-                            
-                    if self.tantou_fuzai_button_handle:
-                        rect = win32gui.GetWindowRect(self.tantou_fuzai_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "担当者不在"
-                            button_rect = rect
-                            
-                    if self.ng_button_handle:
-                        rect = win32gui.GetWindowRect(self.ng_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "NG"
-                            button_rect = rect
+            # クリック間隔チェック
+            if current_time - self.last_button_click_time < self.button_click_interval:
+                return
+                
+            # マウス座標を取得
+            x, y = win32gui.GetCursorPos()
+            
+            # 各ボタンの位置を確認
+            for button_name, rect in [
+                ("次", self.next_button_rect),
+                ("留守", self.rusu_button_rect),
+                ("担当者不在", self.tantousha_button_rect),
+                ("NG", self.ng_button_rect)
+            ]:
+                if rect and self._is_point_in_rect(x, y, rect):
+                    clicked_button = button_name
+                    button_rect = rect
                     
                     if clicked_button:
                         logging.info(f"★★★ 「{clicked_button}」ボタンがクリックされました ★★★")
@@ -659,7 +631,12 @@ class CTIStatusMonitor:
                         logging.info(f"- マウス座標: x={x}, y={y}")
                         logging.info(f"- ボタン位置: left={button_rect[0]}, top={button_rect[1]}, right={button_rect[2]}, bottom={button_rect[3]}")
                         logging.info(f"- 現在のCTI状態: {self.current_status.value}")
-                        logging.info(f"- 提供判定状態: {'実行中' if self.is_processing else '未実行'}")
+                        
+                        # 提供判定の実行状態を確認
+                        is_running = False
+                        with self.processing_lock:
+                            is_running = (self.processing_thread and self.processing_thread.is_alive())
+                        logging.info(f"- 提供判定状態: {'実行中' if is_running else '未実行'}")
                         
                         self.last_button_click_time = current_time
                         
@@ -678,7 +655,9 @@ class CTIStatusMonitor:
         """
         try:
             with self.processing_lock:
-                if self.is_processing:
+                # 提供判定スレッドが実行中か確認
+                is_running = (self.processing_thread and self.processing_thread.is_alive())
+                if is_running:
                     self.is_processing = False
                     logging.info(f"★★★ 「{button_name}」ボタンクリックにより提供判定をキャンセルしました ★★★")
                     logging.info(f"- キャンセル時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
