@@ -232,7 +232,10 @@ class MainWindow(QMainWindow):
         
         # CTI状態監視の初期化と開始（設定に基づいて制御）
         cti_monitoring_enabled = self.settings.get('enable_cti_monitoring', True)
-        logging.info(f"CTI監視設定: {cti_monitoring_enabled}")
+        cti_auto_processing_enabled = self.settings.get('enable_auto_cti_processing', True)
+        logging.info(f"★★★ メイン設定読み込み ★★★")
+        logging.info(f"- CTI監視設定: {cti_monitoring_enabled}")
+        logging.info(f"- CTI自動処理設定: {cti_auto_processing_enabled}")
         
         if cti_monitoring_enabled:
             if not hasattr(self, 'cti_status_monitor') or self.cti_status_monitor is None:
@@ -243,8 +246,12 @@ class MainWindow(QMainWindow):
                     on_cancel_processing_callback=self.on_cancel_processing_request
                 )
                 # 通話時間閾値を設定
-                call_duration_threshold = settings.get('call_duration_threshold', 0)
+                call_duration_threshold = self.settings.get('call_duration_threshold', 0)
                 self.cti_status_monitor.set_call_duration_threshold(call_duration_threshold)
+                
+                # 自動処理設定を反映
+                self.cti_status_monitor.enable_auto_processing = cti_auto_processing_enabled
+                logging.info(f"- 自動処理設定を反映: {cti_auto_processing_enabled}")
                 
                 self.cti_status_monitor.start_monitoring()
                 logging.info("CTI状態監視を開始しました")
@@ -1322,11 +1329,14 @@ class MainWindow(QMainWindow):
     def on_cti_dialing_to_talking(self):
         """発信中→通話中の状態変化時のコールバック処理"""
         try:
+            logging.info("★★★ on_cti_dialing_to_talking コールバックが呼び出されました ★★★")
+            logging.info(f"- 自動処理中フラグ: {self.is_auto_processing}")
+            
             if not self.is_auto_processing:
                 self.is_auto_processing = True
                 # 重要な状態変化なのでINFOレベルで出力
                 logging.info("CTI状態変化検出: 発信中 → 通話中")
-                logging.debug("自動処理を開始します: 顧客情報取得 → 提供判定検索")
+                logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
                 
                 # 顧客情報を取得
                 data = self.cti_service.get_all_fields_data()
@@ -1394,10 +1404,16 @@ class MainWindow(QMainWindow):
             
             # 自動処理の有効/無効を設定
             if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor is not None:
-                self.cti_status_monitor.enable_auto_processing = cti_settings.get('enable_auto_cti_processing', True)
+                auto_processing_enabled = cti_settings.get('enable_auto_cti_processing', True)
+                self.cti_status_monitor.enable_auto_processing = auto_processing_enabled
                 
                 # 監視間隔を設定
-                self.cti_status_monitor.monitor_interval = cti_settings.get('cti_monitor_interval', 0.2)
+                monitor_interval = cti_settings.get('cti_monitor_interval', 0.5)
+                self.cti_status_monitor.monitor_interval = monitor_interval
+                
+                logging.info(f"★★★ CTI監視設定を更新 ★★★")
+                logging.info(f"- 自動処理有効: {auto_processing_enabled}")
+                logging.info(f"- 監視間隔: {monitor_interval}秒")
             
             logging.info("CTI監視設定を適用しました")
             
@@ -1448,7 +1464,7 @@ class MainWindow(QMainWindow):
         自動提供判定検索（UIボタン経由で統一）
         """
         try:
-            logging.info("★★★ 自動提供判定検索を開始します ★★★")
+            logging.info("★★★ auto_search_service_area が呼び出されました ★★★")
             
             # 入力データの確認
             postal_code = self.postal_code_input.text().strip()
