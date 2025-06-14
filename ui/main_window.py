@@ -521,7 +521,8 @@ ND：{nd}
         self.cti_status_monitor = CTIStatusMonitor(
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
             on_call_ended_callback=self.on_cti_call_ended,
-            on_talking_started_callback=self.on_cti_talking_started
+            on_talking_started_callback=self.on_cti_talking_started,
+            on_cancel_processing_callback=self.on_cancel_processing_request
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -1671,7 +1672,8 @@ ND：{nd}
                         self.cti_status_monitor = CTIStatusMonitor(
                             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                             on_call_ended_callback=self.on_cti_call_ended,
-                            on_talking_started_callback=self.on_cti_talking_started
+                            on_talking_started_callback=self.on_cti_talking_started,
+                            on_cancel_processing_callback=self.on_cancel_processing_request
                         )
                         self.cti_status_monitor.start_monitoring()
                         logging.info("CTI状態監視を開始しました")
