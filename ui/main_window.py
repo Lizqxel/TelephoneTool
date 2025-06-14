@@ -2824,20 +2824,32 @@ ND：{nd}
             except ImportError:
                 logging.warning("エリア検索モジュールのインポートに失敗しました")
             
-            # UIキャンセルと同じ処理を実行（統一されたキャンセル処理）
-            if hasattr(self, 'cancel_search'):
-                logging.info(f"- UIキャンセル処理を実行します")
-                self.cancel_search()
+            # UIのキャンセルボタンが存在し、キャンセル状態の場合は直接クリック
+            if (hasattr(self, 'area_search_btn') and 
+                self.area_search_btn.text() == "キャンセル" and 
+                self.area_search_btn.isEnabled()):
+                
+                logging.info(f"- UIキャンセルボタンを直接クリックします")
+                # UIのキャンセルボタンをプログラム的にクリック
+                self.area_search_btn.click()
+                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました（UIボタンクリック） ★★★")
+                
+            elif (hasattr(self, 'area_search_btn') and 
+                  self.area_search_btn.text() == "キャンセル中..."):
+                
+                logging.info(f"- 既にキャンセル処理中です")
+                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル要求を受信しましたが、既にキャンセル中です ★★★")
+                
             else:
-                # cancel_searchメソッドが存在しない場合のフォールバック
-                logging.warning("cancel_searchメソッドが見つかりません。直接キャンセル処理を実行します")
+                # キャンセルボタンが存在しない場合は従来の処理
+                logging.info(f"- UIキャンセルボタンが利用できません。直接キャンセル処理を実行します")
                 
                 # ワーカーのキャンセル
                 if hasattr(self, 'worker') and self.worker:
                     self.worker.cancel()
                     logging.info(f"- 実行中のワーカーをキャンセルしました")
                 
-                # UI状態を「キャンセル中」に設定（UIキャンセルと同じ）
+                # UI状態を「キャンセル中」に設定
                 if hasattr(self, 'area_search_btn'):
                     self.area_search_btn.setEnabled(False)
                     self.area_search_btn.setText("キャンセル中...")
@@ -2856,9 +2868,8 @@ ND：{nd}
                         }
                     """)
                     logging.info(f"- 結果表示を「キャンセル中」に設定しました")
-            
-            logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました ★★★")
-            logging.info(f"- キャンセル完了はon_search_completedで処理されます")
+                
+                logging.info(f"★★★ 「{button_name}」ボタンによるキャンセル処理が完了しました（直接処理） ★★★")
             
         except Exception as e:
             logging.error(f"処理キャンセル要求の処理中にエラー: {str(e)}")
