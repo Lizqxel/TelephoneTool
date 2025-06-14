@@ -1401,6 +1401,14 @@ class MainWindow(QMainWindow):
                     call_duration_threshold = self.settings.get('call_duration_threshold', 0)
                     self.cti_status_monitor.set_call_duration_threshold(call_duration_threshold)
                     
+                    # シグナル・スロット接続を設定（apply_cti_settingsでも必要）
+                    try:
+                        self.trigger_auto_search.disconnect()
+                    except:
+                        pass
+                    self.trigger_auto_search.connect(self.auto_search_service_area, Qt.ConnectionType.QueuedConnection)
+                    logging.info("- trigger_auto_search シグナル・スロット接続を設定しました（apply_cti_settings内）")
+                    
                 if not self.cti_status_monitor.is_monitoring:
                     self.cti_status_monitor.start_monitoring()
                     logging.info("CTI監視を開始しました")
