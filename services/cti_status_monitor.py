@@ -10,6 +10,7 @@ CtiOutboundSysの状態変化（「発信中」→「通話中」）を監視し
 - 発信中から通話中への変化時の自動処理実行
 - 通話中状態への遷移時のイベント通知
 - 通話終了時（通話中→待ち受け中）のイベント通知
+- 「次」ボタンクリックの検出と自動処理のキャンセル
 - エラーハンドリングとログ出力
 
 制限事項：
@@ -69,6 +70,7 @@ class CTIStatusMonitor:
         # ウィンドウハンドル
         self.window_handle = None  # CTIメインウィンドウのハンドル
         self.status_text_handle = None  # 状態表示コントロールのハンドル
+        self.next_button_handle = None  # 「次」ボタンのハンドル
         
         # 監視制御
         self.is_monitoring = False
@@ -90,6 +92,10 @@ class CTIStatusMonitor:
         # 通話時間設定
         self.call_duration_threshold = 0  # 通話時間の閾値（秒）
         self.talking_start_time = 0  # 通話開始時刻
+        
+        # 「次」ボタンクリック検出用
+        self.last_next_button_click_time = 0  # 最後の「次」ボタンクリック時刻
+        self.next_button_click_interval = 0.5  # 「次」ボタンクリック間隔（秒）
         
         # 設定の読み込み
         self.load_settings()
@@ -308,11 +314,15 @@ class CTIStatusMonitor:
                     if self.window_handle and not self.status_text_handle:
                         self.find_status_text_control()
                         
+                    if self.window_handle and not self.next_button_handle:
+                        self.find_next_button()
+                        
                     self.last_window_redetect_time = current_time
                 
                 # 状態チェック間隔を制御
                 if current_time - self.last_detection_time >= self.monitor_interval:
                     self._check_status_change()
+                    self._check_next_button_click()  # 「次」ボタンクリックをチェック
                     self.last_detection_time = current_time
                     
             except Exception as e:
@@ -582,3 +592,96 @@ class CTIStatusMonitor:
                 logging.info(f"通話時間が閾値に達していないため、自動処理をスキップします（経過時間: {elapsed_time:.1f}秒）")
         except Exception as e:
             logging.error(f"通話時間チェック中にエラーが発生: {str(e)}") 
+
+    def find_next_button(self) -> bool:
+        """
+        「次」ボタンを検索
+        
+        Returns:
+            bool: ボタンが見つかった場合True
+        """
+        try:
+            def callback(hwnd, extra):
+                if win32gui.IsWindowVisible(hwnd):
+                    try:
+                        text = win32gui.GetWindowText(hwnd)
+                        if text == "次":
+                            self.next_button_handle = hwnd
+                            rect = win32gui.GetWindowRect(hwnd)
+                            logging.info(f"「次」ボタンを検出: handle={hwnd}, rect={rect}")
+                            return False
+                    except Exception:
+                        pass
+                return True
+            
+            # 既存のハンドルをクリア
+            self.next_button_handle = None
+            
+            # CTIメインウィンドウ内の子ウィンドウを列挙
+            if self.window_handle:
+                win32gui.EnumChildWindows(self.window_handle, callback, None)
+            
+            if self.next_button_handle:
+                logging.info("「次」ボタンの検出に成功しました")
+                return True
+            else:
+                logging.debug("「次」ボタンが見つかりませんでした")
+                return False
+                
+        except Exception as e:
+            logging.error(f"「次」ボタンの検索中にエラー: {str(e)}")
+            return False
+
+    def _check_next_button_click(self):
+        """
+        「次」ボタンのクリックをチェック
+        """
+        try:
+            if not self.next_button_handle or not win32gui.IsWindow(self.next_button_handle):
+                if not self.find_next_button():
+                    return
+            
+            # マウスクリックをチェック
+            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+                current_time = time.time()
+                # 連続クリックを防ぐ
+                if current_time - self.last_next_button_click_time >= self.next_button_click_interval:
+                    # マウス座標を取得
+                    x, y = win32api.GetCursorPos()
+                    
+                    # ボタンの位置を取得
+                    rect = win32gui.GetWindowRect(self.next_button_handle)
+                    if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                        logging.info("★★★ 「次」ボタンがクリックされました ★★★")
+                        logging.info(f"- クリック時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        logging.info(f"- マウス座標: x={x}, y={y}")
+                        logging.info(f"- ボタン位置: left={rect[0]}, top={rect[1]}, right={rect[2]}, bottom={rect[3]}")
+                        logging.info(f"- 現在のCTI状態: {self.current_status.value}")
+                        logging.info(f"- 自動処理状態: {'実行中' if self.is_processing else '未実行'}")
+                        
+                        self.last_next_button_click_time = current_time
+                        
+                        # 自動処理をキャンセル
+                        self._cancel_auto_processing()
+                        
+        except Exception as e:
+            logging.error(f"「次」ボタンクリックの検出中にエラー: {str(e)}")
+
+    def _cancel_auto_processing(self):
+        """
+        自動処理をキャンセル
+        """
+        try:
+            if self.is_processing:
+                self.is_processing = False
+                logging.info("★★★ 自動処理をキャンセルしました ★★★")
+                logging.info(f"- キャンセル時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                logging.info(f"- キャンセル時のCTI状態: {self.current_status.value}")
+                logging.info(f"- 通話開始からの経過時間: {time.time() - self.talking_start_time:.1f}秒")
+                
+                # 通話開始時刻をリセット
+                self.talking_start_time = 0
+                logging.info("- 通話開始時刻をリセットしました")
+                
+        except Exception as e:
+            logging.error(f"自動処理のキャンセル中にエラー: {str(e)}") 
