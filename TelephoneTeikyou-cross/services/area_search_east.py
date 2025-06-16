@@ -560,12 +560,105 @@ def create_driver(headless=False):
         options.add_argument('--disable-notifications')
         options.add_argument('--disable-popup-blocking')
         
-        # メモリ使用量の最適化
+        # 起動時間短縮のための最適化設定
         options.add_argument('--disable-application-cache')
         options.add_argument('--aggressive-cache-discard')
         options.add_argument('--disable-default-apps')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--disable-ipc-flooding-protection')
+        options.add_argument('--disable-component-extensions-with-background-pages')
+        options.add_argument('--disable-background-networking')
+        options.add_argument('--disable-sync')
+        options.add_argument('--disable-web-security')  # セキュリティ機能を無効化（速度優先）
+        options.add_argument('--disable-features=VizDisplayCompositor')  # GPU関連の無効化
+        
+        # さらなる高速化オプション
+        options.add_argument('--disable-blink-features=AutomationControlled')  # 自動化検出を無効化
+        options.add_argument('--disable-dev-tools')  # DevToolsを無効化
+        options.add_argument('--disable-plugins')  # プラグインを無効化
+        options.add_argument('--disable-images')  # 画像読み込みを無効化（速度優先）
+        # JavaScriptは必要なので無効化しない
+        options.add_argument('--disable-css3d')  # CSS3Dを無効化
+        options.add_argument('--disable-webgl')  # WebGLを無効化
+        options.add_argument('--disable-accelerated-2d-canvas')  # 2Dキャンバス加速を無効化
+        options.add_argument('--disable-accelerated-video-decode')  # ビデオデコード加速を無効化
+        options.add_argument('--disable-smooth-scrolling')  # スムーズスクロールを無効化
+        options.add_argument('--disable-threaded-scrolling')  # スレッド化スクロールを無効化
+        options.add_argument('--disable-checker-imaging')  # チェッカーイメージングを無効化
+        options.add_argument('--disable-new-bookmark-apps')  # 新しいブックマークアプリを無効化
+        options.add_argument('--disable-speech-api')  # 音声APIを無効化
+        options.add_argument('--disable-speech-synthesis-api')  # 音声合成APIを無効化
+        options.add_argument('--disable-voice-input')  # 音声入力を無効化
+        options.add_argument('--disable-file-system')  # ファイルシステムAPIを無効化
+        options.add_argument('--disable-presentation-api')  # プレゼンテーションAPIを無効化
+        options.add_argument('--disable-permissions-api')  # 権限APIを無効化
+        options.add_argument('--disable-wake-lock-api')  # ウェイクロックAPIを無効化
+        options.add_argument('--disable-sensor-api')  # センサーAPIを無効化
+        options.add_argument('--no-first-run')  # 初回実行処理をスキップ
+        options.add_argument('--no-service-autorun')  # サービス自動実行を無効化
+        options.add_argument('--password-store=basic')  # パスワードストアを基本に設定
+        options.add_argument('--use-mock-keychain')  # モックキーチェーンを使用
+        options.add_argument('--disable-component-update')  # コンポーネント更新を無効化
+        
+        # ログレベルを下げて処理速度向上
+        options.add_argument('--log-level=3')  # FATALレベルのみ
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # パフォーマンス設定
+        prefs = {
+            'profile.default_content_setting_values': {
+                'images': 2,  # 画像をブロック
+                'plugins': 2,  # プラグインをブロック
+                'popups': 2,  # ポップアップをブロック
+                'geolocation': 2,  # 位置情報をブロック
+                'notifications': 2,  # 通知をブロック
+                'media_stream': 2,  # メディアストリームをブロック
+            },
+            'profile.managed_default_content_settings': {
+                'images': 2  # 画像をブロック
+            }
+        }
+        options.add_experimental_option('prefs', prefs)
+        
+        # ページ読み込み戦略を設定（高速化）
+        options.page_load_strategy = 'eager'  # DOMContentLoadedで完了とする
         
         driver = webdriver.Chrome(options=options)
+        
+        # 追加の高速化設定
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        
+        # ネットワーク最適化
+        driver.execute_cdp_cmd('Network.enable', {})
+        driver.execute_cdp_cmd('Network.setBlockedURLs', {
+            'urls': [
+                '*google-analytics.com*',
+                '*googletagmanager.com*',
+                '*facebook.com*',
+                '*twitter.com*',
+                '*youtube.com*',
+                '*.jpg',
+                '*.jpeg',
+                '*.png',
+                '*.gif',
+                '*.svg',
+                '*.ico',
+                '*.css',
+                '*.woff*',
+                '*.ttf'
+            ]
+        })
+        
+        # DNS事前解決とキャッシュ最適化
+        driver.execute_cdp_cmd('Network.setCacheDisabled', {'cacheDisabled': False})
+        driver.execute_cdp_cmd('Network.setBypassServiceWorker', {'bypass': True})
+        
         logging.info(f"Chromeドライバーを作成しました（ヘッドレスモード: {headless}）")
         
         return driver
@@ -654,74 +747,136 @@ def search_service_area(postal_code, address, progress_callback=None):
     show_popup = browser_settings.get("show_popup", True)
     # ブラウザ自動終了設定を取得
     auto_close = browser_settings.get("auto_close", True)
-    # タイムアウト設定を取得
-    page_load_timeout = browser_settings.get("page_load_timeout", 60)
-    script_timeout = browser_settings.get("script_timeout", 60)
+    # タイムアウト設定を最適化（短縮）
+    page_load_timeout = min(browser_settings.get("page_load_timeout", 30), 30)  # 最大30秒
+    script_timeout = min(browser_settings.get("script_timeout", 20), 20)  # 最大20秒
     
     logging.info(f"ブラウザ設定 - ヘッドレス: {headless_mode}, ポップアップ表示: {show_popup}, 自動終了: {auto_close}")
+    logging.info(f"タイムアウト設定 - ページ読み込み: {page_load_timeout}秒, スクリプト: {script_timeout}秒")
     
     driver = None
     try:
-        # ブラウザを起動
+        # ブラウザを起動（時間計測）
         if progress_callback:
             progress_callback("ブラウザを起動中...")
         
+        browser_start_time = time.time()
         driver = create_driver(
             headless=headless_mode
         )
+        browser_time = time.time() - browser_start_time
+        logging.info(f"ブラウザ起動完了（所要時間: {browser_time:.2f}秒）")
+        
+        # ブラウザ起動後のキャンセルチェック
+        check_cancellation()
         
         # グローバル変数に保存
         global_driver = driver
-         # タイムアウト設定を適用
+        
+        # 最適化されたタイムアウト設定を適用
         driver.set_page_load_timeout(page_load_timeout)
         driver.set_script_timeout(script_timeout)
         
+        # タイムアウト設定後のキャンセルチェック
+        check_cancellation()
+        
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
-        # サイトにアクセス
+        # サイトにアクセス（高速化）
         if progress_callback:
             progress_callback("サイトにアクセス中...")
         
         # キャンセルチェック
         check_cancellation()
         
-        driver.get("https://flets.com/app2/search_c.html")
-        logging.info("サイトにアクセスしました")
+        # 高速アクセスのための事前準備
+        logging.info("NTT東日本サイトへの高速アクセスを開始...")
+        start_time = time.time()
+        
+        # DNS事前解決前のキャンセルチェック
+        check_cancellation()
+        
+        # DNS事前解決（ネットワーク接続高速化）
+        try:
+            driver.execute_cdp_cmd('Runtime.evaluate', {
+                'expression': 'fetch("https://flets.com/favicon.ico", {method: "HEAD", mode: "no-cors"}).catch(() => {})'
+            })
+            logging.info("DNS事前解決を実行しました")
+            
+            # DNS事前解決後のキャンセルチェック
+            check_cancellation()
+            
+        except Exception as e:
+            logging.warning(f"DNS事前解決に失敗しましたが、処理を続行します: {str(e)}")
+        
+        # ページ読み込み戦略を変更（高速化）
+        driver.execute_cdp_cmd('Page.setLifecycleEventsEnabled', {'enabled': True})
+        
+        # サイトアクセス直前のキャンセルチェック
+        check_cancellation()
+        
+        try:
+            driver.get("https://flets.com/app2/search_c.html")
+            access_time = time.time() - start_time
+            logging.info(f"サイトにアクセスしました（所要時間: {access_time:.2f}秒）")
+            
+            # サイトアクセス完了後のキャンセルチェック
+            check_cancellation()
+            
+        except Exception as e:
+            access_time = time.time() - start_time
+            logging.warning(f"初回アクセスに失敗（所要時間: {access_time:.2f}秒）、リトライします: {str(e)}")
+            
+            # リトライ前のキャンセルチェック
+            check_cancellation()
+            
+            # リトライ
+            driver.get("https://flets.com/app2/search_c.html")
+            total_time = time.time() - start_time
+            logging.info(f"リトライでサイトにアクセス成功（総所要時間: {total_time:.2f}秒）")
+            
+            # リトライ成功後のキャンセルチェック
+            check_cancellation()
         
 
         
-        # 郵便番号入力ページが表示されるのを待つ
+        # 郵便番号入力ページが表示されるのを待つ（短縮）
         # 郵便番号入力フィールドが表示されるまで待機
-        WebDriverWait(driver, 10).until(
+        
+        # ページ表示待機前のキャンセルチェック
+        check_cancellation()
+        
+        WebDriverWait(driver, 8).until(
             EC.presence_of_element_located((By.NAME, "FIELD_ZIP1"))
         )
         logging.info("郵便番号入力ページが表示されました")
         
-
+        # ページ表示確認後のキャンセルチェック
+        check_cancellation()
         
         # 郵便番号入力フィールドを探す
         try:
             # キャンセルチェック
             check_cancellation()
             
-            # 郵便番号前半3桁を入力
-            postal_code_first_input = WebDriverWait(driver, 5).until(
+            # 郵便番号前半3桁を入力（短縮）
+            postal_code_first_input = WebDriverWait(driver, 3).until(
                 EC.presence_of_element_located((By.NAME, "FIELD_ZIP1"))
             )
             postal_code_first_input.clear()
             postal_code_first_input.send_keys(postal_code_first)
             logging.info(f"郵便番号前半3桁を入力: {postal_code_first}")
             
-            # 郵便番号後半4桁を入力
-            postal_code_second_input = WebDriverWait(driver, 5).until(
+            # 郵便番号後半4桁を入力（短縮）
+            postal_code_second_input = WebDriverWait(driver, 3).until(
                 EC.presence_of_element_located((By.NAME, "FIELD_ZIP2"))
             )
             postal_code_second_input.clear()
             postal_code_second_input.send_keys(postal_code_second)
             logging.info(f"郵便番号後半4桁を入力: {postal_code_second}")
             
-            # 再検索ボタンをクリック
-            search_button = WebDriverWait(driver, 5).until(
+            # 再検索ボタンをクリック（短縮）
+            search_button = WebDriverWait(driver, 3).until(
                 EC.element_to_be_clickable((By.CLASS_NAME, "cao_submit"))
             )
             search_button.click()
@@ -752,8 +907,8 @@ def search_service_area(postal_code, address, progress_callback=None):
             # キャンセルチェック
             check_cancellation()
             
-            # 住所候補リストが表示されるまで待機
-            WebDriverWait(driver, 10).until(
+            # 住所候補リストが表示されるまで待機（短縮）
+            WebDriverWait(driver, 8).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "btn_list"))
             )
             logging.info("住所候補リストが表示されました")
@@ -791,7 +946,7 @@ def search_service_area(postal_code, address, progress_callback=None):
                     # JavaScriptを使用してクリックを実行
                     driver.execute_script("arguments[0].click();", best_candidate)
                     logging.info("JavaScriptを使用して住所を選択しました")
-                    time.sleep(2)
+                    time.sleep(1)  # 2秒→1秒に短縮
 
                     # 住所選択後の丁目・番地調整処理
                     logging.info(f"選択された住所: {selected_address_text}")
@@ -856,17 +1011,25 @@ def search_service_area(postal_code, address, progress_callback=None):
                             "show_popup": show_popup
                         }
                     
-                    # 番地入力画面への遷移を待機
-                    WebDriverWait(driver, 15).until(
-                        EC.url_contains("/cao/InputAddressNum")
-                    )
-                    logging.info("番地入力画面への遷移を確認しました")
+                    # 番地入力画面への遷移を待機（短縮・キャンセル対応）
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            EC.url_contains("/cao/InputAddressNum")
+                        )
+                        logging.info("番地入力画面への遷移を確認しました")
+                    except TimeoutException:
+                        check_cancellation()  # タイムアウト時にキャンセルチェック
+                        raise
                     
-                    # ページの読み込み完了を待機
-                    WebDriverWait(driver, 20).until(
-                        lambda d: d.execute_script('return document.readyState') == 'complete'
-                    )
-                    logging.info("番地入力ページの読み込みが完了しました")
+                    # ページの読み込み完了を待機（短縮・キャンセル対応）
+                    try:
+                        WebDriverWait(driver, 8).until(  # 12秒→8秒に短縮
+                            lambda d: d.execute_script('return document.readyState') == 'complete'
+                        )
+                        logging.info("番地入力ページの読み込みが完了しました")
+                    except TimeoutException:
+                        check_cancellation()  # タイムアウト時にキャンセルチェック
+                        logging.warning("ページ読み込み完了の待機がタイムアウトしましたが、処理を続行します")
                     
                     if progress_callback:
                         progress_callback("番地を入力中...")
@@ -891,9 +1054,70 @@ def search_service_area(postal_code, address, progress_callback=None):
     except CancellationError as e:
         logging.info("★★★ 提供エリア検索がキャンセルされました ★★★")
         return {"status": "cancelled", "message": "検索がキャンセルされました"}
+    except TimeoutException as e:
+        logging.error(f"タイムアウトエラー: {str(e)}")
+        # タイムアウト時のスクリーンショットを取得
+        if driver:
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                screenshot_path = f"debug_timeout_error_{timestamp}.png"
+                take_full_page_screenshot(driver, screenshot_path)
+                logging.info(f"タイムアウト時のスクリーンショットを保存: {screenshot_path}")
+                return {
+                    "status": "failure", 
+                    "message": "処理がタイムアウトしました", 
+                    "details": {
+                        "判定結果": "判定失敗",
+                        "提供エリア": "判定できませんでした",
+                        "備考": f"処理がタイムアウトしました: {str(e)}"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": False
+                }
+            except:
+                pass
+        return {
+            "status": "failure", 
+            "message": "処理がタイムアウトしました", 
+            "details": {
+                "判定結果": "判定失敗",
+                "提供エリア": "判定できませんでした",
+                "備考": f"処理がタイムアウトしました: {str(e)}"
+            },
+            "show_popup": False
+        }
     except Exception as e:
         logging.error(f"検索処理中にエラー: {str(e)}")
-        return {"status": "error", "message": f"検索処理中にエラーが発生しました: {str(e)}"}
+        # 一般的なエラー時のスクリーンショットを取得
+        if driver:
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                screenshot_path = f"debug_general_error_{timestamp}.png"
+                take_full_page_screenshot(driver, screenshot_path)
+                logging.info(f"エラー時のスクリーンショットを保存: {screenshot_path}")
+                return {
+                    "status": "failure", 
+                    "message": f"検索処理中にエラーが発生しました: {str(e)}", 
+                    "details": {
+                        "判定結果": "判定失敗",
+                        "提供エリア": "判定できませんでした",
+                        "備考": f"検索処理中にエラーが発生しました: {str(e)}"
+                    },
+                    "screenshot": screenshot_path,
+                    "show_popup": False
+                }
+            except:
+                pass
+        return {
+            "status": "failure", 
+            "message": f"検索処理中にエラーが発生しました: {str(e)}", 
+            "details": {
+                "判定結果": "判定失敗",
+                "提供エリア": "判定できませんでした",
+                "備考": f"検索処理中にエラーが発生しました: {str(e)}"
+            },
+            "show_popup": False
+        }
         
     finally:
         # ブラウザを終了
@@ -1483,9 +1707,15 @@ def handle_address_number_selection(driver, address_parts, progress_callback=Non
             else:
                 # 予期しない遷移
                 logging.warning(f"予期しない遷移先: {current_url}")
-                # 10秒待機して再度確認
-                time.sleep(10)
-                current_url = driver.current_url
+                # 短時間の段階的待機で応答性を維持
+                for i in range(10):
+                    check_cancellation()  # キャンセルチェック
+                    time.sleep(1)  # 1秒ずつ待機
+                    if i % 2 == 0:  # 2秒ごとにURL確認
+                        current_url = driver.current_url
+                        if "ProvideResult" in current_url:
+                            break
+                logging.info(f"段階的待機完了後のURL: {current_url}")
                 
                 if "ProvideResult" in current_url:
                     return handle_result_page(driver, show_popup)
@@ -1572,8 +1802,8 @@ def handle_go_selection(driver, address_parts, progress_callback=None, show_popu
             driver.execute_script("arguments[0].click();", button)
             logging.info(f"最初の候補を選択しました: {first_candidate.text}")
         
-        # 号選択後の遷移先を判定
-        time.sleep(2)
+        # 号選択後の遷移先を判定（短縮）
+        time.sleep(1)  # 2秒→1秒に短縮
         current_url = driver.current_url
         logging.info(f"号選択後のURL: {current_url}")
         
