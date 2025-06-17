@@ -102,7 +102,7 @@ class CTIStatusMonitor:
         
         # ボタンクリック検出用
         self.last_button_click_time = 0  # 最後のボタンクリック時刻
-        self.button_click_interval = 0.5  # ボタンクリック間隔（秒）
+        self.button_click_interval = 0.2  # ボタンクリック間隔（秒） - 0.5秒から0.2秒に短縮
         
         # ボタン検出状態
         self.buttons_detected = False  # ボタンが検出済みかどうか
@@ -654,11 +654,15 @@ class CTIStatusMonitor:
                 if not self.find_action_buttons():
                     return
             
-            # マウスクリックをチェック
-            if win32api.GetAsyncKeyState(win32con.VK_LBUTTON) & 0x8000:
+            # マウスクリックをチェック（より精密な検出）
+            # 左クリックの状態を確認（押下中と離した瞬間の両方をチェック）
+            left_button_state = win32api.GetAsyncKeyState(win32con.VK_LBUTTON)
+            
+            # ボタンが押されている状態（0x8000）または押されて離された状態（0x0001）をチェック
+            if (left_button_state & 0x8000) or (left_button_state & 0x0001):
                 current_time = time.time()
-                # 連続クリックを防ぐ
-                if current_time - self.last_button_click_time >= self.button_click_interval:
+                # 連続クリックを防ぐ（間隔を短縮してより敏感に検出）
+                if current_time - self.last_button_click_time >= 0.2:  # 0.5秒から0.2秒に短縮
                     # マウス座標を取得
                     x, y = win32api.GetCursorPos()
                     
@@ -666,29 +670,42 @@ class CTIStatusMonitor:
                     clicked_button = None
                     button_rect = None
                     
-                    if self.next_button_handle:
-                        rect = win32gui.GetWindowRect(self.next_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "次"
-                            button_rect = rect
+                    # ボタンハンドルの有効性を確認してからチェック
+                    if self.next_button_handle and win32gui.IsWindow(self.next_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.next_button_handle)
+                            if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                                clicked_button = "次"
+                                button_rect = rect
+                        except Exception:
+                            self.next_button_handle = None
                             
-                    if self.rusu_button_handle:
-                        rect = win32gui.GetWindowRect(self.rusu_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "留守"
-                            button_rect = rect
+                    if self.rusu_button_handle and win32gui.IsWindow(self.rusu_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.rusu_button_handle)
+                            if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                                clicked_button = "留守"
+                                button_rect = rect
+                        except Exception:
+                            self.rusu_button_handle = None
                             
-                    if self.tantou_fuzai_button_handle:
-                        rect = win32gui.GetWindowRect(self.tantou_fuzai_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "担当者不在"
-                            button_rect = rect
+                    if self.tantou_fuzai_button_handle and win32gui.IsWindow(self.tantou_fuzai_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.tantou_fuzai_button_handle)
+                            if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                                clicked_button = "担当者不在"
+                                button_rect = rect
+                        except Exception:
+                            self.tantou_fuzai_button_handle = None
                             
-                    if self.ng_button_handle:
-                        rect = win32gui.GetWindowRect(self.ng_button_handle)
-                        if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
-                            clicked_button = "NG"
-                            button_rect = rect
+                    if self.ng_button_handle and win32gui.IsWindow(self.ng_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.ng_button_handle)
+                            if (rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]):
+                                clicked_button = "NG"
+                                button_rect = rect
+                        except Exception:
+                            self.ng_button_handle = None
                     
                     if clicked_button:
                         # 提供判定の実行状態を確認

@@ -12,7 +12,7 @@ NTT東日本の提供エリア検索サービス
 - 提供エリア判定
 
 制限事項：
-- キャッシュ機能は使用しません
+- キャンセル機能は使用しません
 - エラー発生時は詳細なログを出力します
 """
 
@@ -34,9 +34,33 @@ from datetime import datetime
 from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
 from utils.address_utils import normalize_address
+from services.area_search import take_full_page_screenshot, check_cancellation, CancellationError
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
+
+# キャンセルフラグ
+global_cancel_flag = False
+
+def set_cancel_flag(value: bool):
+    """
+    グローバルキャンセルフラグを設定
+    
+    Args:
+        value (bool): 設定するキャンセルフラグの値
+    """
+    global global_cancel_flag
+    global_cancel_flag = value
+    logging.info(f"東日本エリア検索のキャンセルフラグを {value} に設定しました")
+
+def get_cancel_flag() -> bool:
+    """
+    グローバルキャンセルフラグを取得
+    
+    Returns:
+        bool: 現在のキャンセルフラグの値
+    """
+    return global_cancel_flag
 
 def split_address(address):
     """
@@ -359,6 +383,9 @@ def search_service_area(postal_code, address, progress_callback=None):
     if progress_callback:
         progress_callback("住所情報を解析中...")
     
+    # キャンセルチェック
+    check_cancellation()
+    
     address_parts = split_address(address)
     if not address_parts:
         logging.error("住所の分割に失敗しました")
@@ -420,11 +447,17 @@ def search_service_area(postal_code, address, progress_callback=None):
             headless=headless_mode
         )
         
+        # ブラウザ起動後のキャンセルチェック
+        check_cancellation()
+        
         # グローバル変数に保存
         global_driver = driver
          # タイムアウト設定を適用
         driver.set_page_load_timeout(page_load_timeout)
         driver.set_script_timeout(script_timeout)
+        
+        # タイムアウト設定後のキャンセルチェック
+        check_cancellation()
         
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
@@ -432,22 +465,38 @@ def search_service_area(postal_code, address, progress_callback=None):
         if progress_callback:
             progress_callback("サイトにアクセス中...")
         
+        # サイトアクセス直前のキャンセルチェック
+        check_cancellation()
+        
         driver.get("https://flets.com/app_new/cao/")
         logging.info("サイトにアクセスしました")
+        
+        # サイトアクセス完了後のキャンセルチェック
+        check_cancellation()
         
 
         
         # 郵便番号入力ページが表示されるのを待つ
         # 郵便番号入力フィールドが表示されるまで待機
+        
+        # ページ表示待機前のキャンセルチェック
+        check_cancellation()
+        
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.ID, "id_address_search_zip1"))
         )
         logging.info("郵便番号入力ページが表示されました")
         
+        # ページ表示確認後のキャンセルチェック
+        check_cancellation()
+        
 
         
         # 郵便番号入力フィールドを探す
         try:
+            # キャンセルチェック
+            check_cancellation()
+            
             # 郵便番号前半3桁を入力
             postal_code_first_input = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.ID, "id_address_search_zip1"))
@@ -492,6 +541,9 @@ def search_service_area(postal_code, address, progress_callback=None):
         try:
             if progress_callback:
                 progress_callback("住所候補を検索中...")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # 住所候補リストが表示されるまで待機
             WebDriverWait(driver, 10).until(
@@ -564,6 +616,12 @@ def search_service_area(postal_code, address, progress_callback=None):
             logging.error(f"住所選択処理中にエラー: {str(e)}")
             return {"status": "error", "message": f"住所選択処理中にエラーが発生しました: {str(e)}"}
             
+    except CancellationError as e:
+        logging.info("★★★ 提供エリア検索がキャンセルされました ★★★")
+        return {"status": "cancelled", "message": "検索がキャンセルされました"}
+    except TimeoutException as e:
+        logging.error(f"タイムアウトエラー: {str(e)}")
+        return {"status": "failure", "message": "処理がタイムアウトしました"}
     except Exception as e:
         logging.error(f"検索処理中にエラー: {str(e)}")
         return {"status": "error", "message": f"検索処理中にエラーが発生しました: {str(e)}"}
