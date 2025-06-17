@@ -414,8 +414,15 @@ class CTIStatusMonitor:
                 # 通話中状態への遷移を検出
                 if new_status == CTIStatus.TALKING:
                     logging.info("★★★ 通話中状態を検出 ★★★")
-                    # 通話開始時刻を記録
-                    self.talking_start_time = current_time
+                    # 通話開始時刻を記録（発信中→通話中の場合のみ）
+                    if previous_status == CTIStatus.DIALING:
+                        self.talking_start_time = current_time
+                        logging.info(f"通話開始時刻を記録: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))}")
+                    elif self.talking_start_time == 0:
+                        # 何らかの理由で通話開始時刻が記録されていない場合
+                        self.talking_start_time = current_time
+                        logging.info(f"通話開始時刻を補完記録: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))}")
+                    
                     if self.on_talking_started_callback:
                         try:
                             self.on_talking_started_callback()
@@ -437,6 +444,9 @@ class CTIStatusMonitor:
                             logging.info(f"- 処理開始からの経過時間: {elapsed_time:.1f}秒")
                     else:
                         logging.info("処理中フラグは既にリセット済みです")
+                        # 次の通話に備えてタイムスタンプをクリア
+                        self.talking_start_time = 0
+                        logging.info("通話開始時刻をクリアしました")
                     
                     # 通話終了コールバックを実行
                     if self.on_call_ended_callback:
@@ -449,9 +459,19 @@ class CTIStatusMonitor:
                 elif (previous_status == CTIStatus.DIALING and 
                       new_status == CTIStatus.TALKING):
                     
+                    logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
+                    
+                    # 最後の発信中→通話中検出時刻を更新
+                    self.last_dialing_to_talking_time = current_time
+                    
+                    # 自動処理の詳細状態をログ出力
+                    logging.info(f"- 自動処理有効: {self.enable_auto_processing}")
+                    logging.info(f"- 処理中フラグ: {self.is_processing}")
+                    logging.info(f"- 通話時間閾値: {self.call_duration_threshold}秒")
+                    logging.info(f"- 通話開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.talking_start_time)) if self.talking_start_time > 0 else 'なし'}")
+                    
                     # 重複実行防止チェック
                     if self._should_trigger_auto_processing(current_time):
-                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
                         
                         # 通話時間の閾値が0秒の場合は即時実行
                         if self.call_duration_threshold == 0:
@@ -464,8 +484,14 @@ class CTIStatusMonitor:
                             # 一定時間後に自動処理を実行
                             threading.Timer(self.call_duration_threshold, self._check_and_trigger_auto_processing).start()
                     else:
-                        logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
                         logging.info("重複実行防止により自動処理をスキップしました")
+                        # 処理中フラグをチェックして、必要に応じてリセット
+                        if self.is_processing:
+                            elapsed_since_last = current_time - self.last_dialing_to_talking_time if self.last_dialing_to_talking_time > 0 else 0
+                            if elapsed_since_last > 60:  # 60秒以上経過した場合はリセット
+                                logging.warning(f"処理中フラグが長時間設定されています（{elapsed_since_last:.1f}秒）。リセットします")
+                                self.is_processing = False
+                                self.talking_start_time = 0
                 
                 # 不正な状態変化パターンの検出と警告
                 elif (previous_status == CTIStatus.UNKNOWN and 
@@ -496,11 +522,23 @@ class CTIStatusMonitor:
             
         # 現在処理中の場合
         if self.is_processing:
-            logging.debug("既に自動処理が実行中です")
-            return False
+            # 長時間処理中の場合は強制リセット
+            if self.talking_start_time > 0:
+                elapsed_time = current_time - self.talking_start_time
+                if elapsed_time > 120:  # 2分以上経過した場合
+                    logging.warning(f"処理中フラグが長時間設定されています（{elapsed_time:.1f}秒）。強制リセットして新しい処理を開始します")
+                    self.is_processing = False
+                    self.talking_start_time = 0
+                    return True
+                else:
+                    logging.debug(f"既に自動処理が実行中です（経過時間: {elapsed_time:.1f}秒）")
+                    return False
+            else:
+                logging.debug("既に自動処理が実行中です")
+                return False
             
-        # 前回の発信中→通話中検出から短時間の場合
-        if (current_time - self.last_dialing_to_talking_time) < self.status_change_cooldown:
+        # 前回の発信中→通話中検出から短時間の場合（ただし新規検出時刻は考慮しない）
+        if self.last_dialing_to_talking_time > 0 and (current_time - self.last_dialing_to_talking_time) < self.status_change_cooldown:
             time_since_last = current_time - self.last_dialing_to_talking_time
             logging.debug(f"前回の自動処理から{time_since_last:.2f}秒しか経過していません（最小間隔: {self.status_change_cooldown}秒）")
             return False
