@@ -28,6 +28,13 @@ def create_driver(headless=False):
         WebDriver: 作成されたWebDriverインスタンス
     """
     try:
+        # キャンセルチェック（ドライバー作成開始時）
+        try:
+            from services.area_search import check_cancellation
+            check_cancellation()
+        except (ImportError, NameError):
+            pass  # area_searchモジュールが利用できない場合はスキップ
+        
         # Chromeオプションの設定
         chrome_options = Options()
         if headless:
@@ -54,12 +61,33 @@ def create_driver(headless=False):
         }
         chrome_options.add_experimental_option('prefs', prefs)
         
+        # キャンセルチェック（オプション設定後）
+        try:
+            from services.area_search import check_cancellation
+            check_cancellation()
+        except (ImportError, NameError):
+            pass
+        
         # ChromeDriverManagerの設定
         driver_manager = ChromeDriverManager()
         service = Service(driver_manager.install())
         
+        # キャンセルチェック（ドライバー起動直前）
+        try:
+            from services.area_search import check_cancellation
+            check_cancellation()
+        except (ImportError, NameError):
+            pass
+        
         # WebDriverの作成
         driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # キャンセルチェック（ドライバー作成直後）
+        try:
+            from services.area_search import check_cancellation
+            check_cancellation()
+        except (ImportError, NameError):
+            pass
         
         # タイムアウト設定
         driver.set_page_load_timeout(60)

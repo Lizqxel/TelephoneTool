@@ -36,46 +36,41 @@ from utils.address_utils import split_address, normalize_address
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
-global_cancel_flag = False
+_global_cancel_flag = False
 
 class CancellationError(Exception):
-    """
-    検索処理がキャンセルされた際に発生する例外
-    """
+    """検索キャンセル時に発生する例外"""
     pass
 
-def set_cancel_flag(value: bool):
-    """
-    グローバルキャンセルフラグを設定
+def set_cancel_flag(value=True):
+    """キャンセルフラグを設定
     
     Args:
-        value: キャンセルフラグの値（True: キャンセル要求, False: リセット）
+        value (bool): 設定する値（デフォルト: True）
     """
-    global global_cancel_flag
-    global_cancel_flag = value
+    global _global_cancel_flag
+    _global_cancel_flag = value
     if value:
-        logging.info("★★★ エリア検索のキャンセルフラグが設定されました ★★★")
+        logging.info("★★★ エリア検索のキャンセルフラグを設定しました ★★★")
     else:
-        logging.info("エリア検索のキャンセルフラグがリセットされました")
+        logging.info("エリア検索のキャンセルフラグをクリアしました")
 
-def get_cancel_flag() -> bool:
-    """
-    グローバルキャンセルフラグを取得
-    
-    Returns:
-        bool: 現在のキャンセルフラグの値
-    """
-    return global_cancel_flag
+def clear_cancel_flag():
+    """キャンセルフラグをクリア"""
+    global _global_cancel_flag
+    _global_cancel_flag = False
+    logging.info("エリア検索のキャンセルフラグをクリアしました")
+
+def is_cancelled():
+    """キャンセルフラグの状態を確認（互換性のため）"""
+    global _global_cancel_flag
+    return _global_cancel_flag
 
 def check_cancellation():
-    """
-    キャンセル要求をチェックし、キャンセルされている場合は例外を発生
-    
-    Raises:
-        CancellationError: キャンセルが要求されている場合
-    """
-    if global_cancel_flag:
-        logging.info("★★★ キャンセル要求を検出しました - 処理を中断します ★★★")
+    """キャンセル要求をチェックし、必要に応じて例外を発生"""
+    global _global_cancel_flag
+    if _global_cancel_flag:
+        logging.info("★★★ キャンセル要求を検出：検索を中断します ★★★")
         raise CancellationError("検索がキャンセルされました")
 
 def is_east_japan(address):
@@ -394,7 +389,10 @@ def find_best_address_match(input_address, candidates):
     best_candidate = None
     best_similarity = -1
     
-    for candidate in candidates:
+    for i, candidate in enumerate(candidates):
+        # キャンセルチェック（候補処理前）
+        check_cancellation()
+        
         try:
             candidate_text = candidate.text.strip().split('\n')[0]
             _, similarity = is_address_match(input_address, candidate_text)
@@ -404,7 +402,18 @@ def find_best_address_match(input_address, candidates):
             if similarity > best_similarity:
                 best_similarity = similarity
                 best_candidate = candidate
+                
+            # 完全一致が見つかった場合は即座に返す
+            if similarity >= 1.0:
+                logging.info(f"完全一致の候補が見つかりました: {candidate_text}")
+                break
+                
         except Exception as e:
+            # Stale Element Referenceエラーの場合はキャンセルされた可能性が高い
+            if "stale element reference" in str(e).lower():
+                logging.info("Stale Element Referenceエラー - キャンセルされた可能性があります")
+                check_cancellation()  # キャンセルフラグを確認
+            
             logging.warning(f"候補の処理中にエラー: {str(e)}")
             continue
     
@@ -515,12 +524,18 @@ def take_full_page_screenshot(driver, save_path):
     Returns:
         str: 保存されたスクリーンショットの絶対パス
     """
+    # キャンセルチェック（スクリーンショット開始前）
+    check_cancellation()
+    
     # 元のウィンドウサイズと位置、スクロール位置を保存
     original_size = driver.get_window_size()
     original_position = driver.get_window_position()
     original_scroll = driver.execute_script("return window.pageYOffset;")
 
     try:
+        # キャンセルチェック（サイズ取得前）
+        check_cancellation()
+        
         # ページ全体のサイズを取得
         total_width = driver.execute_script("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);")
         total_height = driver.execute_script("return Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);")
@@ -539,9 +554,15 @@ def take_full_page_screenshot(driver, save_path):
         driver.set_window_size(viewport_width, viewport_height)
         
         while current_position < total_height:
+            # キャンセルチェック（スクロール前）
+            check_cancellation()
+            
             # 指定位置までスクロール
             driver.execute_script(f"window.scrollTo(0, {current_position});")
             time.sleep(0.5)  # スクロール後の描画を待機
+            
+            # キャンセルチェック（スクリーンショット撮影前）
+            check_cancellation()
             
             # 一時的なスクリーンショットファイル名
             temp_screenshot = f"temp_screenshot_{current_position}.png"
@@ -552,6 +573,9 @@ def take_full_page_screenshot(driver, save_path):
             
             # 次のスクロール位置（ビューポートの高さ分）
             current_position += viewport_height
+        
+        # キャンセルチェック（画像合成前）
+        check_cancellation()
         
         # スクリーンショットを合成
         images = [Image.open(s) for s in screenshots]
@@ -566,6 +590,9 @@ def take_full_page_screenshot(driver, save_path):
         # 画像を縦に結合
         y_offset = 0
         for img in images:
+            # キャンセルチェック（画像結合前）
+            check_cancellation()
+            
             # 最後の画像の場合、はみ出る部分をトリミング
             if y_offset + img.height > total_height:
                 crop_height = total_height - y_offset
@@ -633,7 +660,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     global global_driver
     
     # キャンセルフラグをリセット
-    set_cancel_flag(False)
+    clear_cancel_flag()
     
     # デバッグログ：入力値の確認
     logging.info(f"=== 検索開始 ===")
@@ -716,11 +743,23 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     
     driver = None
     try:
+        # ドライバー作成前にキャンセルチェック（最速対応）
+        check_cancellation()
+        
+        if progress_callback:
+            progress_callback("ブラウザを起動中...")
+        
         # ドライバーを作成してサイトを開く
         driver = create_driver(headless=headless_mode)
         
+        # ドライバー作成直後にキャンセルチェック
+        check_cancellation()
+        
         # グローバル変数に保存
         global_driver = driver
+        
+        # タイムアウト設定適用前にキャンセルチェック
+        check_cancellation()
         
         # タイムアウト設定を適用
         driver.set_page_load_timeout(page_load_timeout)
@@ -728,15 +767,27 @@ def search_service_area_west(postal_code, address, progress_callback=None):
         
         driver.implicitly_wait(0)  # 暗黙の待機を無効化
         
+        # サイトアクセス前にキャンセルチェック
+        check_cancellation()
+        
+        if progress_callback:
+            progress_callback("NTT西日本サイトにアクセス中...")
+        
         # サイトにアクセス
         driver.get("https://flets-w.com/cart/")
         logging.info("NTT西日本のサイトにアクセスしています...")
         
-        # キャンセルチェック
+        # サイトアクセス直後にキャンセルチェック
         check_cancellation()
         
         # 2. 郵便番号を入力
         try:
+            if progress_callback:
+                progress_callback("郵便番号入力フィールドを検索中...")
+            
+            # 郵便番号入力前にキャンセルチェック
+            check_cancellation()
+            
             # 郵便番号入力フィールドが操作可能になるまで待機
             zip_field = WebDriverWait(driver, 10).until(
                 lambda d: d.find_element(By.XPATH, "//*[@id='id_tak_tx_ybk_yb']") if d.execute_script("return document.readyState") == "complete" else None
@@ -745,16 +796,25 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             if not zip_field:
                 raise TimeoutException("郵便番号入力フィールドが見つかりませんでした")
             
-            # キャンセルチェック
+            # フィールド発見直後にキャンセルチェック
             check_cancellation()
             
+            if progress_callback:
+                progress_callback("郵便番号を入力中...")
+            
             # フィールドが表示され、操作可能になるまで短い間隔で確認
-            for _ in range(10):  # 最大1秒間試行
+            for i in range(10):  # 最大1秒間試行
                 try:
+                    # ループ内でもキャンセルチェック
+                    check_cancellation()
+                    
                     zip_field.clear()
                     zip_field.send_keys(postal_code_clean)
                     logging.info(f"郵便番号 {postal_code_clean} を入力しました")
                     break
+                except CancellationError:
+                    # キャンセル例外は再発生
+                    raise
                 except:
                     time.sleep(0.1)
                     continue
@@ -768,11 +828,28 @@ def search_service_area_west(postal_code, address, progress_callback=None):
         
         # 3. 検索ボタンを押す
         try:
+            if progress_callback:
+                progress_callback("検索ボタンを探しています...")
+            
+            # 検索ボタン操作前にキャンセルチェック
+            check_cancellation()
+            
             search_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//*[@id='id_tak_bt_ybk_jks']"))
             )
+            
+            # ボタン発見直後にキャンセルチェック
+            check_cancellation()
+            
+            if progress_callback:
+                progress_callback("検索ボタンをクリック中...")
+            
             search_button.click()
             logging.info("検索ボタンをクリックしました")
+            
+            # クリック直後にキャンセルチェック
+            check_cancellation()
+            
         except Exception as e:
             logging.error(f"検索ボタンの操作に失敗: {str(e)}")
             raise
@@ -817,14 +894,23 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             
             # 住所候補が多い場合は、検索フィールドで絞り込み
             try:
+                # キャンセルチェック
+                check_cancellation()
+                
                 search_field = WebDriverWait(driver, 3).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='絞り込みワードを入力']"))
                 )
                 logging.info("住所検索フィールドが見つかりました")
                 
+                # キャンセルチェック
+                check_cancellation()
+                
                 # 検索用の住所フォーマットを作成
                 search_address = base_address.replace("県", "県 ").replace("市", "市 ").replace("町", "町 ").replace("区", "区 ").strip()
                 logging.info(f"検索用にフォーマットされた住所: {search_address}")
+                
+                # キャンセルチェック
+                check_cancellation()
                 
                 # 検索フィールドをクリアして入力
                 search_field.clear()
@@ -836,20 +922,31 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     EC.presence_of_all_elements_located((By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]"))
                 )
                 
+                # キャンセルチェック
+                check_cancellation()
+                
                 # 絞り込み後の候補を取得
                 filtered_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
                 if filtered_candidates:
                     valid_candidates = filtered_candidates
                     logging.info(f"絞り込み後の候補数: {len(valid_candidates)}")
                     
+                    # キャンセルチェック
+                    check_cancellation()
+                    
                     # 絞り込み後の候補をログ出力（最初の5件のみ）
                     for i, candidate in enumerate(valid_candidates[:5]):
+                        # キャンセルチェック（ループ内でも確認）
+                        check_cancellation()
                         logging.info(f"絞り込み後の候補 {i+1}: '{candidate.text.strip()}'")
                 else:
                     logging.warning("絞り込み後の候補が見つかりませんでした")
                     logging.info("元の候補リストを使用します")
             except Exception as e:
                 logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # 住所を選択
             best_candidate, similarity = find_best_address_match(base_address, valid_candidates)
@@ -858,9 +955,16 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 selected_address = best_candidate.text.strip().split('\n')[0]
                 logging.info(f"選択された住所: '{selected_address}' (類似度: {similarity})")
                 
+                # キャンセルチェック
+                check_cancellation()
+                
                 # 選択された住所でクリックを実行
                 try:
                     WebDriverWait(driver, 3).until(EC.element_to_be_clickable(best_candidate))
+                    
+                    # キャンセルチェック
+                    check_cancellation()
+                    
                     best_candidate.click()
                     logging.info("住所を選択しました")
                 except Exception as click_error:
@@ -881,6 +985,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 EC.invisibility_of_element_located((By.ID, "addressSelectModal"))
             )
             logging.info("住所選択モーダルが閉じられました")
+            
+            # キャンセルチェック
+            check_cancellation()
             
             # 5. 番地入力画面が表示された場合は、番地を入力
             try:
@@ -982,20 +1089,34 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         
                         if target_button:
                             try:
+                                # キャンセルチェック（スクロール前）
+                                check_cancellation()
+                                
                                 # スクロールしてボタンを表示
                                 driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
+                                
+                                # キャンセルチェック（待機前）
+                                check_cancellation()
+                                
                                 time.sleep(1)
+                                
+                                # キャンセルチェック（クリック前）
+                                check_cancellation()
                                 
                                 # クリックを試行（複数の方法）
                                 try:
                                     target_button.click()
                                     logging.info("通常のクリックで選択しました")
                                 except Exception as click_error:
+                                    # キャンセルチェック（リトライ前）
+                                    check_cancellation()
                                     logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                                     try:
                                         driver.execute_script("arguments[0].click();", target_button)
                                         logging.info("JavaScriptでクリックしました")
                                     except Exception as js_error:
+                                        # キャンセルチェック（最終リトライ前）
+                                        check_cancellation()
                                         logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
                                         ActionChains(driver).move_to_element(target_button).click().perform()
                                         logging.info("ActionChainsでクリックしました")
@@ -1089,24 +1210,41 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     
                     if target_button:
                         try:
+                            # キャンセルチェック（スクロール前）
+                            check_cancellation()
+                            
                             # スクロールしてボタンを表示
                             driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
+                            
+                            # キャンセルチェック（待機前）
+                            check_cancellation()
+                            
                             time.sleep(1)
+                            
+                            # キャンセルチェック（クリック前）
+                            check_cancellation()
                             
                             # クリックを試行（複数の方法）
                             try:
                                 target_button.click()
                                 logging.info("通常のクリックで選択しました")
                             except Exception as click_error:
+                                # キャンセルチェック（リトライ前）
+                                check_cancellation()
                                 logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                                 try:
                                     driver.execute_script("arguments[0].click();", target_button)
                                     logging.info("JavaScriptでクリックしました")
                                 except Exception as js_error:
+                                    # キャンセルチェック（最終リトライ前）
+                                    check_cancellation()
                                     logging.warning(f"JavaScriptクリックに失敗: {str(js_error)}")
                                     ActionChains(driver).move_to_element(target_button).click().perform()
                                     logging.info("ActionChainsでクリックしました")
                         
+                            # キャンセルチェック（待機前）
+                            check_cancellation()
+                            
                             # クリック後の待機
                             time.sleep(2)
                             
@@ -1147,6 +1285,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 if progress_callback:
                     progress_callback("検索結果を確認中...")
                 
+                # キャンセルチェック（検索結果確認前）
+                check_cancellation()
+                
                 # 検索結果確認ボタンをクリック
                 logging.info("検索結果確認ボタンの検出を開始します")
                 
@@ -1155,20 +1296,39 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
                 )
                 
+                # キャンセルチェック（ボタン検出後）
+                check_cancellation()
+                
                 # ボタンが見つかった場合の情報をログ出力
                 button_html = final_search_button.get_attribute('outerHTML')
                 logging.info(f"検索結果確認ボタンが見つかりました: {button_html}")
                 
+                # キャンセルチェック（スクロール前）
+                check_cancellation()
+                
                 # スクロールしてボタンを表示
                 driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
+                
+                # キャンセルチェック（待機前）
+                check_cancellation()
+                
                 time.sleep(1)
+                
+                # キャンセルチェック（クリック前）
+                check_cancellation()
                 
                 # ボタンをクリック
                 final_search_button.click()
                 logging.info("検索結果確認ボタンをクリックしました")
                 
+                # キャンセルチェック（画面遷移待機前）
+                check_cancellation()
+                
                 # クリック後の画面遷移を待機
                 time.sleep(2)
+                
+                # キャンセルチェック（画像確認前）
+                check_cancellation()
                 
                 # 提供可否の画像を確認
                 try:
@@ -1226,8 +1386,14 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     
                     # 各パターンを順番に確認
                     for pattern_name, pattern_info in image_patterns.items():
+                        # キャンセルチェック（パターンループ開始時）
+                        check_cancellation()
+                        
                         for url_pattern in pattern_info["urls"]:
                             try:
+                                # キャンセルチェック（URL検索前）
+                                check_cancellation()
+                                
                                 image = WebDriverWait(driver, 5).until(
                                     EC.presence_of_element_located((By.XPATH, url_pattern))
                                 )
@@ -1243,6 +1409,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             break
                     
                     if found_image and found_pattern:
+                        # キャンセルチェック（スクリーンショット前）
+                        check_cancellation()
+                        
                         # 画像確認時のスクリーンショットを保存
                         screenshot_path = f"debug_{found_pattern['status']}_confirmation.png"
                         take_full_page_screenshot(driver, screenshot_path)
@@ -1258,6 +1427,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             progress_callback(f"{result['message']}が確認されました")
                         return result
                     else:
+                        # キャンセルチェック（失敗時のスクリーンショット前）
+                        check_cancellation()
+                        
                         # 提供不可時のスクリーンショットを保存
                         screenshot_path = "debug_unavailable_confirmation.png"
                         take_full_page_screenshot(driver, screenshot_path)
@@ -1350,6 +1522,10 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 "screenshot": screenshot_path,
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
+        except CancellationError:
+            # キャンセル例外は再発生させて上位で処理
+            logging.info("住所選択処理中にキャンセルが検出されました")
+            raise
         except Exception as e:
             logging.error(f"住所選択処理中にエラーが発生しました: {str(e)}")
             screenshot_path = "debug_address_error.png"
@@ -1368,6 +1544,10 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 "show_popup": show_popup  # ポップアップ表示設定を追加
             }
     
+    except CancellationError as e:
+        logging.error(f"自動化に失敗しました: {str(e)}")
+        # キャンセル例外は再発生させて上位で処理
+        raise
     except Exception as e:
         logging.error(f"自動化に失敗しました: {str(e)}")
         screenshot_path = "debug_general_error.png"

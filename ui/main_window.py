@@ -12,6 +12,7 @@ import os
 import re
 import time
 import requests
+import threading
 from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
@@ -59,9 +60,10 @@ from services.area_search import search_service_area
 class CancelWorker(QObject):
     """
     キャンセル処理を並列実行するワーカークラス
+    TelephoneTeikyou-crossの高速キャンセル方式を適用
     """
     finished = Signal()
-    error = Signal(str)
+    progress = Signal(str)  # 進捗報告用シグナルを追加
     
     def __init__(self, worker_to_cancel=None):
         """
@@ -73,45 +75,56 @@ class CancelWorker(QObject):
         super().__init__()
         self.worker_to_cancel = worker_to_cancel
         self.is_cancelled = False
-        
+    
     def cancel(self):
         """
-        キャンセル処理を実行
+        キャンセル処理を実行（cleanup_threadから呼び出し用）
+        """
+        self.is_cancelled = True
+        if self.worker_to_cancel and hasattr(self.worker_to_cancel, 'cancel'):
+            self.worker_to_cancel.cancel()
+    
+    def run(self):
+        """
+        軽量化されたキャンセル処理を実行
+        TelephoneTeikyou-crossの高速方式を採用
         """
         try:
-            logging.info("CancelWorker: キャンセル処理を開始")
+            logging.info("★★★ 並列キャンセル処理を開始します ★★★")
+            self.progress.emit("キャンセル処理を実行中...")
             
-            # キャンセルフラグを設定
-            self.is_cancelled = True
-            
-            # ワーカーにキャンセル要求
+            # ワーカーのキャンセル処理
             if self.worker_to_cancel and hasattr(self.worker_to_cancel, 'cancel'):
+                logging.info("- ワーカーのキャンセル処理を実行")
                 self.worker_to_cancel.cancel()
-                logging.info("CancelWorker: ワーカーのキャンセルメソッドを呼び出しました")
-            
-            # area_searchモジュールのキャンセルフラグを設定
+                
+            # キャンセルフラグの設定
             try:
-                from services.area_search import set_cancel_flag
-                set_cancel_flag(True)
-                logging.info("CancelWorker: area_searchのキャンセルフラグを設定しました")
-            except ImportError as e:
-                logging.warning(f"CancelWorker: area_searchのキャンセルフラグ設定に失敗: {e}")
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
+                logging.info("- エリア検索のキャンセルフラグを設定しました")
+            except ImportError:
+                pass
             
-            # area_search_eastモジュールのキャンセルフラグを設定
             try:
-                from services.area_search_east import set_cancel_flag
-                set_cancel_flag(True)
-                logging.info("CancelWorker: area_search_eastのキャンセルフラグを設定しました")
-            except ImportError as e:
-                logging.warning(f"CancelWorker: area_search_eastのキャンセルフラグ設定に失敗: {e}")
+                from services.area_search_east import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
+                logging.info("- 東日本エリア検索のキャンセルフラグを設定しました")
+            except ImportError:
+                pass
             
-            self.finished.emit()
-            logging.info("CancelWorker: キャンセル処理が完了しました")
+            # 短時間の待機で完了確認（TelephoneTeikyou-crossと同様）
+            import time
+            time.sleep(0.5)  # 500ms待機
+            
+            self.progress.emit("キャンセル処理完了")
+            logging.info("★★★ 並列キャンセル処理が完了しました ★★★")
             
         except Exception as e:
-            error_message = f"キャンセル処理中にエラーが発生しました: {str(e)}"
-            logging.error(f"CancelWorker: {error_message}")
-            self.error.emit(error_message)
+            logging.error(f"並列キャンセル処理中にエラー: {str(e)}")
+        finally:
+            self.is_cancelled = True
+            self.finished.emit()
 
 
 class CustomComboBox(QComboBox):
@@ -2328,6 +2341,21 @@ ND：{nd}
                 return
         
         try:
+            # ★★★ 検索開始前にキャンセルフラグを必ずクリア ★★★
+            try:
+                from services.area_search import clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("★★★ 検索開始前：西日本エリア検索のキャンセルフラグをクリアしました ★★★")
+            except ImportError:
+                pass
+            
+            try:
+                from services.area_search_east import clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("★★★ 検索開始前：東日本エリア検索のキャンセルフラグをクリアしました ★★★")
+            except ImportError:
+                pass
+            
             # 既存のスレッドとワーカーをクリーンアップ
             self.cleanup_thread()
             
@@ -2430,189 +2458,265 @@ ND：{nd}
     def cancel_search(self):
         """
         検索をキャンセルする
+        TelephoneTeikyou-crossの高速キャンセル方式を適用
         """
         try:
             logging.info("=== 検索キャンセル処理開始 ===")
             
-            # ボタンをキャンセル中状態に変更
+            # キャンセル中の状態をUIに即時反映
             if hasattr(self, 'area_search_btn'):
-                self.area_search_btn.setText("キャンセル中...")
                 self.area_search_btn.setEnabled(False)
+                self.area_search_btn.setText("キャンセル中...")
             
-            # 結果ラベルをクリア（属性名を修正）
+            # 結果ラベルを即座に更新
             if hasattr(self, 'area_result_label'):
-                self.area_result_label.setText("検索がキャンセルされました")
-                self.area_result_label.setStyleSheet("color: orange; font-weight: bold;")
+                self.area_result_label.setText("提供エリア: キャンセル中...")
+                self.area_result_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 14px;
+                        padding: 5px;
+                        border: 1px solid #F39C12;
+                        border-radius: 4px;
+                        background-color: #FFF3E0;
+                        color: #F39C12;
+                    }
+                """)
             
-            # CTI監視システムにキャンセル開始を通知
-            if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
-                try:
-                    with self.cti_status_monitor.processing_lock:
-                        # 処理状態をログに記録
-                        was_processing = self.cti_status_monitor.is_processing
-                        if self.cti_status_monitor.talking_start_time > 0:
-                            import time
-                            elapsed_time = time.time() - self.cti_status_monitor.talking_start_time
-                            logging.info(f"★★★ CTI監視システム: 検索キャンセル開始 ★★★")
-                            logging.info(f"- 処理状態: {'実行中' if was_processing else '未実行'}")
-                            logging.info(f"- 処理開始からの経過時間: {elapsed_time:.1f}秒")
-                        else:
-                            logging.info(f"★★★ CTI監視システム: 検索キャンセル開始 ★★★")
-                            logging.info(f"- 処理状態: {'実行中' if was_processing else '未実行'}")
-                except Exception as cti_error:
-                    logging.error(f"CTI監視システムのキャンセル通知中にエラー: {str(cti_error)}")
+            # リロード/再起動ボタンを表示（キャンセル中状態で問題が発生した場合の対処用）
+            if hasattr(self, 'reload_btn'):
+                self.reload_btn.show()
+            if hasattr(self, 'restart_btn'):
+                self.restart_btn.show()
             
-            # 即座にキャンセルフラグを設定（スレッド開始前でも有効）
-            try:
-                from services.area_search import set_cancel_flag
-                set_cancel_flag(True)
-                logging.info("★★★ エリア検索のキャンセルフラグが設定されました ★★★")
-            except ImportError:
-                pass
-            
-            try:
-                from services.area_search_east import set_cancel_flag
-                set_cancel_flag(True)
-                logging.info("東日本エリア検索のキャンセルフラグを True に設定しました")
-            except ImportError:
-                pass
-            
-            # ワーカーがすでに存在している場合は即座にキャンセル
-            if hasattr(self, 'worker') and self.worker is not None:
-                try:
-                    self.worker.cancel()
-                    logging.info("ワーカーのキャンセルメソッドを呼び出しました")
-                except Exception as e:
-                    logging.error(f"ワーカーキャンセル中にエラー: {str(e)}")
-            
-            # 並列キャンセル処理を開始
-            if QThread.currentThread() == QApplication.instance().thread():
-                # メインスレッドから呼ばれた場合は直接実行
+            # バックエンド処理のキャンセル
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.cancel()
+                
+            # 並列キャンセル処理を開始（メインスレッドから実行）
+            if threading.current_thread() == threading.main_thread():
+                # メインスレッドから呼び出された場合
                 self.start_parallel_cancel()
+                # 2秒後にキャンセルが完了していない場合の自動リセット処理（高速化のため短縮）
+                QTimer.singleShot(5000, self.check_cancel_timeout)
             else:
-                # 別スレッドから呼ばれた場合はQueuedConnectionで実行
+                # 別スレッドから呼び出された場合はシグナルを使用
                 QMetaObject.invokeMethod(self, "start_parallel_cancel", Qt.QueuedConnection)
-            
-            # 5秒後のタイムアウト処理を設定（並列処理開始後に設定）
-            QTimer.singleShot(100, self.check_cancel_timeout)  # 100ms後にタイムアウト監視開始
-            
-            logging.info("検索キャンセル処理を開始しました")
-            
+                QMetaObject.invokeMethod(self, "schedule_cancel_timeout", Qt.QueuedConnection)
+                
         except Exception as e:
             logging.error(f"キャンセル処理中にエラー: {str(e)}")
+            # エラー時もUI状態をリセット
             self.reset_search_button()
+    
+    @Slot()
+    def schedule_cancel_timeout(self):
+        """
+        キャンセルタイムアウト処理をスケジュール（メインスレッド専用）
+        """
+        try:
+            QTimer.singleShot(5000, self.check_cancel_timeout)  # 高速化のため2秒に短縮
+        except Exception as e:
+            logging.error(f"キャンセルタイムアウトスケジュール中にエラー: {str(e)}")
     
     @Slot()
     def start_parallel_cancel(self):
         """
-        並列キャンセル処理を開始する（メインスレッドで実行）
+        並列キャンセル処理を開始
+        UIの応答性を維持するため、キャンセル処理を別スレッドで実行
+        TelephoneTeikyou-crossの軽量方式を採用
         """
         try:
-            logging.info("並列キャンセル処理を開始します")
+            # 既存のキャンセルスレッドがある場合は終了
+            self.cleanup_cancel_thread()
             
-            # 既存のキャンセルワーカーをクリーンアップ
-            if self.cancel_worker:
-                try:
-                    self.cancel_worker.deleteLater()
-                except:
-                    pass
-                self.cancel_worker = None
-                
-            if self.cancel_thread:
-                try:
-                    if hasattr(self.cancel_thread, 'isRunning') and callable(self.cancel_thread.isRunning):
-                        if self.cancel_thread.isRunning():
-                            self.cancel_thread.quit()
-                            self.cancel_thread.wait(1000)
-                    self.cancel_thread.deleteLater()
-                except Exception as e:
-                    logging.error(f"既存キャンセルスレッドのクリーンアップエラー: {str(e)}")
-                self.cancel_thread = None
-            
-            # 新しいキャンセルワーカーとスレッドを作成
+            # キャンセルワーカーを作成
             self.cancel_worker = CancelWorker(worker_to_cancel=self.worker)
+            
+            # キャンセル用スレッドを作成
             self.cancel_thread = QThread()
             self.cancel_worker.moveToThread(self.cancel_thread)
             
-            # シグナル接続
-            self.cancel_thread.started.connect(self.cancel_worker.cancel)
+            # シグナルとスロットを接続
+            self.cancel_thread.started.connect(self.cancel_worker.run)
             self.cancel_worker.finished.connect(self.on_cancel_completed)
-            self.cancel_worker.error.connect(self.on_cancel_error)
+            self.cancel_worker.progress.connect(self.update_cancel_progress)
             self.cancel_worker.finished.connect(self.cancel_thread.quit)
             self.cancel_worker.finished.connect(self.cancel_worker.deleteLater)
             self.cancel_thread.finished.connect(self.cancel_thread.deleteLater)
             
-            # スレッド開始
+            # キャンセルスレッドを開始
             self.cancel_thread.start()
-            
             logging.info("並列キャンセル処理を開始しました")
             
         except Exception as e:
             logging.error(f"並列キャンセル処理の開始に失敗: {str(e)}")
-            self.reset_search_button()
+            # フォールバック：同期的にキャンセル処理を実行
+            self.fallback_cancel()
     
-    def check_cancel_timeout(self):
+    def cleanup_cancel_thread(self):
         """
-        キャンセル処理のタイムアウトをチェックする
+        キャンセル用スレッドとワーカーをクリーンアップ
         """
         try:
-            # 既存のタイマーをクリーンアップ
-            if self.cancel_timer:
-                self.cancel_timer.stop()
-                self.cancel_timer.deleteLater()
-                self.cancel_timer = None
-            
-            # 5秒後にタイムアウト処理を実行するタイマーを設定
-            self.cancel_timer = QTimer()
-            self.cancel_timer.timeout.connect(self.on_cancel_timeout)
-            self.cancel_timer.setSingleShot(True)
-            self.cancel_timer.start(5000)  # 5秒
-            
-            logging.info("キャンセルタイムアウト監視を開始しました（5秒）")
+            # ワーカーをキャンセル
+            if hasattr(self, 'cancel_worker') and self.cancel_worker:
+                try:
+                    self.cancel_worker.cancel()
+                    logging.debug("ワーカーをキャンセルしました")
+                except Exception as e:
+                    logging.error(f"ワーカーキャンセル中にエラー: {str(e)}")
+                
+            # スレッドを終了
+            if hasattr(self, 'cancel_thread') and self.cancel_thread:
+                try:
+                    if self.cancel_thread.isRunning():
+                        self.cancel_thread.quit()
+                        if not self.cancel_thread.wait(3000):  # 最大3秒待機（TelephoneTeikyou-crossと同じ）
+                            logging.warning("スレッドが正常に終了しませんでした。強制終了します")
+                            self.cancel_thread.terminate()
+                        else:
+                            logging.debug("スレッドを正常に終了しました")
+                    else:
+                        logging.debug("スレッドは既に停止しています")
+                except Exception as e:
+                    logging.error(f"スレッド終了中にエラー: {str(e)}")
+                    
+            # 参照をクリア
+            self.cancel_worker = None
+            self.cancel_thread = None
             
         except Exception as e:
-            logging.error(f"キャンセルタイムアウト設定に失敗: {str(e)}")
+            logging.error(f"スレッドクリーンアップ中にエラー: {str(e)}")
+            # エラー時でも参照をクリア
+            self.cancel_worker = None
+            self.cancel_thread = None
+    
+    def fallback_cancel(self):
+        """
+        フォールバック用の同期キャンセル処理
+        """
+        try:
+            logging.info("フォールバックキャンセル処理を実行")
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.cancel()
+            
+            # キャンセルフラグの設定
+            try:
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
+            except ImportError:
+                pass
+                
+            try:
+                from services.area_search_east import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
+            except ImportError:
+                pass
+            
+            # メインスレッドでタイマーを開始
+            QTimer.singleShot(500, self.on_cancel_completed)
+        except Exception as e:
+            logging.error(f"フォールバックキャンセル処理中にエラー: {str(e)}")
+            # エラー時も強制的にキャンセル完了処理を実行
+            try:
+                self.on_cancel_completed()
+            except Exception as complete_error:
+                logging.error(f"強制キャンセル完了処理中にもエラー: {str(complete_error)}")
+    
+    def update_cancel_progress(self, message):
+        """
+        キャンセル進捗の更新
+        
+        Args:
+            message (str): 進捗メッセージ
+        """
+        try:
+            logging.info(f"キャンセル進捗: {message}")
+            # プログレスバーがある場合は更新
+            if hasattr(self, 'progress_bar') and self.progress_bar:
+                self.progress_bar.setFormat(message)
+        except Exception as e:
+            logging.error(f"キャンセル進捗更新中にエラー: {str(e)}")
+    
+    @Slot()
+    def check_cancel_timeout(self):
+        """
+        キャンセルタイムアウトをチェックし、必要に応じて強制リセット
+        TelephoneTeikyou-crossの高速方式を適用
+        """
+        try:
+            logging.info("キャンセルタイムアウトチェックを実行")
+            
+            # まだキャンセル処理中の場合は強制リセット
+            if hasattr(self, 'area_search_btn') and self.area_search_btn.text() == "キャンセル中...":
+                logging.warning("キャンセル処理が5秒以上継続：強制リセットを実行")
+                self.reset_search_button()
+                
+                # キャンセルスレッドの強制クリーンアップ
+                self.cleanup_cancel_thread()
+                
+                # 結果ラベルを更新
+                if hasattr(self, 'area_result_label'):
+                    self.area_result_label.setText("提供エリア: キャンセル完了（タイムアウト）")
+                    self.area_result_label.setStyleSheet("""
+                        QLabel {
+                            font-size: 14px;
+                            padding: 5px;
+                            border: 1px solid #E74C3C;
+                            border-radius: 4px;
+                            background-color: #FADBD8;
+                            color: #E74C3C;
+                        }
+                    """)
+            else:
+                logging.info("キャンセル処理は正常に完了済みです")
+                
+        except Exception as e:
+            logging.error(f"キャンセルタイムアウトチェック中にエラー: {str(e)}")
+            # エラー時も強制リセット
+            try:
+                self.reset_search_button()
+            except Exception as reset_error:
+                logging.error(f"強制リセット中にもエラー: {str(reset_error)}")
 
     def on_cancel_completed(self):
         """
         キャンセル処理完了時の処理
+        TelephoneTeikyou-cross完全準拠の高速実装
         """
         try:
-            logging.info("キャンセル処理が完了しました")
+            logging.info("★★★ キャンセル処理が完了しました ★★★")
             
-            # タイマーを停止
-            if self.cancel_timer:
-                self.cancel_timer.stop()
-                self.cancel_timer.deleteLater()
-                self.cancel_timer = None
+            # ★★★ キャンセル完了時にフラグを明示的にクリア ★★★
+            try:
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("キャンセル完了：西日本エリア検索のキャンセルフラグをクリアしました")
+            except ImportError:
+                pass
             
-            # ボタンを元に戻す
+            try:
+                from services.area_search_east import set_cancel_flag, clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("キャンセル完了：東日本エリア検索のキャンセルフラグをクリアしました")
+            except ImportError:
+                pass
+            
+            # キャンセルスレッドのクリーンアップ
+            self.cleanup_cancel_thread()
+            
+            # UI状態をリセット
             self.reset_search_button()
+            
+            logging.info("キャンセル完了処理が終了しました")
             
         except Exception as e:
             logging.error(f"キャンセル完了処理中にエラー: {str(e)}")
-    
-    def on_cancel_error(self, error_message):
-        """
-        キャンセル処理エラー時の処理
-        
-        Args:
-            error_message (str): エラーメッセージ
-        """
-        try:
-            logging.error(f"キャンセル処理でエラーが発生: {error_message}")
-            
-            # タイマーを停止
-            if self.cancel_timer:
-                self.cancel_timer.stop()
-                self.cancel_timer.deleteLater()
-                self.cancel_timer = None
-            
-            # ボタンを元に戻す
-            self.reset_search_button()
-            
-        except Exception as e:
-            logging.error(f"キャンセルエラー処理中にエラー: {str(e)}")
+            # エラー時も強制的にUI状態をリセット
+            try:
+                self.reset_search_button()
+            except Exception as reset_error:
+                logging.error(f"強制UI状態リセット中にもエラー: {str(reset_error)}")
     
     def on_cancel_timeout(self):
         """
@@ -2689,6 +2793,21 @@ ND：{nd}
 
     def reset_search_button(self):
         """検索ボタンを初期状態に戻す"""
+        # ★★★ ボタンリセット時にもキャンセルフラグをクリア ★★★
+        try:
+            from services.area_search import set_cancel_flag, clear_cancel_flag
+            clear_cancel_flag()
+            logging.info("ボタンリセット：西日本エリア検索のキャンセルフラグをクリアしました")
+        except ImportError:
+            pass
+        
+        try:
+            from services.area_search_east import set_cancel_flag, clear_cancel_flag
+            clear_cancel_flag()
+            logging.info("ボタンリセット：東日本エリア検索のキャンセルフラグをクリアしました")
+        except ImportError:
+            pass
+        
         self.area_search_btn.setText("提供エリア検索")
         self.area_search_btn.setEnabled(True)
         self.area_search_btn.setStyleSheet("""
@@ -2714,7 +2833,10 @@ ND：{nd}
             }
         """)
         # 検索ボタンのクリックイベントを元に戻す
-        self.area_search_btn.clicked.disconnect()
+        try:
+            self.area_search_btn.clicked.disconnect()
+        except:
+            pass  # 既に接続されていない場合のエラーを無視
         self.area_search_btn.clicked.connect(self.search_service_area)
         
         # リロード/再起動ボタンを非表示
@@ -2726,6 +2848,28 @@ ND：{nd}
     def on_search_completed(self, result):
         """検索完了時の処理"""
         try:
+            # 検索完了時に進捗バーを100%にする
+            self.update_search_progress("検索完了 (100%)")
+            
+            # ★★★ 検索完了時にキャンセルフラグを必ずクリア ★★★
+            try:
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("★★★ 検索完了：西日本エリア検索のキャンセルフラグをクリアしました ★★★")
+            except ImportError:
+                pass
+            
+            try:
+                from services.area_search_east import set_cancel_flag, clear_cancel_flag
+                clear_cancel_flag()
+                logging.info("★★★ 検索完了：東日本エリア検索のキャンセルフラグをクリアしました ★★★")
+            except ImportError:
+                pass
+            
+            # 検索スレッドをクリーンアップ
+            self.cleanup_thread()
+            self.reset_search_button()
+            
             # 自動処理フラグをリセット
             self.is_auto_processing = False
             
@@ -2830,19 +2974,23 @@ ND：{nd}
                     """)
                 logging.warning(f"提供判定結果: 不明な状態 - {result}")
                 
-            # スクリーンショットの表示（設定で有効な場合）
-            if result.get("show_popup", False) and "screenshot" in result:
-                screenshot_path = result["screenshot"]
-                if os.path.exists(screenshot_path):
-                    self.show_screenshot_window(screenshot_path)
+            # 詳細情報のポップアップ表示
+            details = result.get("details", {})
+            if result.get("show_popup", False) and details:
+                details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
+                QMessageBox.information(self, "提供判定結果", details_text)
+                
+            # スクリーンショットの保存（自動表示はしない）
+            if "screenshot" in result and os.path.exists(result["screenshot"]):
+                self.screenshot_path = result["screenshot"]
+                logging.info(f"スクリーンショットを保存しました: {result['screenshot']}")
                     
         except Exception as e:
             logging.error(f"検索完了処理中にエラーが発生: {str(e)}")
             # エラー時も確実にフラグをリセット
             self.is_auto_processing = False
+            self.cleanup_thread()
             self.reset_search_button()
-            if hasattr(self, 'progress_bar'):
-                self.progress_bar.setVisible(False)
                 
             # エラー時もCTI監視システムのフラグをリセット
             if hasattr(self, 'cti_status_monitor') and self.cti_status_monitor:
@@ -2857,6 +3005,11 @@ ND：{nd}
     def cleanup_thread(self):
         """スレッドとワーカーをクリーンアップ"""
         try:
+            # 進捗バーをリセット
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setValue(0)
+                self.progress_bar.setVisible(False)
+            
             # ワーカーをキャンセル
             if hasattr(self, 'worker') and self.worker:
                 try:
@@ -3313,15 +3466,15 @@ ND：{nd}
             
             # 1. 即座にキャンセルフラグを設定（最優先）
             try:
-                from services.area_search import set_cancel_flag
-                set_cancel_flag(True)
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
                 logging.info(f"- エリア検索のキャンセルフラグを設定しました")
             except ImportError:
                 logging.warning("エリア検索モジュールのインポートに失敗しました")
             
             try:
-                from services.area_search_east import set_cancel_flag
-                set_cancel_flag(True)
+                from services.area_search_east import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
                 logging.info("- 東日本エリア検索のキャンセルフラグを設定しました")
             except ImportError:
                 pass
@@ -3415,8 +3568,8 @@ ND：{nd}
             # エラー時も基本的なキャンセルを実行
             try:
                 # エラー時もキャンセルフラグを設定
-                from services.area_search import set_cancel_flag
-                set_cancel_flag(True)
+                from services.area_search import set_cancel_flag, clear_cancel_flag
+                set_cancel_flag()
                 logging.info("エラー時にキャンセルフラグを設定しました")
                 
                 # エラー時も強制的にcancel_search実行を試行
@@ -3649,16 +3802,16 @@ class ServiceAreaSearchWorker(QObject):
         
         # area_searchモジュールのキャンセルフラグを設定
         try:
-            from services.area_search import set_cancel_flag
-            set_cancel_flag(True)
+            from services.area_search import set_cancel_flag, clear_cancel_flag
+            set_cancel_flag()
             logging.info("ServiceAreaSearchWorker: area_searchのキャンセルフラグを設定しました")
         except ImportError as e:
             logging.warning(f"ServiceAreaSearchWorker: area_searchのキャンセルフラグ設定に失敗: {e}")
         
         # area_search_eastモジュールのキャンセルフラグを設定
         try:
-            from services.area_search_east import set_cancel_flag
-            set_cancel_flag(True)
+            from services.area_search_east import set_cancel_flag, clear_cancel_flag
+            set_cancel_flag()
             logging.info("ServiceAreaSearchWorker: area_search_eastのキャンセルフラグを設定しました")
         except ImportError as e:
             logging.warning(f"ServiceAreaSearchWorker: area_search_eastのキャンセルフラグ設定に失敗: {e}")
@@ -3671,35 +3824,48 @@ class ServiceAreaSearchWorker(QObject):
             message (str, optional): カスタムメッセージ。指定がない場合は定義済みメッセージを使用
         """
         try:
-            if message is None and self._current_step < len(self._progress_steps):
+            # メッセージに既にパーセンテージが含まれている場合はそのまま使用
+            if message and "%" in message:
+                self.progress.emit(message)
+                return
+            
+            # メッセージごとの進捗マッピング
+            progress_map = {
+                "住所情報を解析中...": 5,
+                "ブラウザを起動中...": 15,
+                "NTT西日本サイトにアクセス中...": 25,
+                "郵便番号を入力中...": 35,
+                "基本住所の候補を検索中...": 45,
+                "番地を入力中...": 60,
+                "号を入力中...": 75,
+                "検索結果を確認中...": 85,
+                "集合住宅と判定しました。スクリーンショットを保存します。": 90
+            }
+            
+            if message in progress_map:
+                # 特定のメッセージの場合は対応する進捗率を使用
+                progress_percent = progress_map[message]
+                message = f"{message} ({progress_percent}%)"
+            elif message and "%" not in message:
+                # その他のメッセージの場合は現在のステップベース
+                progress_percent = min(int((self._accumulated_progress / self._total_weight) * 90), 90)
+                message = f"{message} ({progress_percent}%)"
+            elif message is None and self._current_step < len(self._progress_steps):
+                # 定義済みステップの場合
                 step_info = self._progress_steps[self._current_step]
                 message = step_info["message"]
-                # 現在のステップの重みに基づいて進捗を計算
                 self._accumulated_progress += step_info["weight"]
-            elif message:
-                # メッセージに含まれるパーセンテージを抽出
-                import re
-                percent_match = re.search(r'(\d+)%', message)
-                if percent_match:
-                    self._accumulated_progress = int(percent_match.group(1))
-                else:
-                    # メッセージにパーセンテージが含まれていない場合は、次のステップに進む
-                    if self._current_step < len(self._progress_steps):
-                        self._accumulated_progress += self._progress_steps[self._current_step]["weight"]
-            
-            # 進捗率を計算（最大95%まで）
-            progress_percent = min(int((self._accumulated_progress / self._total_weight) * 95), 95)
-            
-            # 進捗メッセージを生成
-            if "%" not in message:
+                progress_percent = min(int((self._accumulated_progress / self._total_weight) * 90), 90)
                 message = f"{message} ({progress_percent}%)"
+                self._current_step += 1
+            else:
+                message = "処理中... (0%)"
             
-            self._current_step += 1
             self.progress.emit(message)
             
         except Exception as e:
             logging.error(f"進捗更新中にエラー: {e}")
-            self.progress.emit(f"{message} (進捗更新エラー)")
+            self.progress.emit(f"処理中... (エラー)")
     
     def run(self):
         """提供エリア検索を実行し、結果をシグナルで通知する"""
@@ -3728,16 +3894,16 @@ class ServiceAreaSearchWorker(QObject):
             
             # キャンセルフラグを初期化（まだキャンセルされていない場合のみ）
             try:
-                from services.area_search import is_cancelled, set_cancel_flag
+                from services.area_search import is_cancelled, clear_cancel_flag
                 if not is_cancelled():
-                    set_cancel_flag(False)
+                    clear_cancel_flag()
             except ImportError:
                 pass
             
             try:
-                from services.area_search_east import is_cancelled, set_cancel_flag
+                from services.area_search_east import is_cancelled, clear_cancel_flag
                 if not is_cancelled():
-                    set_cancel_flag(False)
+                    clear_cancel_flag()
             except ImportError:
                 pass
                 
@@ -3748,7 +3914,6 @@ class ServiceAreaSearchWorker(QObject):
                 self._update_progress(message)
 
             # 検索を実行
-            self._update_progress()  # 初期進捗を表示
             result = search_service_area(
                 self.postal_code,
                 self.address,
