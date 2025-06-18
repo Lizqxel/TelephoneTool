@@ -40,27 +40,38 @@ from services.area_search import take_full_page_screenshot, check_cancellation, 
 global_driver = None
 
 # キャンセルフラグ
-global_cancel_flag = False
+_global_cancel_flag = False
 
-def set_cancel_flag(value: bool):
-    """
-    グローバルキャンセルフラグを設定
+def set_cancel_flag(value=True):
+    """キャンセルフラグを設定
     
     Args:
-        value (bool): 設定するキャンセルフラグの値
+        value (bool): 設定する値（デフォルト: True）
     """
-    global global_cancel_flag
-    global_cancel_flag = value
-    logging.info(f"東日本エリア検索のキャンセルフラグを {value} に設定しました")
+    global _global_cancel_flag
+    _global_cancel_flag = value
+    if value:
+        logging.info("★★★ エリア検索のキャンセルフラグを設定しました ★★★")
+    else:
+        logging.info("エリア検索のキャンセルフラグをクリアしました")
 
-def get_cancel_flag() -> bool:
-    """
-    グローバルキャンセルフラグを取得
-    
-    Returns:
-        bool: 現在のキャンセルフラグの値
-    """
-    return global_cancel_flag
+def clear_cancel_flag():
+    """キャンセルフラグをクリア"""
+    global _global_cancel_flag
+    _global_cancel_flag = False
+    logging.info("エリア検索のキャンセルフラグをクリアしました")
+
+def is_cancelled():
+    """キャンセルフラグの状態を確認（互換性のため）"""
+    global _global_cancel_flag
+    return _global_cancel_flag
+
+def check_cancellation():
+    """キャンセル要求をチェックし、必要に応じて例外を発生"""
+    global _global_cancel_flag
+    if _global_cancel_flag:
+        logging.info("★★★ キャンセル要求を検出：検索を中断します ★★★")
+        raise CancellationError("検索がキャンセルされました")
 
 def split_address(address):
     """
