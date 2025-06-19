@@ -1003,13 +1003,13 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 )
                 logging.info("番地入力ダイアログが表示されました")
                 
-                # 番地がない場合は「該当する住所がない」を選択
+                # 番地がない場合は「番地なし」を選択
                 if not street_number:
-                    logging.info("番地が指定されていないため、「該当する住所がない」を選択します")
+                    logging.info("番地が指定されていないため、「（番地なし）」を選択します")
                     try:
-                        # 「該当する住所がない」のリンクを探す
+                        # 「（番地なし）」のリンクを探す
                         no_address_link = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//dialog[@id='DIALOG_ID01']//a[contains(text(), '該当する住所がない')]"))
+                            EC.element_to_be_clickable((By.XPATH, "//dialog[@id='DIALOG_ID01']//a[contains(text(), '（番地なし）')]"))
                         )
                         
                         # スクロールしてリンクを表示
@@ -1019,7 +1019,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         # クリックを試行（複数の方法）
                         try:
                             no_address_link.click()
-                            logging.info("通常のクリックで「該当する住所がない」を選択しました")
+                            logging.info("通常のクリックで「（番地なし）」を選択しました")
                         except Exception as click_error:
                             logging.warning(f"通常のクリックに失敗: {str(click_error)}")
                             try:
@@ -1034,7 +1034,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         time.sleep(2)
                         
                     except Exception as e:
-                        logging.error(f"「該当する住所がない」の選択に失敗: {str(e)}")
+                        logging.error(f"「（番地なし）」の選択に失敗: {str(e)}")
                         driver.save_screenshot("debug_no_address_error.png")
                         raise
                 else:
@@ -1058,9 +1058,10 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         # キャンセルチェック
                         check_cancellation()
                         
-                        # 「該当する住所がない」ボタンと目的の番地ボタンを探す
+                        # 番地ボタンを探す（優先順位付き）
                         banchi_button = None
-                        no_address_button = None
+                        banchi_nashi_button = None
+                        gaitou_nashi_button = None
                         
                         for button in all_buttons:
                             try:
@@ -1070,13 +1071,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 button_text = button.text.strip()
                                 logging.info(f"番地ボタンのテキスト: {button_text}")
                                 
-                                if button_text == "該当する住所がない":
-                                    no_address_button = button
-                                    logging.info("「該当する住所がない」ボタンが見つかりました")
-                                # 全角・半角どちらでも一致するか確認
-                                elif button_text == input_street_number or button_text == zen_street_number:
+                                # 目的の番地を優先的に探す
+                                if button_text == input_street_number or button_text == zen_street_number:
                                     banchi_button = button
                                     logging.info(f"番地ボタンが見つかりました: {button_text}")
+                                # 番地なし系のボタンを探す
+                                elif button_text == "番地なし" or button_text == "（番地なし）":
+                                    banchi_nashi_button = button
+                                    logging.info(f"「{button_text}」ボタンが見つかりました")
+                                # 該当する住所がないボタンを探す（最後の手段）
+                                elif button_text == "該当する住所がない":
+                                    gaitou_nashi_button = button
+                                    logging.info(f"「{button_text}」ボタンが見つかりました")
                             except CancellationError:
                                 # キャンセル例外は再発生
                                 raise
@@ -1084,8 +1090,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                                 continue
                         
-                        # 目的の番地が見つからない場合は「該当する住所がない」を選択
-                        target_button = banchi_button if banchi_button else no_address_button
+                        # 優先順位に従ってボタンを選択
+                        if banchi_button:
+                            target_button = banchi_button
+                            logging.info(f"目的の番地ボタンを選択: {input_street_number}")
+                        elif banchi_nashi_button:
+                            target_button = banchi_nashi_button
+                            logging.info("「番地なし」系のボタンを選択")
+                        elif gaitou_nashi_button:
+                            target_button = gaitou_nashi_button
+                            logging.info("「該当する住所がない」ボタンを選択（フォールバック）")
+                        else:
+                            target_button = None
                         
                         if target_button:
                             try:
@@ -1160,15 +1176,19 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 logging.info("号入力ダイアログが表示されました")
                 
                 # 号を入力
-                input_building_number = building_number if building_number else "1"
+                input_building_number = building_number
                 logging.info(f"入力予定の号: {input_building_number}")
                 
-                # 全角数字に変換
-                zen_numbers = "０１２３４５６７８９"
-                han_numbers = "0123456789"
-                trans_table = str.maketrans(han_numbers, zen_numbers)
-                zen_building_number = input_building_number.translate(trans_table)
-                logging.info(f"全角変換後の号: {zen_building_number}")
+                # 全角数字に変換（号がある場合のみ）
+                if input_building_number:
+                    zen_numbers = "０１２３４５６７８９"
+                    han_numbers = "0123456789"
+                    trans_table = str.maketrans(han_numbers, zen_numbers)
+                    zen_building_number = input_building_number.translate(trans_table)
+                    logging.info(f"全角変換後の号: {zen_building_number}")
+                else:
+                    zen_building_number = None
+                    logging.info("号の指定がないため、号なし系のボタンを優先します")
                 
                 # 号ボタンを探す
                 try:
@@ -1179,9 +1199,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     # キャンセルチェック
                     check_cancellation()
                     
-                    # 「該当する住所がない」ボタンと目的の号ボタンを探す
+                    # 号ボタンを探す（優先順位付き）
                     gou_button = None
-                    no_address_button = None
+                    gou_nashi_button = None
+                    banchi_nashi_button = None  # 番地なし系のボタンを追加
+                    gaitou_nashi_button = None
                     
                     for button in all_buttons:
                         try:
@@ -1191,13 +1213,22 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             button_text = button.text.strip()
                             logging.info(f"号ボタンのテキスト: {button_text}")
                             
-                            if button_text == "該当する住所がない":
-                                no_address_button = button
-                                logging.info("「該当する住所がない」ボタンが見つかりました")
-                            # 全角・半角どちらでも一致するか確認
-                            elif button_text == input_building_number or button_text == zen_building_number:
+                            # 号の指定がある場合は目的の号を優先的に探す
+                            if input_building_number and (button_text == input_building_number or button_text == zen_building_number):
                                 gou_button = button
                                 logging.info(f"号ボタンが見つかりました: {button_text}")
+                            # 号なし系のボタンを探す
+                            elif button_text == "（号なし）" or button_text == "号なし":
+                                gou_nashi_button = button
+                                logging.info(f"「{button_text}」ボタンが見つかりました")
+                            # 番地なし系のボタンを探す（号選択画面でも使われることがある）
+                            elif button_text == "（番地なし）" or button_text == "番地なし":
+                                banchi_nashi_button = button
+                                logging.info(f"「{button_text}」ボタンが見つかりました")
+                            # 該当する住所がないボタンを探す（最後の手段）
+                            elif button_text == "該当する住所がない":
+                                gaitou_nashi_button = button
+                                logging.info(f"「{button_text}」ボタンが見つかりました")
                         except CancellationError:
                             # キャンセル例外は再発生
                             raise
@@ -1205,8 +1236,28 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             logging.warning(f"ボタンテキストの取得中にエラー: {str(e)}")
                             continue
                     
-                    # 目的の号が見つからない場合は「該当する住所がない」を選択
-                    target_button = gou_button if gou_button else no_address_button
+                    # 優先順位に従ってボタンを選択
+                    # 号の指定がない場合は号なし系を優先
+                    if not input_building_number and gou_nashi_button:
+                        target_button = gou_nashi_button
+                        logging.info("号の指定がないため「号なし」系ボタンを選択")
+                    elif not input_building_number and banchi_nashi_button:
+                        target_button = banchi_nashi_button
+                        logging.info("号の指定がないため「番地なし」系ボタンを選択")
+                    elif input_building_number and gou_button:
+                        target_button = gou_button
+                        logging.info(f"目的の号ボタンを選択: {input_building_number}")
+                    elif gou_nashi_button:
+                        target_button = gou_nashi_button
+                        logging.info("「号なし」系のボタンを選択（フォールバック）")
+                    elif banchi_nashi_button:
+                        target_button = banchi_nashi_button
+                        logging.info("「番地なし」系のボタンを選択（フォールバック）")
+                    elif gaitou_nashi_button:
+                        target_button = gaitou_nashi_button
+                        logging.info("「該当する住所がない」ボタンを選択（最終フォールバック）")
+                    else:
+                        target_button = None
                     
                     if target_button:
                         try:
