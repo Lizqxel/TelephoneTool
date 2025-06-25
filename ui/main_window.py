@@ -3686,22 +3686,41 @@ ND：{nd}
                 
                 logging.info("アプリケーションを再起動します...")
                 
-                # Pythonスクリプトを再実行
+                # 実行ファイルのパスを正しく取得
                 import sys
                 import os
+                import subprocess
                 
-                # 現在のPythonインタープリターと実行中のスクリプトを取得
-                python_executable = sys.executable
-                script_path = sys.argv[0]
-                
-                # 新しいプロセスでアプリケーションを起動
-                if os.name == 'nt':  # Windows
-                    import subprocess
-                    subprocess.Popen([python_executable, script_path])
-                else:  # Unix/Linux/Mac
-                    os.execv(python_executable, [python_executable] + sys.argv)
+                if getattr(sys, 'frozen', False):
+                    # PyInstallerで作成されたexeファイルの場合
+                    executable_path = sys.executable
+                    logging.info(f"PyInstaller環境での再起動: {executable_path}")
+                    
+                    # 新しいプロセスを起動（引数なしで起動）
+                    try:
+                        subprocess.Popen([executable_path], 
+                                       cwd=os.path.dirname(executable_path),
+                                       creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
+                        logging.info("新しいプロセスを起動しました")
+                    except Exception as start_error:
+                        logging.error(f"新しいプロセス起動エラー: {start_error}")
+                        QMessageBox.critical(self, "エラー", f"新しいプロセスの起動に失敗しました: {str(start_error)}")
+                        return
+                else:
+                    # 通常のPythonスクリプトとして実行されている場合
+                    python_executable = sys.executable
+                    script_path = sys.argv[0]
+                    
+                    # 新しいプロセスでアプリケーションを起動
+                    if os.name == 'nt':  # Windows
+                        subprocess.Popen([python_executable, script_path])
+                    else:  # Unix/Linux/Mac
+                        os.execv(python_executable, [python_executable] + sys.argv)
+                    
+                    logging.info("通常のPython環境での再起動")
                 
                 # 現在のアプリケーションを終了
+                logging.info("現在のプロセスを終了します")
                 QApplication.quit()
                 
         except Exception as e:
