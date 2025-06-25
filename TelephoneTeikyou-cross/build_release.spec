@@ -32,6 +32,7 @@ added_files = [
     ('version.py', '.'),
     ('requirements.txt', '.'),
     ('icon_orange.ico', '.'),  # オレンジ色のアイコンを使用
+    ('pyside6_fix.py', '.'),  # PySide6修正モジュールを追加
     ('utils', 'utils'),
     ('ui', 'ui'),
     ('services', 'services')
@@ -85,7 +86,7 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir='.',  # 実行ファイルと同じディレクトリに一時ディレクトリを作成
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
