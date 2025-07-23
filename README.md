@@ -1,6 +1,6 @@
 # TelephoneTool - コールセンター業務効率化ツール
 
-![バージョン](https://img.shields.io/badge/version-1.7.0-blue.svg)
+![バージョン](https://img.shields.io/badge/version-2.4.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![ライセンス](https://img.shields.io/badge/license-proprietary-red.svg)
 
