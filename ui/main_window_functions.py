@@ -462,8 +462,84 @@ ND：{nd}
     
     def write_to_spreadsheet(self):
         """スプレッドシートにデータを書き込む"""
-        # この部分は実装しない（必要に応じて実装）
-        QMessageBox.information(self, "情報", "スプレッドシート連携機能は実装されていません。")
+        try:
+            # 選択・既定値の準備（UIから取得できるものは埋める）
+            # 直近のCTI取得データを優先（管理番号・リスト名を自動投入）
+            cti = getattr(self, 'cti_service', None)
+            cti_data = None
+            try:
+                if cti and hasattr(cti, 'get_all_fields_data'):
+                    cti_data = cti.get_all_fields_data()
+            except Exception:
+                cti_data = None
+
+            import datetime as _dt
+            today_str = _dt.date.today().strftime('%Y-%m-%d')
+            now_str = _dt.datetime.now().strftime('%H:%M')
+
+            # 転記先選択肢（settings.json の destinations）
+            destinations = []
+            try:
+                if hasattr(self, 'settings') and isinstance(self.settings, dict):
+                    gf = self.settings.get('googleFormPosting', {})
+                    destinations = gf.get('destinations', []) or []
+            except Exception:
+                destinations = []
+
+            initial_values = {
+                'destinations': destinations,
+                'kanKatsu': getattr(self, 'settings', {}).get('last_kanKatsu', '岩田管轄') if hasattr(self, 'settings') else '岩田管轄',
+                'kakutokuSha': getattr(self, 'order_person_input', None).text().strip() if hasattr(self, 'order_person_input') else '',
+                'kakutokuId': getattr(cti_data, 'management_id', '') if cti_data else '',
+                'listName': getattr(cti_data, 'list_name', '') if cti_data else (getattr(self, 'list_name_input', None).text().strip() if hasattr(self, 'list_name_input') else ''),
+                'shozai': 'NA光',
+                'kubun': '新規',
+                'kadenTime': now_str,
+                'freeBox': '',
+                'tosDate': today_str,
+                'zenkakuCallDate': today_str,
+                'zenkakuResult': '前確待ち',
+            }
+
+            # 入力ダイアログを表示
+            from ui.spreadsheet_post_dialog import SpreadsheetPostDialog
+            dialog = SpreadsheetPostDialog(self, initial_values)
+            if dialog.exec():
+                values = dialog.getValues()
+                # サービス送信
+                from services.google_form_sender import GoogleFormSender
+                sender = GoogleFormSender()
+                payload = {
+                    'kanKatsu': initial_values['kanKatsu'],
+                    'kakutokuSha': values.get('kakutokuSha', ''),
+                    'kakutokuId': values.get('kakutokuId', ''),
+                    'listName': values.get('listName', ''),
+                    'shozai': values.get('shozai', 'NA光'),
+                    'kubun': values.get('kubun', '新規'),
+                    'kadenTime': values.get('kadenTime', ''),
+                    'freeBox': values.get('freeBox', ''),
+                    'tosDate': values.get('tosDate', ''),
+                    'zenkakuCallDate': values.get('zenkakuCallDate', ''),
+                    'zenkakuResult': values.get('zenkakuResult', '前確待ち'),
+                }
+                # 転記先キー
+                route_key = values.get('routeKey', '')
+                if route_key:
+                    payload['routeKey'] = route_key
+                sender.send(payload)
+                # 入力された管轄を次回以降の既定として保存
+                try:
+                    if hasattr(self, 'settings') and isinstance(self.settings, dict):
+                        self.settings['last_kanKatsu'] = values.get('kanKatsu', '') or initial_values['kanKatsu']
+                        with open(self.settings_file, 'w', encoding='utf-8') as f:
+                            import json as _json
+                            _json.dump(self.settings, f, ensure_ascii=False, indent=2)
+                except Exception as _se:
+                    logging.warning(f"管轄の既定値保存に失敗: {_se}")
+                QMessageBox.information(self, "成功", "スプレッドシートに転記リクエストを送信しました。\n数秒後に本番タブへ反映されます。")
+        except Exception as e:
+            logging.error(f"スプレッドシート転記エラー: {e}")
+            QMessageBox.critical(self, "エラー", f"スプレッドシート転記中にエラーが発生しました:\n{e}")
     
     def show_settings(self):
         """設定ダイアログを表示"""
