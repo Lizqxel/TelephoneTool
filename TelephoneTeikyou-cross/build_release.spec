@@ -43,6 +43,7 @@ datas = []
 datas += collect_data_files('selenium')
 datas += collect_data_files('webdriver_manager')
 datas += collect_data_files('PIL')  # PILライブラリのデータファイルを追加
+datas += collect_data_files('pykakasi')  # pykakasi のデータファイル
 for src, dst in added_files:
     if os.path.exists(os.path.join(work_dir, src)):
         datas.append((os.path.join(work_dir, src), dst))
@@ -52,6 +53,8 @@ hiddenimports = []
 hiddenimports += collect_submodules('selenium')
 hiddenimports += collect_submodules('webdriver_manager')
 hiddenimports += collect_submodules('PIL')  # PILライブラリのサブモジュールを追加
+hiddenimports += collect_submodules('pykakasi')  # pykakasi のサブモジュール
+hiddenimports += ['jaconv']  # 依存関係
 
 # 実行ファイルの設定
 a = Analysis(
