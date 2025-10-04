@@ -19,7 +19,9 @@ from __future__ import annotations
 
 from typing import Dict, Any, List, Tuple
 import json
+import sys
 from pathlib import Path
+import logging
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit, QPushButton, QCheckBox
 from PySide6.QtCore import Qt, QDate, QTime
 
@@ -218,43 +220,82 @@ class SpreadsheetPostDialog(QDialog):
 
 
 def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
-    """settings.json から Googleフォーム転送先の候補を読み込む。
+    """設定ファイルから Googleフォーム転送先の候補を読み込む。
+
+    探索順: exe直下 → CWD → ソース直下 → _MEIPASS
+    ファイル名の優先順: gform_settings.json → settings.json → setteings.json
 
     Returns:
         (items, default_key)
         items: [{label, routeKey}, ...]
-        default_key: 優先既定（ZAI_HOME があればそれ、なければ DEV、次に先頭、無ければ空）
+        default_key: 優先既定（設定値 defaultRouteKey があれば優先、無ければ ZAI_HOME→DEV→先頭）
     """
-    try:
-        # settings.json を優先、無ければ setteings.json をフォールバック
-        root = Path(__file__).resolve().parents[1]
-        settings_path = root / "settings.json"
-        if not settings_path.exists():
-            alt = root / "setteings.json"
-            if alt.exists():
-                settings_path = alt
-        data = json.loads(settings_path.read_text(encoding="utf-8"))
-        gfp = (data or {}).get("googleFormPosting", {})
-        dests = list(gfp.get("destinations") or [])
-        items: List[Dict[str, str]] = []
-        for d in dests:
-            rk = str((d or {}).get("routeKey", "")).strip()
-            if not rk:
-                continue
-            label = str((d or {}).get("label", "")).strip() or rk
-            items.append({"label": label, "routeKey": rk})
+    def _candidate_files() -> List[Path]:
+        names = ("gform_settings.json", "settings.json", "setteings.json")
+        dirs: List[Path] = []
+        try:
+            dirs.append(Path(sys.argv[0]).resolve().parent)
+        except Exception:
+            pass
+        try:
+            dirs.append(Path.cwd())
+        except Exception:
+            pass
+        try:
+            dirs.append(Path(__file__).resolve().parents[1])
+        except Exception:
+            pass
+        try:
+            if hasattr(sys, "_MEIPASS"):
+                mp = Path(sys._MEIPASS)
+                dirs += [mp, mp / "TelephoneTool", mp / "config"]
+        except Exception:
+            pass
+        out: List[Path] = []
+        seen: set[str] = set()
+        for d in dirs:
+            for n in names:
+                p = (d / n).resolve()
+                ps = str(p)
+                if ps in seen:
+                    continue
+                seen.add(ps)
+                if p.exists():
+                    out.append(p)
+        return out
 
-        # 既定キーは heuristics で決定
-        keys = [i["routeKey"] for i in items]
-        default_key = ""
-        for cand in ("ZAI_HOME", "DEV"):
-            if cand in keys:
-                default_key = cand
-                break
-        if not default_key and keys:
-            default_key = keys[0]
-        return items, default_key
-    except Exception:
-        return [], ""
+    # デフォルト
+    items: List[Dict[str, str]] = []
+    default_key = ""
+    for p in _candidate_files():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            gfp = (data or {}).get("googleFormPosting", {})
+            dests = list(gfp.get("destinations") or [])
+            if not dests:
+                continue
+            items = []
+            for d in dests:
+                rk = str((d or {}).get("routeKey", "")).strip()
+                if not rk:
+                    continue
+                label = str((d or {}).get("label", "")).strip() or rk
+                items.append({"label": label, "routeKey": rk})
+            # defaultRouteKey 優先
+            default_key = str(gfp.get("defaultRouteKey", "")).strip()
+            if not default_key:
+                keys = [i["routeKey"] for i in items]
+                for cand in ("ZAI_HOME", "DEV"):
+                    if cand in keys:
+                        default_key = cand
+                        break
+                if not default_key and keys:
+                    default_key = keys[0]
+            logging.info(f"[GForm:UI] destinations loaded from: {p}")
+            return items, default_key
+        except Exception as e:
+            logging.warning(f"[GForm:UI] settings load failed at {p}: {e}")
+            continue
+    return items, default_key
 
 

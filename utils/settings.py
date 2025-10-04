@@ -9,6 +9,44 @@ import json
 import logging
 from typing import Dict, Any, Optional
 
+def _candidate_paths(default_name: str = "settings.json") -> list[str]:
+    """設定ファイル探索候補を返す（exe直下→CWD→ソース直下の順）。
+
+    - settings.json / setteings.json の両方を候補に含める
+    - 先に見つかったものを優先
+    """
+    paths: list[str] = []
+    try:
+        # exe と同じフォルダ（ビルド後はここを最優先）
+        exe_dir = os.path.dirname(os.path.abspath(os.path.expandvars(os.path.expanduser(os.sys.argv[0]))))
+        paths.append(os.path.join(exe_dir, "settings.json"))
+        paths.append(os.path.join(exe_dir, "setteings.json"))
+    except Exception:
+        pass
+    try:
+        # カレントディレクトリ
+        cwd = os.getcwd()
+        paths.append(os.path.join(cwd, "settings.json"))
+        paths.append(os.path.join(cwd, "setteings.json"))
+    except Exception:
+        pass
+    try:
+        # このファイルのあるソース直下
+        here = os.path.dirname(os.path.abspath(__file__))
+        root = os.path.dirname(here)
+        paths.append(os.path.join(root, "settings.json"))
+        paths.append(os.path.join(root, "setteings.json"))
+    except Exception:
+        pass
+    # 重複排除を保持順で
+    seen = set()
+    uniq: list[str] = []
+    for p in paths:
+        if p not in seen:
+            uniq.append(p)
+            seen.add(p)
+    return uniq
+
 class Settings:
     """設定を管理するクラス"""
     
@@ -19,31 +57,39 @@ class Settings:
         self.load_settings()
     
     def load_settings(self) -> None:
-        """設定を読み込む（settings.json / setteings.json の両対応）"""
+        """設定を読み込む（JSONファイルのみ）。
+
+        - 探索順: exe直下 → CWD → ソース直下
+        - settings.json / setteings.json の両対応
+        - 見つからなければ空設定のまま（自動保存しない）
+        """
         try:
-            # まずは指定されたパスを試す
-            target_path = self.settings_file
+            # 呼び出し時に明示パスが指定されている場合はそれを最優先
+            candidate_list = []
+            if self.settings_file and os.path.isabs(self.settings_file):
+                candidate_list.append(self.settings_file)
+            # 既定探索候補
+            candidate_list += _candidate_paths()
 
-            # 指定が settings.json で存在しない場合、同階層の setteings.json をフォールバック
-            try:
-                base = os.path.basename(self.settings_file)
-                dir_ = os.path.dirname(self.settings_file) or os.getcwd()
-                if not os.path.exists(target_path) and base.lower() == 'settings.json':
-                    alt = os.path.join(dir_, 'setteings.json')
-                    if os.path.exists(alt):
-                        target_path = alt
-                        # 以後の保存先もフォールバック先に合わせる
-                        self.settings_file = alt
-            except Exception:
-                pass
+            loaded_path: Optional[str] = None
+            for p in candidate_list:
+                try:
+                    if os.path.exists(p):
+                        with open(p, 'r', encoding='utf-8') as f:
+                            self.settings = json.load(f)
+                        loaded_path = p
+                        # 読み込みに成功したパスを以後の保存先にする
+                        self.settings_file = p
+                        break
+                except Exception:
+                    continue
 
-            if os.path.exists(target_path):
-                with open(target_path, 'r', encoding='utf-8') as f:
-                    self.settings = json.load(f)
+            if loaded_path:
+                logging.info(f"設定ファイルを読み込みました: {loaded_path}")
             else:
-                # どちらも存在しない場合は空設定として初期化し、指定パスに保存
+                # 見つからない場合は空設定のまま
                 self.settings = {}
-                self.save_settings()
+                logging.warning("設定ファイルが見つかりませんでした（空設定を使用します）。")
         except Exception as e:
             logging.error(f"設定の読み込み中にエラー: {e}")
             self.settings = {}

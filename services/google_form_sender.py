@@ -42,12 +42,12 @@ class GoogleFormSender:
 
         設定ファイルから送信設定を読み込みます。
         """
-        # 設定の探索順: gform_settings.json → settings.json → setteings.json → utils.settings
+        # 設定の探索順: exe直下/カレント/ソース直下の gform_settings.json → settings.json → setteings.json
         self.config, loaded_from = self._load_google_form_config()
         if loaded_from:
             logging.info(f"[GForm] config loaded from: {loaded_from}")
         else:
-            logging.info("[GForm] config loaded from: utils.settings")
+            logging.info("[GForm] config not found in file (googleFormPosting missing)")
 
         # formUrl / url の両対応
         self.formUrl: str = self.config.get("formUrl") or self.config.get("url")
@@ -217,9 +217,9 @@ class GoogleFormSender:
     def _load_google_form_config(self) -> Tuple[Dict[str, Any], Optional[str]]:
         """googleFormPosting 設定を外部ファイル優先で読み込む。
 
-        優先順: gform_settings.json → settings.json → setteings.json → utils.settings。
-        さらに、googleFormPosting が存在しても必須キー（url/formUrl と entryMap）を満たさないものはスキップし、
-        次の候補を評価する。
+        優先順: gform_settings.json → settings.json → setteings.json。
+        googleFormPosting が存在しても必須キー（url/formUrl と entryMap）を満たさないものはスキップし、
+        次の候補を評価する。ファイルに見つからない場合は空の辞書を返し、呼び出し側でエラーにする。
         """
         candidates = self._settings_candidates()
         for path, data in candidates:
@@ -232,10 +232,8 @@ class GoogleFormSender:
                     return g, path
             except Exception:
                 continue
-
-        # フォールバック: utils.settings（こちらも最低限の整合性チェックを行う）
-        g = settings.get("googleFormPosting", {}) or {}
-        return g, None
+        # ファイルから見つからない
+        return {}, None
 
     def _validate(self, d: Dict[str, Any]) -> None:
         """入力値の検証
