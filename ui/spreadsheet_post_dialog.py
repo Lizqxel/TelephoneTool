@@ -74,10 +74,25 @@ class SpreadsheetPostDialog(QDialog):
         except Exception:
             pass
 
-        # 管轄（A）
+        # 管轄（A）: 編集可能なプルダウン + 自由入力可（初期は未入力）
         layout.addWidget(QLabel("管轄"))
-        self.kanKatsuInput = QLineEdit(self.values.get("kanKatsu", ""))
-        layout.addWidget(self.kanKatsuInput)
+        self.kanKatsuCombo = QComboBox()
+        self.kanKatsuCombo.setEditable(True)
+        # 先頭は空（未入力）を用意
+        self.kanKatsuCombo.addItem("")
+        # 候補リスト
+        for label in ["岩田管轄", "佐藤秀管轄", "杉崎管轄", "角江管轄", "和田管轄"]:
+            self.kanKatsuCombo.addItem(label)
+        # 初期値（渡されていればそれを表示。なければ空のまま）
+        init_k = (self.values.get("kanKatsu") or "").strip()
+        if init_k:
+            idx = self.kanKatsuCombo.findText(init_k)
+            if idx >= 0:
+                self.kanKatsuCombo.setCurrentIndex(idx)
+            else:
+                # 候補外ならそのままテキストとしてセット
+                self.kanKatsuCombo.setCurrentText(init_k)
+        layout.addWidget(self.kanKatsuCombo)
 
         # 獲得者名（B）
         layout.addWidget(QLabel("獲得者名"))
@@ -188,7 +203,7 @@ class SpreadsheetPostDialog(QDialog):
         return {
             "routeKey": self.destCombo.currentData() or "",
             "routeLabel": self.destCombo.currentText() or "",
-            "kanKatsu": self.kanKatsuInput.text().strip(),
+            "kanKatsu": self.kanKatsuCombo.currentText().strip(),
             "kakutokuSha": self.kakutokuShaInput.text().strip(),
             "kakutokuId": self.kakutokuIdInput.text().strip(),
             "listName": self.listNameInput.text().strip(),
