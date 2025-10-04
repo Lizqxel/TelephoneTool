@@ -27,7 +27,7 @@ from __future__ import annotations
 import re
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 import requests
 
@@ -42,8 +42,18 @@ class GoogleFormSender:
 
         設定ファイルから送信設定を読み込みます。
         """
-        self.config: Dict[str, Any] = settings.get("googleFormPosting", {}) or {}
-        self.formUrl: str = self._get_required("formUrl")
+        # 設定の探索順: gform_settings.json → settings.json → setteings.json → utils.settings
+        self.config, loaded_from = self._load_google_form_config()
+        if loaded_from:
+            logging.info(f"[GForm] config loaded from: {loaded_from}")
+        else:
+            logging.info("[GForm] config loaded from: utils.settings")
+
+        # formUrl / url の両対応
+        self.formUrl: str = self.config.get("formUrl") or self.config.get("url")
+        if not self.formUrl:
+            raise ValueError("Googleフォーム送信設定に必須キー 'formUrl' が存在しません")
+
         self.tokenValue: str = self._get_required("tokenValue")
         self.timezone: str = self.config.get("timezone", "Asia/Tokyo")
         self.retryPolicy: Dict[str, Any] = self.config.get("retryPolicy", {"maxAttempts": 3, "backoffSeconds": [1, 3, 10]})
@@ -143,6 +153,89 @@ class GoogleFormSender:
         raise RuntimeError(f"Googleフォーム送信エラー: {lastErr}")
 
     # ===== 内部ヘルパ =====
+    def _settings_candidates(self) -> list[Tuple[str, Dict[str, Any]]]:
+        """gform_settings.json / settings.json / setteings.json を実行形態に応じて探索し、
+        見つかった全候補の (path, data) をリストで返す。
+
+        先に見つかった空の設定に引っ張られないよう、呼び出し側で要件を満たすものを選別する。
+        """
+        results: list[Tuple[str, Dict[str, Any]]] = []
+        try:
+            import sys, json
+            from pathlib import Path
+
+            names = ("gform_settings.json", "settings.json", "setteings.json")
+            dirs = []
+            # exe と同じフォルダ
+            try:
+                dirs.append(Path(sys.argv[0]).resolve().parent)
+            except Exception:
+                pass
+            # カレント
+            try:
+                dirs.append(Path.cwd())
+            except Exception:
+                pass
+            # 開発時のソース直下（.../TelephoneTool）
+            try:
+                dirs.append(Path(__file__).resolve().parents[1])
+            except Exception:
+                pass
+            # PyInstaller onefile 展開先
+            try:
+                if hasattr(sys, "_MEIPASS"):
+                    mp = Path(sys._MEIPASS)
+                    dirs += [mp, mp / "TelephoneTool", mp / "config"]
+            except Exception:
+                pass
+
+            seen: set[str] = set()
+            for d in dirs:
+                for n in names:
+                    try:
+                        p = (d / n).resolve()
+                    except Exception:
+                        continue
+                    ps = str(p)
+                    if ps in seen:
+                        continue
+                    seen.add(ps)
+                    if p.exists():
+                        try:
+                            txt = p.read_text(encoding="utf-8")
+                            data = json.loads(txt)
+                            if isinstance(data, dict):
+                                results.append((ps, data))
+                        except Exception:
+                            # 壊れた JSON はスキップ
+                            continue
+        except Exception:
+            # 何らかの理由で探索自体に失敗した場合は空を返す
+            return []
+        return results
+
+    def _load_google_form_config(self) -> Tuple[Dict[str, Any], Optional[str]]:
+        """googleFormPosting 設定を外部ファイル優先で読み込む。
+
+        優先順: gform_settings.json → settings.json → setteings.json → utils.settings。
+        さらに、googleFormPosting が存在しても必須キー（url/formUrl と entryMap）を満たさないものはスキップし、
+        次の候補を評価する。
+        """
+        candidates = self._settings_candidates()
+        for path, data in candidates:
+            try:
+                g = data.get("googleFormPosting") or {}
+                if not isinstance(g, dict) or not g:
+                    continue
+                # 必須キーの存在確認（url/formUrl と entryMap のいずれも必須）
+                if (g.get("formUrl") or g.get("url")) and g.get("entryMap"):
+                    return g, path
+            except Exception:
+                continue
+
+        # フォールバック: utils.settings（こちらも最低限の整合性チェックを行う）
+        g = settings.get("googleFormPosting", {}) or {}
+        return g, None
 
     def _validate(self, d: Dict[str, Any]) -> None:
         """入力値の検証
