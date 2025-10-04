@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
+import json
+from pathlib import Path
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit, QPushButton, QCheckBox
 from PySide6.QtCore import Qt, QDate, QTime
 
@@ -38,9 +40,39 @@ class SpreadsheetPostDialog(QDialog):
         # 転記先（Apps Script ルーティングキー）
         layout.addWidget(QLabel("転記先（シート選択）"))
         self.destCombo = QComboBox()
-        for dest in (self.values.get("destinations") or []):
+
+        # settings.json から destinations を読み込み、initialValues の destinations とマージ
+        settings_items, settings_default_key = load_destinations_from_settings()
+        init_items: List[Dict[str, str]] = list(self.values.get("destinations") or [])
+
+        # routeKey で重複を避けつつマージ（initialValues 優先の上書き）
+        merged: Dict[str, Dict[str, str]] = {}
+        for it in settings_items:
+            rk = (it.get("routeKey") or "").strip()
+            if rk:
+                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
+        for it in init_items:
+            rk = (it.get("routeKey") or "").strip()
+            if rk:
+                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
+
+        merged_list = list(merged.values())
+        if not merged_list and init_items:
+            merged_list = init_items
+
+        for dest in merged_list:
             self.destCombo.addItem(dest.get("label", ""), dest.get("routeKey", ""))
         layout.addWidget(self.destCombo)
+        # 既定の選択（initialValues に defaultRouteKey があれば優先）
+        try:
+            default_key = (self.values or {}).get("defaultRouteKey") or settings_default_key
+            if default_key:
+                for i in range(self.destCombo.count()):
+                    if (self.destCombo.itemData(i) or "").strip() == default_key:
+                        self.destCombo.setCurrentIndex(i)
+                        break
+        except Exception:
+            pass
 
         # 管轄（A）
         layout.addWidget(QLabel("管轄"))
@@ -112,6 +144,12 @@ class SpreadsheetPostDialog(QDialog):
         # 前確コール日 空欄チェック
         self.emptyZenkakuCheck = QCheckBox("前確コール日を空欄にする")
         layout.addWidget(self.emptyZenkakuCheck)
+        # チェック状態に応じて日付入力の有効/無効を切り替え
+        def _toggle_zenkaku_enabled(checked: bool):
+            self.zenkakuDateEdit.setEnabled(not checked)
+        self.emptyZenkakuCheck.toggled.connect(_toggle_zenkaku_enabled)
+        # 既定の状態反映
+        _toggle_zenkaku_enabled(self.emptyZenkakuCheck.isChecked())
 
         # 前確コール結果（P）
         layout.addWidget(QLabel("前確コール結果"))
@@ -128,7 +166,16 @@ class SpreadsheetPostDialog(QDialog):
         btnLayout.addWidget(self.cancelBtn)
         layout.addLayout(btnLayout)
 
-        self.okBtn.clicked.connect(self.accept)
+        # 入力検証付きの送信
+        def _on_accept():
+            # 制限事項に基づく必須チェック: 獲得時管理番号(C)
+            if not self.kakutokuIdInput.text().strip():
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "入力エラー", "獲得時管理番号(C)が未入力です。入力してください。")
+                return
+            self.accept()
+
+        self.okBtn.clicked.connect(_on_accept)
         self.cancelBtn.clicked.connect(self.reject)
 
     def getValues(self) -> Dict[str, Any]:
@@ -140,6 +187,7 @@ class SpreadsheetPostDialog(QDialog):
         zenkakuDate = "" if self.emptyZenkakuCheck.isChecked() else self.zenkakuDateEdit.date().toString("yyyy-MM-dd")
         return {
             "routeKey": self.destCombo.currentData() or "",
+            "routeLabel": self.destCombo.currentText() or "",
             "kanKatsu": self.kanKatsuInput.text().strip(),
             "kakutokuSha": self.kakutokuShaInput.text().strip(),
             "kakutokuId": self.kakutokuIdInput.text().strip(),
@@ -152,5 +200,41 @@ class SpreadsheetPostDialog(QDialog):
             "zenkakuCallDate": zenkakuDate,
             "zenkakuResult": self.zenkakuResultCombo.currentText(),
         }
+
+
+def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
+    """settings.json から Googleフォーム転送先の候補を読み込む。
+
+    Returns:
+        (items, default_key)
+        items: [{label, routeKey}, ...]
+        default_key: 優先既定（ZAI_HOME があればそれ、なければ DEV、次に先頭、無ければ空）
+    """
+    try:
+        # settings.json はプロジェクト直下に配置されている前提
+        settings_path = Path(__file__).resolve().parents[1] / "settings.json"
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+        gfp = (data or {}).get("googleFormPosting", {})
+        dests = list(gfp.get("destinations") or [])
+        items: List[Dict[str, str]] = []
+        for d in dests:
+            rk = str((d or {}).get("routeKey", "")).strip()
+            if not rk:
+                continue
+            label = str((d or {}).get("label", "")).strip() or rk
+            items.append({"label": label, "routeKey": rk})
+
+        # 既定キーは heuristics で決定
+        keys = [i["routeKey"] for i in items]
+        default_key = ""
+        for cand in ("ZAI_HOME", "DEV"):
+            if cand in keys:
+                default_key = cand
+                break
+        if not default_key and keys:
+            default_key = keys[0]
+        return items, default_key
+    except Exception:
+        return [], ""
 
 

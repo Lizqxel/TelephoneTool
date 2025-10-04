@@ -18,7 +18,7 @@
   "cti_auto_processing_cooldown": 3.0,
   "call_duration_threshold": 0,
   "googleFormPosting": {
-    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLSe_A7eI8wU-aKd7H7Iq13E0d3GvHRlAPdRRSPv92mSINsLv-A/formResponse",
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScX9KW23yuW5nT1Y6L31H0bb3N-HbSX-Cv9OlEfjQ2CLMUzUQ/formResponse",
     "tokenValue": "共有トークン",
     "timezone": "Asia/Tokyo",
     "retryPolicy": {
@@ -43,24 +43,28 @@
       {
         "label": "在宅管理ドライブ",
         "routeKey": "ZAI_HOME"
+      },
+      {
+        "label": "岩田部署管理ドライブ",
+        "routeKey": "IWATA"
       }
     ],
     "choices": {},
     "entryMap": {
-      "kanKatsu": "entry.348909373",
-      "kakutokuSha": "entry.108082987",
-      "kakutokuId": "entry.923323223",
-      "listName": "entry.1254379870",
-      "shozai": "entry.602770779",
-      "kubun": "entry.554033708",
-      "kadenTime": "entry.1975720711",
-      "freeBox": "entry.1584111860",
-      "tosDate": "entry.92556250",
-      "zenkakuCallDate": "entry.330733709",
-      "zenkakuResult": "entry.658123729",
-      "sharedToken": "entry.2112760449",
-      "routeKey": "entry.2028020812"
+      "kanKatsu": "entry.1653289377",
+      "kakutokuSha": "entry.1036430775",
+      "kakutokuId": "entry.115608654",
+      "listName": "entry.1448866842",
+      "shozai": "entry.934325871",
+      "kubun": "entry.1622243955",
+      "kadenTime": "entry.1830600860",
+      "freeBox": "entry.1672212308",
+      "tosDate": "entry.1955799782",
+      "zenkakuCallDate": "entry.1850260892",
+      "zenkakuResult": "entry.1222236713",
+      "sharedToken": "entry.1735555322",
+      "routeKey": "entry.53856546"
     }
   },
-  "last_kanKatsu": "岩田管轄"
+  "last_kanKatsu": "杉崎管轄"
 }

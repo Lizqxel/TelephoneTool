@@ -536,7 +536,12 @@ ND：{nd}
                             _json.dump(self.settings, f, ensure_ascii=False, indent=2)
                 except Exception as _se:
                     logging.warning(f"管轄の既定値保存に失敗: {_se}")
-                QMessageBox.information(self, "成功", "スプレッドシートに転記リクエストを送信しました。\n数秒後に本番タブへ反映されます。")
+                # 転記先のラベルを含めてユーザーに案内
+                route_label = values.get('routeLabel') or values.get('routeKey') or ''
+                if route_label:
+                    QMessageBox.information(self, "成功", f"[{route_label}] へ転記リクエストを送信しました。\n数秒後に反映されます。")
+                else:
+                    QMessageBox.information(self, "成功", "スプレッドシートに転記リクエストを送信しました。\n数秒後に反映されます。")
         except Exception as e:
             logging.error(f"スプレッドシート転記エラー: {e}")
             QMessageBox.critical(self, "エラー", f"スプレッドシート転記中にエラーが発生しました:\n{e}")

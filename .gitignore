@@ -45,6 +45,8 @@ screenshots/
 venv/
 env/
 ENV/
+.venv/
+venvvenv/
 
 # IDE関連
 .idea/
