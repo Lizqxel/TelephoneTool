@@ -34,6 +34,8 @@ added_files = [
     ('qt.conf', '.'),
     ('version.py', '.'),
     ('requirements.txt', '.'),
+    ('gform_settings.json', '.'),
+    ('settings.json', '.'),
     ('icon.ico', '.'),
     ('pyside6_fix.py', '.'),
     ('utils', 'utils'),
