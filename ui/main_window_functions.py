@@ -510,7 +510,8 @@ ND：{nd}
                 from services.google_form_sender import GoogleFormSender
                 sender = GoogleFormSender()
                 payload = {
-                    'kanKatsu': initial_values['kanKatsu'],
+                    # 管轄はUI入力（ダイアログ値）を優先。未入力時のみ初期値を使う
+                    'kanKatsu': (values.get('kanKatsu') or initial_values['kanKatsu']),
                     'kakutokuSha': values.get('kakutokuSha', ''),
                     'kakutokuId': values.get('kakutokuId', ''),
                     'listName': values.get('listName', ''),
@@ -526,6 +527,14 @@ ND：{nd}
                 route_key = values.get('routeKey', '')
                 if route_key:
                     payload['routeKey'] = route_key
+                # 送信前ログ（動作確認用）
+                try:
+                    logging.info(
+                        f"[GForm:UI] routeKey={payload.get('routeKey','')} kanKatsu={payload.get('kanKatsu','')} "
+                        f"shozai={payload.get('shozai','')} kubun={payload.get('kubun','')}"
+                    )
+                except Exception:
+                    pass
                 sender.send(payload)
                 # 入力された管轄を次回以降の既定として保存
                 try:
