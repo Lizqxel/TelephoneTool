@@ -211,8 +211,13 @@ def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
         default_key: 優先既定（ZAI_HOME があればそれ、なければ DEV、次に先頭、無ければ空）
     """
     try:
-        # settings.json はプロジェクト直下に配置されている前提
-        settings_path = Path(__file__).resolve().parents[1] / "settings.json"
+        # settings.json を優先、無ければ setteings.json をフォールバック
+        root = Path(__file__).resolve().parents[1]
+        settings_path = root / "settings.json"
+        if not settings_path.exists():
+            alt = root / "setteings.json"
+            if alt.exists():
+                settings_path = alt
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         gfp = (data or {}).get("googleFormPosting", {})
         dests = list(gfp.get("destinations") or [])

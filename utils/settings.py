@@ -19,12 +19,29 @@ class Settings:
         self.load_settings()
     
     def load_settings(self) -> None:
-        """設定を読み込む"""
+        """設定を読み込む（settings.json / setteings.json の両対応）"""
         try:
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
+            # まずは指定されたパスを試す
+            target_path = self.settings_file
+
+            # 指定が settings.json で存在しない場合、同階層の setteings.json をフォールバック
+            try:
+                base = os.path.basename(self.settings_file)
+                dir_ = os.path.dirname(self.settings_file) or os.getcwd()
+                if not os.path.exists(target_path) and base.lower() == 'settings.json':
+                    alt = os.path.join(dir_, 'setteings.json')
+                    if os.path.exists(alt):
+                        target_path = alt
+                        # 以後の保存先もフォールバック先に合わせる
+                        self.settings_file = alt
+            except Exception:
+                pass
+
+            if os.path.exists(target_path):
+                with open(target_path, 'r', encoding='utf-8') as f:
                     self.settings = json.load(f)
             else:
+                # どちらも存在しない場合は空設定として初期化し、指定パスに保存
                 self.settings = {}
                 self.save_settings()
         except Exception as e:
