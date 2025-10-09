@@ -369,18 +369,17 @@ ND：{nd}
         dest_group = QGroupBox("転記先（Googleフォーム送信）")
         dest_layout = QVBoxLayout()
 
-        dest_desc = QLabel("settings.json の googleFormPosting.destinations を編集できます。\n表示名・転送先キー・スプレッドシートURL・シート名を管理します。")
+        dest_desc = QLabel("settings.json の googleFormPosting.destinations を編集できます。\n表示名・スプレッドシートURL・シート名を管理します。")
         dest_desc.setWordWrap(True)
         dest_layout.addWidget(dest_desc)
 
         # 転記先テーブル
-        self.dest_table = QTableWidget(0, 4, self)
-        self.dest_table.setHorizontalHeaderLabels(["表示名", "転送先キー", "スプシURL", "シート名"])
+        self.dest_table = QTableWidget(0, 3, self)
+        self.dest_table.setHorizontalHeaderLabels(["表示名", "スプシURL", "シート名"])
         header = self.dest_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.dest_table.setSelectionBehavior(self.dest_table.SelectionBehavior.SelectRows)
         self.dest_table.setSelectionMode(self.dest_table.SelectionMode.SingleSelection)
         dest_layout.addWidget(self.dest_table)
@@ -685,9 +684,8 @@ ND：{nd}
                 row = self.dest_table.rowCount()
                 self.dest_table.insertRow(row)
                 self.dest_table.setItem(row, 0, QTableWidgetItem(str(d.get('label', ''))))
-                self.dest_table.setItem(row, 1, QTableWidgetItem(str(d.get('routeKey', ''))))
-                self.dest_table.setItem(row, 2, QTableWidgetItem(str(d.get('spreadsheetUrl', ''))))
-                self.dest_table.setItem(row, 3, QTableWidgetItem(str(d.get('sheetName', ''))))
+                self.dest_table.setItem(row, 1, QTableWidgetItem(str(d.get('spreadsheetUrl', ''))))
+                self.dest_table.setItem(row, 2, QTableWidgetItem(str(d.get('sheetName', ''))))
         except Exception:
             pass
 
@@ -696,39 +694,25 @@ ND：{nd}
         rows = self.dest_table.rowCount()
         for r in range(rows):
             label = (self.dest_table.item(r, 0).text() if self.dest_table.item(r, 0) else '').strip()
-            key = (self.dest_table.item(r, 1).text() if self.dest_table.item(r, 1) else '').strip()
-            url = (self.dest_table.item(r, 2).text() if self.dest_table.item(r, 2) else '').strip()
-            sname = (self.dest_table.item(r, 3).text() if self.dest_table.item(r, 3) else '').strip()
-            if label or key or url or sname:
+            url = (self.dest_table.item(r, 1).text() if self.dest_table.item(r, 1) else '').strip()
+            sname = (self.dest_table.item(r, 2).text() if self.dest_table.item(r, 2) else '').strip()
+            if label or url or sname:
                 dests.append({
                     'label': label,
-                    'routeKey': key,
                     'spreadsheetUrl': url,
                     'sheetName': sname,
                 })
-        # routeKey の重複チェック（重複がある場合は後勝ちでユニーク化）
-        seen = {}
-        for d in dests:
-            seen[d.get('routeKey','')] = d
-        # routeKey が空のものも残したい場合はそのまま返す
-        # ここではユニーク化結果を返す
-        result = [v for k, v in seen.items() if k or v.get('label')]
-        return result
+        return dests
 
     def _on_add_destination(self):
         data = self._prompt_destination()
         if data is None:
             return
-        # 追加（routeKey重複は許可しない）
-        if self._routekey_exists(data.get('routeKey','')):
-            QMessageBox.warning(self, "入力エラー", f"転送先キー『{data.get('routeKey','')}』は既に存在します。")
-            return
         row = self.dest_table.rowCount()
         self.dest_table.insertRow(row)
         self.dest_table.setItem(row, 0, QTableWidgetItem(data.get('label','')))
-        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('routeKey','')))
-        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('spreadsheetUrl','')))
-        self.dest_table.setItem(row, 3, QTableWidgetItem(data.get('sheetName','')))
+        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('spreadsheetUrl','')))
+        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('sheetName','')))
 
     def _on_edit_destination(self):
         row = self.dest_table.currentRow()
@@ -736,21 +720,15 @@ ND：{nd}
             return
         cur = {
             'label': self.dest_table.item(row, 0).text() if self.dest_table.item(row, 0) else '',
-            'routeKey': self.dest_table.item(row, 1).text() if self.dest_table.item(row, 1) else '',
-            'spreadsheetUrl': self.dest_table.item(row, 2).text() if self.dest_table.item(row, 2) else '',
-            'sheetName': self.dest_table.item(row, 3).text() if self.dest_table.item(row, 3) else '',
+            'spreadsheetUrl': self.dest_table.item(row, 1).text() if self.dest_table.item(row, 1) else '',
+            'sheetName': self.dest_table.item(row, 2).text() if self.dest_table.item(row, 2) else '',
         }
         data = self._prompt_destination(cur)
         if data is None:
             return
-        # routeKey重複チェック（自分以外）
-        if data.get('routeKey','') != cur.get('routeKey','') and self._routekey_exists(data.get('routeKey','')):
-            QMessageBox.warning(self, "入力エラー", f"転送先キー『{data.get('routeKey','')}』は既に存在します。")
-            return
         self.dest_table.setItem(row, 0, QTableWidgetItem(data.get('label','')))
-        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('routeKey','')))
-        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('spreadsheetUrl','')))
-        self.dest_table.setItem(row, 3, QTableWidgetItem(data.get('sheetName','')))
+        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('spreadsheetUrl','')))
+        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('sheetName','')))
 
     def _on_delete_destination(self):
         row = self.dest_table.currentRow()
@@ -761,30 +739,17 @@ ND：{nd}
             return
         self.dest_table.removeRow(row)
 
-    def _routekey_exists(self, route_key: str) -> bool:
-        rk = (route_key or '').strip()
-        if not rk:
-            return False
-        rows = self.dest_table.rowCount()
-        for r in range(rows):
-            val = self.dest_table.item(r, 1).text() if self.dest_table.item(r, 1) else ''
-            if val.strip() == rk:
-                return True
-        return False
-
     def _prompt_destination(self, init=None):
         dlg = QDialog(self)
         dlg.setWindowTitle("転記先の編集")
         lay = QVBoxLayout(dlg)
         le_label = QLineEdit(dlg); le_label.setPlaceholderText("表示名（例: 岩田部署管理ドライブ）")
-        le_key = QLineEdit(dlg);   le_key.setPlaceholderText("転送先キー（例: IWATA_DEPT）")
-        le_url = QLineEdit(dlg);   le_url.setPlaceholderText("スプレッドシートURL（任意）")
-        le_snm = QLineEdit(dlg);   le_snm.setPlaceholderText("シート名（任意）")
+        le_url = QLineEdit(dlg);   le_url.setPlaceholderText("スプレッドシートURL（必須）")
+        le_snm = QLineEdit(dlg);   le_snm.setPlaceholderText("シート名（必須）")
 
         def add_row(caption, w):
             row = QHBoxLayout(); row.addWidget(QLabel(caption + '：')); row.addWidget(w); lay.addLayout(row)
         add_row("表示名", le_label)
-        add_row("転送先キー", le_key)
         add_row("スプシURL", le_url)
         add_row("シート名", le_snm)
         btns = QHBoxLayout(); btn_ok = QPushButton("OK", dlg); btn_ng = QPushButton("キャンセル", dlg)
@@ -792,7 +757,6 @@ ND：{nd}
 
         if init:
             le_label.setText(init.get('label',''))
-            le_key.setText(init.get('routeKey',''))
             le_url.setText(init.get('spreadsheetUrl',''))
             le_snm.setText(init.get('sheetName',''))
 
@@ -801,8 +765,11 @@ ND：{nd}
             if not le_label.text().strip():
                 QMessageBox.warning(dlg, "入力エラー", "表示名は必須です。")
                 return
-            if not le_key.text().strip():
-                QMessageBox.warning(dlg, "入力エラー", "転送先キーは必須です。")
+            if not le_url.text().strip():
+                QMessageBox.warning(dlg, "入力エラー", "スプレッドシートURLは必須です。")
+                return
+            if not le_snm.text().strip():
+                QMessageBox.warning(dlg, "入力エラー", "シート名は必須です。")
                 return
             data_holder['ok'] = True
             dlg.accept()
@@ -811,7 +778,6 @@ ND：{nd}
         if dlg.exec() == QDialog.Accepted and data_holder['ok']:
             return {
                 'label': le_label.text().strip(),
-                'routeKey': le_key.text().strip(),
                 'spreadsheetUrl': le_url.text().strip(),
                 'sheetName': le_snm.text().strip(),
             }

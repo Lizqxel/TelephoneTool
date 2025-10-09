@@ -118,10 +118,13 @@ class GoogleFormSender:
                 formBody[entryKey] = "" if value is None else str(value)
         # 共有トークン
         formBody[self.entryMap["sharedToken"]] = self.tokenValue
-        # ルーティングキー（Apps Script 側で複数スプレッドシート振り分け）
-        route_key_entry = self.entryMap.get("routeKey")
-        if route_key_entry and data.get("routeKey"):
-            formBody[route_key_entry] = str(data["routeKey"])  # 例: DEV / ZAI_HOME
+        # スプレッドシートURL/シート名（フォームに項目があれば送る）
+        url_entry = self.entryMap.get("spreadsheetUrl")
+        if url_entry and data.get("spreadsheetUrl"):
+            formBody[url_entry] = str(data["spreadsheetUrl"])  # 例: https://docs.google.com/spreadsheets/d/.../edit
+        sname_entry = self.entryMap.get("sheetName")
+        if sname_entry and data.get("sheetName"):
+            formBody[sname_entry] = str(data["sheetName"])      # 例: 実績反映
 
         # フォーム短文化後: choicesが空なら“その他”は適用しない
         if self.choices:
