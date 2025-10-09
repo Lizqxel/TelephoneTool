@@ -1,13 +1,21 @@
 """
-よみたんAPIとpykakasiを使用してフリガナ変換を行うユーティリティモジュール。
+フリガナ変換ユーティリティ（pykakasi専用版）。
 
 このモジュールは、漢字テキストをカタカナに変換する機能を提供します。
-よみたんAPIが利用できない場合は、pykakasiを使用してフォールバックします。
+外部API（よみたん）は使用せず、`pykakasi` のみで変換します。
+
+主な仕様:
+- 入力となる任意の文字列を `pykakasi` でかな変換し、`jaconv` でカタカナへ統一
+- エラー時は詳細ログを出力し、`None` を返却
+
+制限事項:
+- 人名・地名など固有名詞の長音・拗音の揺れは発生しうる
+- `pykakasi` の辞書精度に依存
 """
 
 import logging
-import requests
-from urllib.parse import quote, unquote
+# import requests  # よみたんAPI無効化に伴い未使用
+# from urllib.parse import quote, unquote  # 未使用
 
 def convert_to_furigana_with_pykakasi(text: str) -> str:
     """
@@ -49,7 +57,7 @@ def convert_to_furigana_with_pykakasi(text: str) -> str:
 
 def convert_to_furigana(text: str) -> str:
     """
-    漢字テキストをカタカナに変換する（よみたんAPI優先、失敗時はpykakasi）
+    漢字テキストをカタカナに変換する（pykakasiのみ使用）
 
     Args:
         text (str): 変換する文字列
@@ -59,44 +67,27 @@ def convert_to_furigana(text: str) -> str:
     """
     logging.info(f"変換対象テキスト: {text}")
     
-    # まずよみたんAPIを試行
+    # よみたんAPI部分（無効化）
+    """
     try:
-        # APIのエンドポイントとパラメータ
         url = "https://yomitan.harmonicom.jp/api/v2/yomi"
-        params = {
-            "ic": "UTF8",
-            "oc": "UTF8",
-            "kana": "k",
-            "text": text,
-            "num": 3
-        }
-        
-        # APIリクエスト
+        params = {"ic": "UTF8", "oc": "UTF8", "kana": "k", "text": text, "num": 3}
         response = requests.get(url, params=params)
         response.raise_for_status()
-        
-        # レスポンスの解析
         data = response.json()
-        logging.info(f"よみたんAPIレスポンス: {data}")
-        
-        # 変換結果の取得（最初の候補を使用）
         if "yomi" in data and data["yomi"]:
-            result = data["yomi"][0]
-            logging.info(f"よみたんAPI変換結果: {result}")
-            return result
-        
-        logging.warning("よみたんAPIから結果が返ってきませんでした。pykakasiにフォールバックします。")
-        
-    except Exception as e:
-        logging.warning(f"よみたんAPI呼び出しエラー: {str(e)}。pykakasiにフォールバックします。")
-    
-    # よみたんAPIが失敗した場合、pykakasiを使用
-    logging.info("pykakasiを使用してフリガナ変換を試行します")
+            return data["yomi"][0]
+    except Exception:
+        pass
+    """
+
+    # pykakasi のみを使用
+    logging.info("pykakasiのみを使用してフリガナ変換を実行します")
     pykakasi_result = convert_to_furigana_with_pykakasi(text)
     
     if pykakasi_result:
         logging.info(f"pykakasi変換成功: {pykakasi_result}")
         return pykakasi_result
     else:
-        logging.error("よみたんAPIとpykakasiの両方でフリガナ変換に失敗しました")
+        logging.error("pykakasiによるフリガナ変換に失敗しました: function=convert_to_furigana, text=%s", text)
         return None 
