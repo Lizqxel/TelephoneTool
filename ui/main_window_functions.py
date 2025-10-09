@@ -11,7 +11,7 @@ import json
 import os
 import re
 from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar, QListView
-from PySide6.QtCore import QTimer, QThread, Signal, QObject
+from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QMessageBox, QApplication
 
@@ -527,11 +527,25 @@ ND：{nd}
                 route_key = values.get('routeKey', '')
                 if route_key:
                     payload['routeKey'] = route_key
+                # 選択した転記先のスプシURL/シート名が settings.json 側にあれば同梱
+                try:
+                    sel_label = values.get('routeLabel') or ''
+                    if isinstance(destinations, list):
+                        for d in destinations:
+                            if (d.get('label') == sel_label) or (d.get('routeKey') == route_key):
+                                if d.get('spreadsheetUrl'):
+                                    payload['spreadsheetUrl'] = d.get('spreadsheetUrl')
+                                if d.get('sheetName'):
+                                    payload['sheetName'] = d.get('sheetName')
+                                break
+                except Exception:
+                    pass
                 # 送信前ログ（動作確認用）
                 try:
                     logging.info(
                         f"[GForm:UI] routeKey={payload.get('routeKey','')} kanKatsu={payload.get('kanKatsu','')} "
-                        f"shozai={payload.get('shozai','')} kubun={payload.get('kubun','')}"
+                        f"shozai={payload.get('shozai','')} kubun={payload.get('kubun','')} "
+                        f"sheetUrl={'Y' if payload.get('spreadsheetUrl') else 'N'} sheetName={'Y' if payload.get('sheetName') else 'N'}"
                     )
                 except Exception:
                     pass
