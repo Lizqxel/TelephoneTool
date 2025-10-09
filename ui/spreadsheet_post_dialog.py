@@ -114,7 +114,7 @@ class SpreadsheetPostDialog(QDialog):
         # 商材（H）
         layout.addWidget(QLabel("商材"))
         self.shozaiCombo = QComboBox()
-        self.shozaiCombo.addItems(["NA光", "NP光"])
+        self.shozaiCombo.addItems(["NA光", "NP光","サポート光","フレッツ光(1G)","フレッツ光(クロス)","USEN光(通常)","転用BIGLOBE光","くらサポ","くらサポ専売","NP光電話N","サポート光電話N","Nアナ戻し"])
         self.shozaiCombo.setCurrentText(self.values.get("shozai", "NA光"))
         layout.addWidget(self.shozaiCombo)
 
