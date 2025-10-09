@@ -39,42 +39,20 @@ class SpreadsheetPostDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # 転記先（Apps Script ルーティングキー）
-        layout.addWidget(QLabel("転記先（シート選択）"))
+        # 転記先（スプレッドシートのURL/シート名）
+        layout.addWidget(QLabel("転記先（スプレッドシート）"))
         self.destCombo = QComboBox()
 
-        # settings.json から destinations を読み込み、initialValues の destinations とマージ
-        settings_items, settings_default_key = load_destinations_from_settings()
-        init_items: List[Dict[str, str]] = list(self.values.get("destinations") or [])
-
-        # routeKey で重複を避けつつマージ（initialValues 優先の上書き）
-        merged: Dict[str, Dict[str, str]] = {}
+        # settings.json から destinations を読み込み
+        settings_items = load_destinations_from_settings()
         for it in settings_items:
-            rk = (it.get("routeKey") or "").strip()
-            if rk:
-                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
-        for it in init_items:
-            rk = (it.get("routeKey") or "").strip()
-            if rk:
-                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
-
-        merged_list = list(merged.values())
-        if not merged_list and init_items:
-            merged_list = init_items
-
-        for dest in merged_list:
-            self.destCombo.addItem(dest.get("label", ""), dest.get("routeKey", ""))
+            # コンボのデータに {label, spreadsheetUrl, sheetName} を保持
+            self.destCombo.addItem(it.get("label", ""), {
+                "label": it.get("label", ""),
+                "spreadsheetUrl": it.get("spreadsheetUrl", ""),
+                "sheetName": it.get("sheetName", ""),
+            })
         layout.addWidget(self.destCombo)
-        # 既定の選択（initialValues に defaultRouteKey があれば優先）
-        try:
-            default_key = (self.values or {}).get("defaultRouteKey") or settings_default_key
-            if default_key:
-                for i in range(self.destCombo.count()):
-                    if (self.destCombo.itemData(i) or "").strip() == default_key:
-                        self.destCombo.setCurrentIndex(i)
-                        break
-        except Exception:
-            pass
 
         # 管轄（A）: 編集可能なプルダウン + 自由入力可（初期は未入力）
         layout.addWidget(QLabel("管轄"))
@@ -202,9 +180,11 @@ class SpreadsheetPostDialog(QDialog):
             Dict[str, Any]: 送信直前の論理キー付きデータ
         """
         zenkakuDate = "" if self.emptyZenkakuCheck.isChecked() else self.zenkakuDateEdit.date().toString("yyyy-MM-dd")
+        sel = self.destCombo.currentData() or {}
         return {
-            "routeKey": self.destCombo.currentData() or "",
             "routeLabel": self.destCombo.currentText() or "",
+            "spreadsheetUrl": (sel.get("spreadsheetUrl") or "").strip(),
+            "sheetName": (sel.get("sheetName") or "").strip(),
             "kanKatsu": self.kanKatsuCombo.currentText().strip(),
             "kakutokuSha": self.kakutokuShaInput.text().strip(),
             "kakutokuId": self.kakutokuIdInput.text().strip(),
@@ -219,16 +199,14 @@ class SpreadsheetPostDialog(QDialog):
         }
 
 
-def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
-    """設定ファイルから Googleフォーム転送先の候補を読み込む。
+def load_destinations_from_settings() -> List[Dict[str, str]]:
+    """設定ファイルから転記先（label/url/sheetName）を読み込む。
 
     探索順: exe直下 → CWD → ソース直下 → _MEIPASS
     ファイル名の優先順: gform_settings.json → settings.json → setteings.json
 
     Returns:
-        (items, default_key)
-        items: [{label, routeKey}, ...]
-        default_key: 優先既定（設定値 defaultRouteKey があれば優先、無ければ ZAI_HOME→DEV→先頭）
+        items: [{label, spreadsheetUrl, sheetName}, ...]
     """
     def _candidate_files() -> List[Path]:
         names = ("gform_settings.json", "settings.json", "setteings.json")
@@ -266,7 +244,6 @@ def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
 
     # デフォルト
     items: List[Dict[str, str]] = []
-    default_key = ""
     for p in _candidate_files():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -274,28 +251,20 @@ def load_destinations_from_settings() -> Tuple[List[Dict[str, str]], str]:
             dests = list(gfp.get("destinations") or [])
             if not dests:
                 continue
-            items = []
+            out: List[Dict[str, str]] = []
             for d in dests:
-                rk = str((d or {}).get("routeKey", "")).strip()
-                if not rk:
+                label = str((d or {}).get("label", "")).strip()
+                url = str((d or {}).get("spreadsheetUrl", "")).strip()
+                sname = str((d or {}).get("sheetName", "")).strip()
+                if not label:
                     continue
-                label = str((d or {}).get("label", "")).strip() or rk
-                items.append({"label": label, "routeKey": rk})
-            # defaultRouteKey 優先
-            default_key = str(gfp.get("defaultRouteKey", "")).strip()
-            if not default_key:
-                keys = [i["routeKey"] for i in items]
-                for cand in ("ZAI_HOME", "DEV"):
-                    if cand in keys:
-                        default_key = cand
-                        break
-                if not default_key and keys:
-                    default_key = keys[0]
-            logging.info(f"[GForm:UI] destinations loaded from: {p}")
-            return items, default_key
+                out.append({"label": label, "spreadsheetUrl": url, "sheetName": sname})
+            if out:
+                logging.info(f"[GForm:UI] destinations loaded from: {p}")
+                return out
         except Exception as e:
             logging.warning(f"[GForm:UI] settings load failed at {p}: {e}")
             continue
-    return items, default_key
+    return items
 
 

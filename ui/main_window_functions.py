@@ -523,29 +523,17 @@ ND：{nd}
                     'zenkakuCallDate': values.get('zenkakuCallDate', ''),
                     'zenkakuResult': values.get('zenkakuResult', '前確待ち'),
                 }
-                # 転記先キー
-                route_key = values.get('routeKey', '')
-                if route_key:
-                    payload['routeKey'] = route_key
-                # 選択した転記先のスプシURL/シート名が settings.json 側にあれば同梱
-                try:
-                    sel_label = values.get('routeLabel') or ''
-                    if isinstance(destinations, list):
-                        for d in destinations:
-                            if (d.get('label') == sel_label) or (d.get('routeKey') == route_key):
-                                if d.get('spreadsheetUrl'):
-                                    payload['spreadsheetUrl'] = d.get('spreadsheetUrl')
-                                if d.get('sheetName'):
-                                    payload['sheetName'] = d.get('sheetName')
-                                break
-                except Exception:
-                    pass
+                # ダイアログから直接、URL/シート名を受け取り同梱
+                if values.get('spreadsheetUrl'):
+                    payload['spreadsheetUrl'] = values['spreadsheetUrl']
+                if values.get('sheetName'):
+                    payload['sheetName'] = values['sheetName']
                 # 送信前ログ（動作確認用）
                 try:
                     logging.info(
-                        f"[GForm:UI] routeKey={payload.get('routeKey','')} kanKatsu={payload.get('kanKatsu','')} "
-                        f"shozai={payload.get('shozai','')} kubun={payload.get('kubun','')} "
-                        f"sheetUrl={'Y' if payload.get('spreadsheetUrl') else 'N'} sheetName={'Y' if payload.get('sheetName') else 'N'}"
+                        f"[GForm:UI] kanKatsu={payload.get('kanKatsu','')} shozai={payload.get('shozai','')} "
+                        f"kubun={payload.get('kubun','')} sheetUrl={'Y' if payload.get('spreadsheetUrl') else 'N'} "
+                        f"sheetName={'Y' if payload.get('sheetName') else 'N'}"
                     )
                 except Exception:
                     pass
@@ -560,7 +548,7 @@ ND：{nd}
                 except Exception as _se:
                     logging.warning(f"管轄の既定値保存に失敗: {_se}")
                 # 転記先のラベルを含めてユーザーに案内
-                route_label = values.get('routeLabel') or values.get('routeKey') or ''
+                route_label = values.get('routeLabel') or ''
                 if route_label:
                     QMessageBox.information(self, "成功", f"[{route_label}] へ転記リクエストを送信しました。\n数秒後に反映されます。")
                 else:
