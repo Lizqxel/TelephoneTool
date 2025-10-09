@@ -8,17 +8,17 @@
     "show_popup": true,
     "auto_close": true,
     "page_load_timeout": 27,
-    "script_timeout": 23
+    "script_timeout": 21
   },
   "mode": "simple",
   "show_mode_selection": false,
   "enable_cti_monitoring": true,
   "enable_auto_cti_processing": true,
-  "cti_monitor_interval": 0.2,
-  "cti_auto_processing_cooldown": 3.0,
+  "cti_monitor_interval": 0.199,
+  "cti_auto_processing_cooldown": 4.0,
   "call_duration_threshold": 0,
   "googleFormPosting": {
-    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLSdqwE_UZHb7SOhroQV20xbIJ7GIYoIumNGGoxj9VZfLEK4ukA/formResponse",
+    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLScRC5jTBWyXXknngE-1k81FAP8j75yf-K6_r0_2EOdvoSOEig/formResponse",
     "tokenValue": "共有トークン",
     "timezone": "Asia/Tokyo",
     "retryPolicy": {
@@ -37,53 +37,32 @@
     },
     "destinations": [
       {
-        "label": "開発用（既存）",
-        "routeKey": "DEV",
-        "spreadsheetUrl": "",
-        "sheetName": ""
-      },
-      {
         "label": "在宅管理ドライブ",
-        "routeKey": "ZAI_HOME",
-        "spreadsheetUrl": "",
-        "sheetName": ""
-      },
-      {
-        "label": "岩田部署管理ドライブ",
-        "routeKey": "IWATA_DEPT",
-        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1SzSpMugQC7Fq0Umo-aQUVYLqT_VFmTS6VUXLgzhdLTk/edit?gid=751784872",
+        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1AytXxlbJnU1xKyj89vGis-EmEwyAlGt86ZMr5UoILjA/edit",
         "sheetName": "実績反映"
       },
       {
-        "label": "岩田管理部署02",
-        "routeKey": "IWATA_DEPT02",
-        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/11PYBafyWIiHMnmoolB7ofBVj_ebvSKIUBeGCxM3WS-Y/edit?gid=751784872#gid=751784872",
+        "label": "岩田部署管理ドライブ02",
+        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/11PYBafyWIiHMnmoolB7ofBVj_ebvSKIUBeGCxM3WS-Y/edit?resourcekey=&gid=751784872#gid=751784872",
         "sheetName": "実績反映"
-      },
-      {
-        "label": "岩田管理部署03",
-        "routeKey": "IWATA_DEPT03",
-        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1puzbOpygdBflw9bqXOnqp9orYMxqaH4HUtjbzE7UMmE/edit?gid=751784872#gid=751784872",
-        "sheetName": "籾山健人"
       }
     ],
     "choices": {},
     "entryMap": {
-      "kanKatsu": "entry.659575849",
-      "kakutokuSha": "entry.1161405880",
-      "kakutokuId": "entry.1016928052",
-      "listName": "entry.1330419786",
-      "shozai": "entry.1027811674",
-      "kubun": "entry.456371778",
-      "kadenTime": "entry.1953228620",
-      "freeBox": "entry.1697280695",
-      "tosDate": "entry.1402815959",
-      "zenkakuCallDate": "entry.735870572",
-      "zenkakuResult": "entry.1425952908",
-      "sharedToken": "entry.679043897",
-      "routeKey": "entry.62487608",
-      "spreadsheetUrl": "entry.1801884581",
-      "sheetName": "entry.646254031"
+      "kanKatsu": "entry.1048398749",
+      "kakutokuSha": "entry.202653651",
+      "kakutokuId": "entry.1813335461",
+      "listName": "entry.1088157693",
+      "shozai": "entry.396989301",
+      "kubun": "entry.1201793265",
+      "kadenTime": "entry.1063881807",
+      "freeBox": "entry.2046081643",
+      "tosDate": "entry.1065257981",
+      "zenkakuCallDate": "entry.15775392",
+      "zenkakuResult": "entry.305786408",
+      "sharedToken": "entry.275947605",
+      "spreadsheetUrl": "entry.1439849575",
+      "sheetName": "entry.1091539664"
     }
   },
   "last_kanKatsu": "杉崎管轄"
