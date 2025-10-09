@@ -1200,7 +1200,7 @@ ND：{nd}
         self.clear_btn = QPushButton("入力クリア")
         self.cti_copy_btn = QPushButton("営コメ作成")
         self.screenshot_btn = QPushButton("提供判定のスクリーンショット確認")
-        self.spreadsheet_btn = QPushButton("スプレッドシート転記（未実装）")
+        self.spreadsheet_btn = QPushButton("スプレッドシート転記")
         self.settings_btn = QPushButton("設定")
         
         # ボタンのスタイル設定
