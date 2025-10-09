@@ -12,8 +12,9 @@ import logging
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
                               QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget,
-                              QRadioButton)
+                              QRadioButton, QLineEdit, QTableWidget, QTableWidgetItem)
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QHeaderView
 
 
 class SettingsDialog(QDialog):
@@ -363,6 +364,40 @@ ND：{nd}
         browser_layout.addLayout(browser_reset_layout)
         browser_group.setLayout(browser_layout)
         content_layout.addWidget(browser_group)
+
+        # 転記先（Googleフォーム送信）設定グループ
+        dest_group = QGroupBox("転記先（Googleフォーム送信）")
+        dest_layout = QVBoxLayout()
+
+        dest_desc = QLabel("settings.json の googleFormPosting.destinations を編集できます。\n表示名・転送先キー・スプレッドシートURL・シート名を管理します。")
+        dest_desc.setWordWrap(True)
+        dest_layout.addWidget(dest_desc)
+
+        # 転記先テーブル
+        self.dest_table = QTableWidget(0, 4, self)
+        self.dest_table.setHorizontalHeaderLabels(["表示名", "転送先キー", "スプシURL", "シート名"])
+        header = self.dest_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.dest_table.setSelectionBehavior(self.dest_table.SelectionBehavior.SelectRows)
+        self.dest_table.setSelectionMode(self.dest_table.SelectionMode.SingleSelection)
+        dest_layout.addWidget(self.dest_table)
+
+        # ボタン群
+        dest_btns = QHBoxLayout()
+        self.dest_add_btn = QPushButton("追加")
+        self.dest_edit_btn = QPushButton("編集")
+        self.dest_del_btn = QPushButton("削除")
+        dest_btns.addStretch()
+        dest_btns.addWidget(self.dest_add_btn)
+        dest_btns.addWidget(self.dest_edit_btn)
+        dest_btns.addWidget(self.dest_del_btn)
+        dest_layout.addLayout(dest_btns)
+
+        dest_group.setLayout(dest_layout)
+        content_layout.addWidget(dest_group)
         
         # CTIフォーマットグループ
         cti_format_group = QGroupBox("CTIフォーマットテンプレート")
@@ -417,6 +452,11 @@ ND：{nd}
         
         # 設定の読み込み
         self.load_settings()
+
+        # 転記先ボタンのハンドラ
+        self.dest_add_btn.clicked.connect(self._on_add_destination)
+        self.dest_edit_btn.clicked.connect(self._on_edit_destination)
+        self.dest_del_btn.clicked.connect(self._on_delete_destination)
     
     def update_font_size_label(self, value):
         """フォントサイズラベルを更新する"""
@@ -453,6 +493,8 @@ ND：{nd}
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
+                    # フル設定を保持（保存時に他キーを保持するため）
+                    self._full_settings = dict(settings)
                     format_template = settings.get('format_template', self.default_format)
                     font_size = settings.get('font_size', self.default_font_size)
                     delay_seconds = settings.get('delay_seconds', self.default_delay)
@@ -489,6 +531,11 @@ ND：{nd}
                     self.auto_close_checkbox.setChecked(browser_settings.get("auto_close", False))
                     self.page_timeout_spin.setValue(browser_settings.get("page_load_timeout", 30))
                     self.script_timeout_spin.setValue(browser_settings.get("script_timeout", 30))
+
+                    # 転記先の読み込み
+                    gfp = settings.get('googleFormPosting', {}) if isinstance(settings, dict) else {}
+                    dests = gfp.get('destinations', []) if isinstance(gfp, dict) else []
+                    self._populate_dest_table(dests)
             else:
                 self.format_edit.setText(self.default_format)
                 self.font_size_slider.setValue(self.default_font_size)
@@ -496,6 +543,8 @@ ND：{nd}
                 self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
                 self.reset_browser_settings()
                 self.reset_cti_settings()  # CTI設定もデフォルトに
+                self._full_settings = {}
+                self._populate_dest_table([])
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
@@ -504,6 +553,8 @@ ND：{nd}
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
             self.reset_browser_settings()
             self.reset_cti_settings()  # CTI設定もデフォルトに
+            self._full_settings = {}
+            self._populate_dest_table([])
     
     def save_settings(self):
         """設定をファイルに保存する"""
@@ -527,6 +578,15 @@ ND：{nd}
                 "script_timeout": self.script_timeout_spin.value()
             }
             
+            # 既存設定をベースに上書き（未知のキーを保持）
+            base = {}
+            try:
+                if os.path.exists(self.settings_file):
+                    with open(self.settings_file, 'r', encoding='utf-8') as rf:
+                        base = json.load(rf) or {}
+            except Exception:
+                base = {}
+
             settings = {
                 'format_template': self.format_edit.toPlainText(),
                 'font_size': self.font_size_slider.value(),
@@ -541,9 +601,22 @@ ND：{nd}
                 'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
                 'call_duration_threshold': self.call_duration_spin.value()
             }
-            
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, ensure_ascii=False, indent=2)
+
+            # googleFormPosting.destinations を反映
+            gfp = base.get('googleFormPosting', {}) if isinstance(base, dict) else {}
+            if not isinstance(gfp, dict):
+                gfp = {}
+            gfp['destinations'] = self._collect_dest_table()
+            base['googleFormPosting'] = gfp
+
+            # 上書きキーを設定
+            base.update(settings)
+
+            # 安全に保存（tmp→置換）
+            tmp_path = self.settings_file + ".tmp"
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(base, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self.settings_file)
             
             # モードが変更された場合、UIを再構築
             if previous_mode != new_mode and hasattr(self.parent(), 'current_mode'):
@@ -603,3 +676,143 @@ ND：{nd}
             'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
             'call_duration_threshold': self.call_duration_spin.value()
         } 
+
+    # ===== 転記先（destinations）編集機能 =====
+    def _populate_dest_table(self, dests):
+        try:
+            self.dest_table.setRowCount(0)
+            for d in dests or []:
+                row = self.dest_table.rowCount()
+                self.dest_table.insertRow(row)
+                self.dest_table.setItem(row, 0, QTableWidgetItem(str(d.get('label', ''))))
+                self.dest_table.setItem(row, 1, QTableWidgetItem(str(d.get('routeKey', ''))))
+                self.dest_table.setItem(row, 2, QTableWidgetItem(str(d.get('spreadsheetUrl', ''))))
+                self.dest_table.setItem(row, 3, QTableWidgetItem(str(d.get('sheetName', ''))))
+        except Exception:
+            pass
+
+    def _collect_dest_table(self):
+        dests = []
+        rows = self.dest_table.rowCount()
+        for r in range(rows):
+            label = (self.dest_table.item(r, 0).text() if self.dest_table.item(r, 0) else '').strip()
+            key = (self.dest_table.item(r, 1).text() if self.dest_table.item(r, 1) else '').strip()
+            url = (self.dest_table.item(r, 2).text() if self.dest_table.item(r, 2) else '').strip()
+            sname = (self.dest_table.item(r, 3).text() if self.dest_table.item(r, 3) else '').strip()
+            if label or key or url or sname:
+                dests.append({
+                    'label': label,
+                    'routeKey': key,
+                    'spreadsheetUrl': url,
+                    'sheetName': sname,
+                })
+        # routeKey の重複チェック（重複がある場合は後勝ちでユニーク化）
+        seen = {}
+        for d in dests:
+            seen[d.get('routeKey','')] = d
+        # routeKey が空のものも残したい場合はそのまま返す
+        # ここではユニーク化結果を返す
+        result = [v for k, v in seen.items() if k or v.get('label')]
+        return result
+
+    def _on_add_destination(self):
+        data = self._prompt_destination()
+        if data is None:
+            return
+        # 追加（routeKey重複は許可しない）
+        if self._routekey_exists(data.get('routeKey','')):
+            QMessageBox.warning(self, "入力エラー", f"転送先キー『{data.get('routeKey','')}』は既に存在します。")
+            return
+        row = self.dest_table.rowCount()
+        self.dest_table.insertRow(row)
+        self.dest_table.setItem(row, 0, QTableWidgetItem(data.get('label','')))
+        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('routeKey','')))
+        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('spreadsheetUrl','')))
+        self.dest_table.setItem(row, 3, QTableWidgetItem(data.get('sheetName','')))
+
+    def _on_edit_destination(self):
+        row = self.dest_table.currentRow()
+        if row < 0:
+            return
+        cur = {
+            'label': self.dest_table.item(row, 0).text() if self.dest_table.item(row, 0) else '',
+            'routeKey': self.dest_table.item(row, 1).text() if self.dest_table.item(row, 1) else '',
+            'spreadsheetUrl': self.dest_table.item(row, 2).text() if self.dest_table.item(row, 2) else '',
+            'sheetName': self.dest_table.item(row, 3).text() if self.dest_table.item(row, 3) else '',
+        }
+        data = self._prompt_destination(cur)
+        if data is None:
+            return
+        # routeKey重複チェック（自分以外）
+        if data.get('routeKey','') != cur.get('routeKey','') and self._routekey_exists(data.get('routeKey','')):
+            QMessageBox.warning(self, "入力エラー", f"転送先キー『{data.get('routeKey','')}』は既に存在します。")
+            return
+        self.dest_table.setItem(row, 0, QTableWidgetItem(data.get('label','')))
+        self.dest_table.setItem(row, 1, QTableWidgetItem(data.get('routeKey','')))
+        self.dest_table.setItem(row, 2, QTableWidgetItem(data.get('spreadsheetUrl','')))
+        self.dest_table.setItem(row, 3, QTableWidgetItem(data.get('sheetName','')))
+
+    def _on_delete_destination(self):
+        row = self.dest_table.currentRow()
+        if row < 0:
+            return
+        label = self.dest_table.item(row, 0).text() if self.dest_table.item(row, 0) else '(未設定)'
+        if QMessageBox.question(self, "削除確認", f"『{label}』を削除しますか？") != QMessageBox.Yes:
+            return
+        self.dest_table.removeRow(row)
+
+    def _routekey_exists(self, route_key: str) -> bool:
+        rk = (route_key or '').strip()
+        if not rk:
+            return False
+        rows = self.dest_table.rowCount()
+        for r in range(rows):
+            val = self.dest_table.item(r, 1).text() if self.dest_table.item(r, 1) else ''
+            if val.strip() == rk:
+                return True
+        return False
+
+    def _prompt_destination(self, init=None):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("転記先の編集")
+        lay = QVBoxLayout(dlg)
+        le_label = QLineEdit(dlg); le_label.setPlaceholderText("表示名（例: 岩田部署管理ドライブ）")
+        le_key = QLineEdit(dlg);   le_key.setPlaceholderText("転送先キー（例: IWATA_DEPT）")
+        le_url = QLineEdit(dlg);   le_url.setPlaceholderText("スプレッドシートURL（任意）")
+        le_snm = QLineEdit(dlg);   le_snm.setPlaceholderText("シート名（任意）")
+
+        def add_row(caption, w):
+            row = QHBoxLayout(); row.addWidget(QLabel(caption + '：')); row.addWidget(w); lay.addLayout(row)
+        add_row("表示名", le_label)
+        add_row("転送先キー", le_key)
+        add_row("スプシURL", le_url)
+        add_row("シート名", le_snm)
+        btns = QHBoxLayout(); btn_ok = QPushButton("OK", dlg); btn_ng = QPushButton("キャンセル", dlg)
+        btns.addStretch(); btns.addWidget(btn_ok); btns.addWidget(btn_ng); lay.addLayout(btns)
+
+        if init:
+            le_label.setText(init.get('label',''))
+            le_key.setText(init.get('routeKey',''))
+            le_url.setText(init.get('spreadsheetUrl',''))
+            le_snm.setText(init.get('sheetName',''))
+
+        data_holder = {'ok': False}
+        def _ok():
+            if not le_label.text().strip():
+                QMessageBox.warning(dlg, "入力エラー", "表示名は必須です。")
+                return
+            if not le_key.text().strip():
+                QMessageBox.warning(dlg, "入力エラー", "転送先キーは必須です。")
+                return
+            data_holder['ok'] = True
+            dlg.accept()
+        btn_ok.clicked.connect(_ok)
+        btn_ng.clicked.connect(dlg.reject)
+        if dlg.exec() == QDialog.Accepted and data_holder['ok']:
+            return {
+                'label': le_label.text().strip(),
+                'routeKey': le_key.text().strip(),
+                'spreadsheetUrl': le_url.text().strip(),
+                'sheetName': le_snm.text().strip(),
+            }
+        return None
