@@ -9,4 +9,5 @@ pillow>=10.1.0
 selenium==4.18.1
 webdriver-manager==4.0.1
 jaconv==0.3.4
+pykakasi>=2.2.1
 pytest==7.4.3 
