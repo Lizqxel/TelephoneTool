@@ -271,8 +271,9 @@ class GoogleFormSender:
             errors.append(f"前確コール日の形式はyyyy-MM-ddで指定してください: {d.get('zenkakuCallDate')}")
 
         # 選択肢チェック
-        if d.get("shozai") and str(d["shozai"]) not in ["NA光", "NP光"]:
-            errors.append(f"商材は 'NA光' または 'NP光' を指定してください: {d.get('shozai')}")
+        valid_shozai = ["NA光", "NP光", "サポート光", "フレッツ光(1G)", "フレッツ光(クロス)", "USEN光(通常)", "転用BIGLOBE光", "くらサポ", "くらサポ専売", "NP光電話N", "サポート光電話N", "Nアナ戻し"]
+        if d.get("shozai") and str(d["shozai"]) not in valid_shozai:
+            errors.append(f"商材は以下のいずれかを指定してください: {', '.join(valid_shozai)}: {d.get('shozai')}")
 
         # 前確のバリデーション（GASで最終正規化するため、ここでは候補緩め）
         if d.get("zenkakuResult") and str(d["zenkakuResult"]) not in ["前確待ち", "トス対象外", "再コール", "前確NG", "前確OK", "前確入力待ち"]:
