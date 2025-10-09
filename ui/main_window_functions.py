@@ -504,6 +504,7 @@ ND：{nd}
             # 入力ダイアログを表示
             from ui.spreadsheet_post_dialog import SpreadsheetPostDialog
             dialog = SpreadsheetPostDialog(self, initial_values)
+            self.spreadsheet_dialog = dialog  # 参照を保持
             if dialog.exec():
                 values = dialog.getValues()
                 # サービス送信
@@ -523,10 +524,15 @@ ND：{nd}
                     'zenkakuCallDate': values.get('zenkakuCallDate', ''),
                     'zenkakuResult': values.get('zenkakuResult', '前確待ち'),
                 }
-                # 転記先キー
+                # 転記先キーとスプレッドシート情報
                 route_key = values.get('routeKey', '')
                 if route_key:
                     payload['routeKey'] = route_key
+                    # 選択されたスプレッドシートの詳細情報を取得
+                    spreadsheet_info = self._get_spreadsheet_info_by_route_key(route_key)
+                    if spreadsheet_info:
+                        payload['spreadsheetId'] = spreadsheet_info.get('spreadsheetId', '')
+                        payload['sheetName'] = spreadsheet_info.get('sheetName', '')
                 # 送信前ログ（動作確認用）
                 try:
                     logging.info(
@@ -572,6 +578,27 @@ ND：{nd}
                 else:
                     widget.update()
             logging.info("設定を更新しました")
+    
+    def refresh_spreadsheet_destinations(self):
+        """スプレッドシート転記先を再読み込みする（設定変更時に呼び出し）"""
+        # 現在開いているスプレッドシート転記ダイアログがあれば更新
+        if hasattr(self, 'spreadsheet_dialog') and self.spreadsheet_dialog:
+            try:
+                self.spreadsheet_dialog.refresh_destinations()
+            except Exception as e:
+                logging.warning(f"スプレッドシート転記先の更新に失敗: {e}")
+    
+    def _get_spreadsheet_info_by_route_key(self, route_key: str) -> dict:
+        """ルーティングキーに対応するスプレッドシート情報を取得する"""
+        try:
+            if hasattr(self, 'settings') and isinstance(self.settings, dict):
+                destinations = self.settings.get('googleFormPosting', {}).get('destinations', [])
+                for dest in destinations:
+                    if dest.get('routeKey') == route_key:
+                        return dest
+        except Exception as e:
+            logging.warning(f"スプレッドシート情報の取得に失敗: {e}")
+        return {}
     
     def toggle_mobile_input(self, text):
         """携帯電話番号入力フィールドの有効/無効を切り替え - 現在は使用しない"""

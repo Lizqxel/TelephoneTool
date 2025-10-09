@@ -122,6 +122,15 @@ class GoogleFormSender:
         route_key_entry = self.entryMap.get("routeKey")
         if route_key_entry and data.get("routeKey"):
             formBody[route_key_entry] = str(data["routeKey"])  # 例: DEV / ZAI_HOME
+        
+        # スプレッドシート情報を動的に送信
+        spreadsheet_id_entry = self.entryMap.get("spreadsheetId")
+        if spreadsheet_id_entry and data.get("spreadsheetId"):
+            formBody[spreadsheet_id_entry] = str(data["spreadsheetId"])
+        
+        sheet_name_entry = self.entryMap.get("sheetName")
+        if sheet_name_entry and data.get("sheetName"):
+            formBody[sheet_name_entry] = str(data["sheetName"])
 
         # フォーム短文化後: choicesが空なら“その他”は適用しない
         if self.choices:

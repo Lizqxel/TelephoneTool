@@ -16,55 +16,5 @@
   "enable_auto_cti_processing": true,
   "cti_monitor_interval": 0.2,
   "cti_auto_processing_cooldown": 3.0,
-  "call_duration_threshold": 0,
-  "googleFormPosting": {
-    "formUrl": "https://docs.google.com/forms/d/e/1FAIpQLSfvXp1PX88Od-OHDQu8NfvLHkddAZgfPQjwDlquvWrUzrKWOg/formResponse",
-    "tokenValue": "共有トークン",
-    "timezone": "Asia/Tokyo",
-    "retryPolicy": {
-      "maxAttempts": 3,
-      "backoffSeconds": [
-        1,
-        3,
-        10
-      ]
-    },
-    "defaults": {
-      "kanKatsu": "岩田管轄",
-      "shozai": "NA光",
-      "kubun": "新規",
-      "zenkakuResult": "前確入力待ち"
-    },
-    "destinations": [
-      {
-        "label": "開発用（既存）",
-        "routeKey": "DEV"
-      },
-      {
-        "label": "在宅管理ドライブ",
-        "routeKey": "ZAI_HOME"
-      },
-      {
-        "label": "岩田部署管理ドライブ",
-        "routeKey": "IWATA_DEPT"
-      }
-    ],
-    "choices": {},
-    "entryMap": {
-      "kanKatsu": "entry.914673617",
-      "kakutokuSha": "entry.1904193218",
-      "kakutokuId": "entry.211026283",
-      "listName": "entry.1646035335",
-      "shozai": "entry.2081171090",
-      "kubun": "entry.667956473",
-      "kadenTime": "entry.1173882698",
-      "freeBox": "entry.1271593799",
-      "tosDate": "entry.917015129",
-      "zenkakuCallDate": "entry.260281711",
-      "zenkakuResult": "entry.479024634",
-      "sharedToken": "entry.1875150095",
-      "routeKey": "entry.356313507"
-    }
-  },
-  "last_kanKatsu": "岩田管轄"
+  "call_duration_threshold": 0
 }

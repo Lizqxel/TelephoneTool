@@ -42,39 +42,10 @@ class SpreadsheetPostDialog(QDialog):
         # 転記先（Apps Script ルーティングキー）
         layout.addWidget(QLabel("転記先（シート選択）"))
         self.destCombo = QComboBox()
-
-        # settings.json から destinations を読み込み、initialValues の destinations とマージ
-        settings_items, settings_default_key = load_destinations_from_settings()
-        init_items: List[Dict[str, str]] = list(self.values.get("destinations") or [])
-
-        # routeKey で重複を避けつつマージ（initialValues 優先の上書き）
-        merged: Dict[str, Dict[str, str]] = {}
-        for it in settings_items:
-            rk = (it.get("routeKey") or "").strip()
-            if rk:
-                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
-        for it in init_items:
-            rk = (it.get("routeKey") or "").strip()
-            if rk:
-                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
-
-        merged_list = list(merged.values())
-        if not merged_list and init_items:
-            merged_list = init_items
-
-        for dest in merged_list:
-            self.destCombo.addItem(dest.get("label", ""), dest.get("routeKey", ""))
+        
+        # 転記先を読み込み
+        self._load_destinations()
         layout.addWidget(self.destCombo)
-        # 既定の選択（initialValues に defaultRouteKey があれば優先）
-        try:
-            default_key = (self.values or {}).get("defaultRouteKey") or settings_default_key
-            if default_key:
-                for i in range(self.destCombo.count()):
-                    if (self.destCombo.itemData(i) or "").strip() == default_key:
-                        self.destCombo.setCurrentIndex(i)
-                        break
-        except Exception:
-            pass
 
         # 管轄（A）: 編集可能なプルダウン + 自由入力可（初期は未入力）
         layout.addWidget(QLabel("管轄"))
@@ -194,6 +165,47 @@ class SpreadsheetPostDialog(QDialog):
 
         self.okBtn.clicked.connect(_on_accept)
         self.cancelBtn.clicked.connect(self.reject)
+
+    def _load_destinations(self) -> None:
+        """転記先を読み込んでコンボボックスに設定する"""
+        # settings.json から destinations を読み込み、initialValues の destinations とマージ
+        settings_items, settings_default_key = load_destinations_from_settings()
+        init_items: List[Dict[str, str]] = list(self.values.get("destinations") or [])
+
+        # routeKey で重複を避けつつマージ（initialValues 優先の上書き）
+        merged: Dict[str, Dict[str, str]] = {}
+        for it in settings_items:
+            rk = (it.get("routeKey") or "").strip()
+            if rk:
+                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
+        for it in init_items:
+            rk = (it.get("routeKey") or "").strip()
+            if rk:
+                merged[rk] = {"label": it.get("label") or rk, "routeKey": rk}
+
+        merged_list = list(merged.values())
+        if not merged_list and init_items:
+            merged_list = init_items
+
+        # コンボボックスをクリアして再設定
+        self.destCombo.clear()
+        for dest in merged_list:
+            self.destCombo.addItem(dest.get("label", ""), dest.get("routeKey", ""))
+        
+        # 既定の選択（initialValues に defaultRouteKey があれば優先）
+        try:
+            default_key = (self.values or {}).get("defaultRouteKey") or settings_default_key
+            if default_key:
+                for i in range(self.destCombo.count()):
+                    if (self.destCombo.itemData(i) or "").strip() == default_key:
+                        self.destCombo.setCurrentIndex(i)
+                        break
+        except Exception:
+            pass
+
+    def refresh_destinations(self) -> None:
+        """転記先を再読み込みする（設定変更時に呼び出し）"""
+        self._load_destinations()
 
     def getValues(self) -> Dict[str, Any]:
         """ダイアログの入力値を辞書で返す

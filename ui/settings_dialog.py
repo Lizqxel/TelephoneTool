@@ -12,8 +12,10 @@ import logging
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QTextEdit, QPushButton, QMessageBox, QSlider,
                               QGroupBox, QSpinBox, QCheckBox, QScrollArea, QWidget,
-                              QRadioButton)
+                              QRadioButton, QTabWidget)
 from PySide6.QtCore import Qt
+
+from .spreadsheet_management_dialog import SpreadsheetManagementDialog
 
 
 class SettingsDialog(QDialog):
@@ -92,11 +94,11 @@ ND：{nd}
         }
         
         # 親ウィンドウから現在の設定を取得
-        if parent and hasattr(parent, 'settings'):
-            self.current_font_size = parent.settings.get('font_size', self.default_font_size)
-            self.current_delay = parent.settings.get('delay_seconds', self.default_delay)
-            self.current_browser_settings = parent.settings.get('browser_settings', self.default_browser_settings)
-            current_call_duration = parent.settings.get('call_duration_threshold', 0)  # デフォルトは0秒
+        if self.parent() and hasattr(self.parent(), 'settings'):
+            self.current_font_size = self.parent().settings.get('font_size', self.default_font_size)
+            self.current_delay = self.parent().settings.get('delay_seconds', self.default_delay)
+            self.current_browser_settings = self.parent().settings.get('browser_settings', self.default_browser_settings)
+            current_call_duration = self.parent().settings.get('call_duration_threshold', 0)  # デフォルトは0秒
         else:
             self.current_font_size = self.default_font_size
             self.current_delay = self.default_delay
@@ -105,6 +107,50 @@ ND：{nd}
         
         # メインレイアウト
         main_layout = QVBoxLayout(self)
+        
+        # タブウィジェット
+        tab_widget = QTabWidget()
+        
+        # 一般設定タブ
+        general_tab = self._create_general_tab()
+        tab_widget.addTab(general_tab, "一般設定")
+        
+        # スプレッドシート管理タブ
+        spreadsheet_tab = self._create_spreadsheet_tab()
+        tab_widget.addTab(spreadsheet_tab, "スプレッドシート管理")
+        
+        main_layout.addWidget(tab_widget)
+        
+        # ボタンレイアウト
+        button_layout = QHBoxLayout()
+        
+        # リセットボタン
+        self.reset_btn = QPushButton("デフォルトに戻す")
+        self.reset_btn.clicked.connect(self.reset_to_default)
+        button_layout.addWidget(self.reset_btn)
+        
+        # スペーサー
+        button_layout.addStretch()
+        
+        # キャンセルボタン
+        self.cancel_btn = QPushButton("キャンセル")
+        self.cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_btn)
+        
+        # 保存ボタン
+        self.save_btn = QPushButton("保存")
+        self.save_btn.clicked.connect(self.accept)
+        self.save_btn.setDefault(True)
+        button_layout.addWidget(self.save_btn)
+        
+        main_layout.addLayout(button_layout)
+        
+        # 設定の読み込み
+        self.load_settings()
+    
+    def _create_general_tab(self) -> QWidget:
+        """一般設定タブを作成する"""
+        tab = QWidget()
         
         # スクロールエリアの設定
         scroll_area = QScrollArea()
@@ -195,8 +241,8 @@ ND：{nd}
         mode_select_layout.addWidget(self.easy_mode_radio)
         
         # 現在のモードを設定
-        if hasattr(parent, 'current_mode'):
-            if parent.current_mode == 'simple':
+        if hasattr(self.parent(), 'current_mode'):
+            if self.parent().current_mode == 'simple':
                 self.simple_mode_radio.setChecked(True)
             else:
                 self.easy_mode_radio.setChecked(True)
@@ -221,11 +267,11 @@ ND：{nd}
         self.cti_monitoring_checkbox.setToolTip("有効にするとCTI状態の変化を監視し、発信中から通話中への変化時に自動で顧客情報取得と提供判定を実行します")
         
         # 現在のCTI監視設定を読み込み
-        if hasattr(parent, 'settings'):
-            current_cti_enabled = parent.settings.get('enable_cti_monitoring', True)
-            current_cti_interval = parent.settings.get('cti_monitor_interval', 0.2)
-            current_cti_cooldown = parent.settings.get('cti_auto_processing_cooldown', 3.0)
-            current_call_duration = parent.settings.get('call_duration_threshold', 0)  # デフォルトは0秒
+        if hasattr(self.parent(), 'settings'):
+            current_cti_enabled = self.parent().settings.get('enable_cti_monitoring', True)
+            current_cti_interval = self.parent().settings.get('cti_monitor_interval', 0.2)
+            current_cti_cooldown = self.parent().settings.get('cti_auto_processing_cooldown', 3.0)
+            current_call_duration = self.parent().settings.get('call_duration_threshold', 0)  # デフォルトは0秒
         else:
             current_cti_enabled = True
             current_cti_interval = 0.2
@@ -240,8 +286,8 @@ ND：{nd}
         self.cti_auto_processing_checkbox.setToolTip("有効にするとCTI状態変化時に自動で顧客情報取得と提供判定を実行します")
         
         # 現在のCTI自動処理設定を読み込み
-        if hasattr(parent, 'settings'):
-            current_auto_processing = parent.settings.get('enable_auto_cti_processing', True)
+        if hasattr(self.parent(), 'settings'):
+            current_auto_processing = self.parent().settings.get('enable_auto_cti_processing', True)
         else:
             current_auto_processing = True
             
@@ -389,34 +435,73 @@ ND：{nd}
         
         # スクロールエリアにウィジェットを設定
         scroll_area.setWidget(content_widget)
-        main_layout.addWidget(scroll_area, 1)  # 1は伸縮比率
         
-        # ボタンレイアウト
-        button_layout = QHBoxLayout()
+        # タブのレイアウト
+        tab_layout = QVBoxLayout(tab)
+        tab_layout.addWidget(scroll_area, 1)  # 1は伸縮比率
         
-        # リセットボタン
-        self.reset_btn = QPushButton("デフォルトに戻す")
-        self.reset_btn.clicked.connect(self.reset_to_default)
-        button_layout.addWidget(self.reset_btn)
+        return tab
+    
+    def _create_spreadsheet_tab(self) -> QWidget:
+        """スプレッドシート管理タブを作成する"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
         
-        # スペーサー
-        button_layout.addStretch()
+        # 説明ラベル
+        description = QLabel(
+            "Googleフォーム転記先のスプレッドシート設定を管理します。\n"
+            "ここで追加したスプレッドシートは、スプレッドシート転記画面の転記先選択に表示されます。"
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
         
-        # キャンセルボタン
-        self.cancel_btn = QPushButton("キャンセル")
-        self.cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(self.cancel_btn)
+        # スプレッドシート管理ボタン
+        manage_btn = QPushButton("スプレッドシート設定を管理")
+        manage_btn.clicked.connect(self._open_spreadsheet_management)
+        layout.addWidget(manage_btn)
         
-        # 保存ボタン
-        self.save_btn = QPushButton("保存")
-        self.save_btn.clicked.connect(self.accept)
-        self.save_btn.setDefault(True)
-        button_layout.addWidget(self.save_btn)
+        # 現在の設定表示
+        self.current_settings_label = QLabel()
+        self._update_current_settings_display()
+        layout.addWidget(self.current_settings_label)
         
-        main_layout.addLayout(button_layout)
+        layout.addStretch()
         
-        # 設定の読み込み
-        self.load_settings()
+        return tab
+    
+    def _open_spreadsheet_management(self) -> None:
+        """スプレッドシート管理ダイアログを開く"""
+        dialog = SpreadsheetManagementDialog(self)
+        dialog.settings_changed.connect(self._on_spreadsheet_settings_changed)
+        dialog.exec()
+    
+    def _on_spreadsheet_settings_changed(self) -> None:
+        """スプレッドシート設定が変更された時の処理"""
+        self._update_current_settings_display()
+        # 親ウィンドウのスプレッドシート転記先を更新
+        if hasattr(self.parent(), 'refresh_spreadsheet_destinations'):
+            self.parent().refresh_spreadsheet_destinations()
+    
+    def _update_current_settings_display(self) -> None:
+        """現在のスプレッドシート設定を表示する"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    destinations = settings.get("googleFormPosting", {}).get("destinations", [])
+                    
+                    if destinations:
+                        text = "現在の設定:\n"
+                        for dest in destinations:
+                            text += f"・{dest.get('label', '')} ({dest.get('routeKey', '')})\n"
+                    else:
+                        text = "スプレッドシート設定がありません。"
+            else:
+                text = "設定ファイルが見つかりません。"
+        except Exception as e:
+            text = f"設定の読み込みに失敗しました: {str(e)}"
+        
+        self.current_settings_label.setText(text)
     
     def update_font_size_label(self, value):
         """フォントサイズラベルを更新する"""
