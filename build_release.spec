@@ -34,8 +34,7 @@ added_files = [
     ('qt.conf', '.'),
     ('version.py', '.'),
     ('requirements.txt', '.'),
-    ('gform_settings.json', '.'),
-    ('settings.json', '.'),
+    # NOTE: settings.json / gform_settings.json は初回起動時に生成するため同梱しない
     ('icon.ico', '.'),
     ('pyside6_fix.py', '.'),
     ('utils', 'utils'),
