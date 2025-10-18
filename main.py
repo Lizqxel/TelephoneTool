@@ -17,6 +17,7 @@ import logging
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
+from first_run_setup import ensure_settings_file
 
 
 # ログの設定
@@ -34,6 +35,11 @@ def main():
     """アプリケーションのメイン関数"""
     # アプリケーションの作成
     app = QApplication(sys.argv)
+    # 初回セットアップ（settings.json 生成と共有トークンの取得）
+    try:
+        ensure_settings_file()
+    except Exception as e:
+        logging.warning(f"初回セットアップ中に問題が発生しました: {e}")
     
     # メインウィンドウの作成と表示
     window = MainWindow()

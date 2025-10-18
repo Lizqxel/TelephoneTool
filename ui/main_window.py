@@ -218,20 +218,25 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # ログ設定
         self.setup_logging()
         
-        # 設定ファイルのパスを設定
+        # 設定ファイルのパスを設定（exe直下 > CWD > ソース直下）
         if getattr(sys, 'frozen', False):
-            # exeファイルとして実行されている場合
             self.settings_file = os.path.join(os.path.dirname(sys.executable), 'settings.json')
         else:
-            # 通常のPythonスクリプトとして実行されている場合
+            # ソース直下を既定としつつ、存在チェック
             self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
+            try:
+                cwd_candidate = os.path.join(os.getcwd(), 'settings.json')
+                if os.path.exists(cwd_candidate):
+                    self.settings_file = cwd_candidate
+            except Exception:
+                pass
         
         logging.info(f"設定ファイルのパス: {self.settings_file}")
         
         # 設定を読み込む
         self.settings = {}
         
-        # 設定ファイルが存在しない場合は新規作成
+        # 設定ファイルが存在しない場合は新規作成（format や CTI のデフォルトのみ）
         if not os.path.exists(self.settings_file):
             logging.info("設定ファイルが存在しないため、新規作成します")
             self.save_mode_settings('simple', True)
@@ -583,6 +588,14 @@ ND：{nd}
         
         # Google Sheetsの設定
         self.setup_google_sheets()
+
+        # 転記機能の可用性チェック（共有トークン未設定時は案内を出す）
+        try:
+            gf = (self.settings or {}).get('googleFormPosting') or {}
+            if not gf or not gf.get('tokenValue'):
+                logging.warning("共有トークン未設定のため、転記機能は使用できません。設定からトークンを追加してください。")
+        except Exception:
+            pass
         
         # フォントサイズの適用
         self.apply_font_size()

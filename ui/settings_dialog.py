@@ -365,6 +365,24 @@ ND：{nd}
         browser_group.setLayout(browser_layout)
         content_layout.addWidget(browser_group)
 
+        # 共有トークン設定グループ
+        token_group = QGroupBox("共有トークン")
+        token_layout = QVBoxLayout()
+        token_desc = QLabel("Googleフォーム送信の認証用トークンです。入力はマスクされます。\n空欄のまま保存はできません。")
+        token_desc.setWordWrap(True)
+        token_layout.addWidget(token_desc)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("共有トークン："))
+        self.token_edit = QLineEdit()
+        self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token_edit.setPlaceholderText("共有トークンを入力")
+        row.addWidget(self.token_edit)
+        token_layout.addLayout(row)
+
+        token_group.setLayout(token_layout)
+        content_layout.addWidget(token_group)
+
         # 転記先（Googleフォーム送信）設定グループ
         dest_group = QGroupBox("転記先（Googleフォーム送信）")
         dest_layout = QVBoxLayout()
@@ -535,6 +553,13 @@ ND：{nd}
                     gfp = settings.get('googleFormPosting', {}) if isinstance(settings, dict) else {}
                     dests = gfp.get('destinations', []) if isinstance(gfp, dict) else []
                     self._populate_dest_table(dests)
+
+                    # 共有トークンの読み込み
+                    try:
+                        token_val = str(gfp.get('tokenValue', '')) if isinstance(gfp, dict) else ''
+                        self.token_edit.setText(token_val)
+                    except Exception:
+                        self.token_edit.setText('')
             else:
                 self.format_edit.setText(self.default_format)
                 self.font_size_slider.setValue(self.default_font_size)
@@ -544,6 +569,7 @@ ND：{nd}
                 self.reset_cti_settings()  # CTI設定もデフォルトに
                 self._full_settings = {}
                 self._populate_dest_table([])
+                self.token_edit.setText('')
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
             self.format_edit.setText(self.default_format)
@@ -554,6 +580,7 @@ ND：{nd}
             self.reset_cti_settings()  # CTI設定もデフォルトに
             self._full_settings = {}
             self._populate_dest_table([])
+            self.token_edit.setText('')
     
     def save_settings(self):
         """設定をファイルに保存する"""
@@ -601,11 +628,19 @@ ND：{nd}
                 'call_duration_threshold': self.call_duration_spin.value()
             }
 
-            # googleFormPosting.destinations を反映
+            # googleFormPosting を反映（destinations と tokenValue）
             gfp = base.get('googleFormPosting', {}) if isinstance(base, dict) else {}
             if not isinstance(gfp, dict):
                 gfp = {}
             gfp['destinations'] = self._collect_dest_table()
+
+            # 共有トークンのバリデーションと反映
+            token_val = (self.token_edit.text() or '').strip()
+            if not token_val:
+                QMessageBox.warning(self, "入力エラー", "共有トークンは空にできません。入力してください。")
+                return False
+            gfp['tokenValue'] = token_val
+
             base['googleFormPosting'] = gfp
 
             # 上書きキーを設定
