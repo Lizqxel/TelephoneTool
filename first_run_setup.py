@@ -87,7 +87,7 @@ def _default_settings() -> Dict[str, Any]:
         "ND：{nd}\n\n"
         "備考：{relationship}\n"
         "お客様が今使っている回線：アナログ\n"
-        "案内料金：2500円\n"
+        "案内料金：3650円\n"
     )
     return {
         "format_template": default_format,
