@@ -52,6 +52,7 @@ hiddenimports += collect_submodules('selenium')
 hiddenimports += collect_submodules('webdriver_manager')
 hiddenimports += collect_submodules('pykakasi')  # pykakasi のサブモジュールを追加
 hiddenimports += ['jaconv']  # ひらがな→カタカナ変換に使用
+hiddenimports += ['bs4', 'soupsieve']  # BeautifulSoup と依存関係を明示的に同梱
 
 # 実行ファイルの設定
 a = Analysis(
