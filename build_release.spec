@@ -59,7 +59,7 @@ hiddenimports += collect_submodules('webdriver_manager')
 hiddenimports += collect_submodules('pykakasi')  # pykakasiのサブモジュールを追加
 hiddenimports += ['PySide6', 'PySide6.QtWidgets', 'PySide6.QtGui', 'PySide6.QtCore']  # 明示的に追加
 hiddenimports += ['jaconv']  # pykakasiの依存関係を追加
-hiddenimports += ['bs4']
+hiddenimports += ['bs4', 'soupsieve']  # BeautifulSoup と CSS セレクタ依存を明示
 
 # 実行ファイルの設定
 a = Analysis(
