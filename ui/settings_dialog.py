@@ -86,6 +86,7 @@ ND：{nd}
         self.default_browser_settings = {
             "headless": False,
             "disable_images": True,
+            "enable_screenshots": True,
             "show_popup": True,
             "page_load_timeout": 30,
             "script_timeout": 30,
@@ -327,6 +328,12 @@ ND：{nd}
         self.popup_checkbox.setToolTip("無効にすると提供判定結果のポップアップが表示されなくなります")
         browser_layout.addWidget(self.popup_checkbox)
         
+        # スクリーンショット有効化設定
+        self.screenshots_checkbox = QCheckBox("提供判定時のスクリーンショットを有効にする")
+        self.screenshots_checkbox.setChecked(self.current_browser_settings.get("enable_screenshots", True))
+        self.screenshots_checkbox.setToolTip("無効にすると提供判定時のスクリーンショット保存を行いません")
+        browser_layout.addWidget(self.screenshots_checkbox)
+        
         # ブラウザ自動終了設定
         self.auto_close_checkbox = QCheckBox("ブラウザを自動的に閉じる")
         self.auto_close_checkbox.setChecked(self.current_browser_settings.get("auto_close", False))
@@ -491,6 +498,8 @@ ND：{nd}
         """ブラウザ設定をデフォルトに戻す"""
         self.headless_checkbox.setChecked(self.default_browser_settings["headless"])
         self.disable_images_checkbox.setChecked(self.default_browser_settings["disable_images"])
+        # enable_screenshots をデフォルトに戻す
+        self.screenshots_checkbox.setChecked(self.default_browser_settings.get("enable_screenshots", True))
         self.popup_checkbox.setChecked(self.default_browser_settings["show_popup"])
         self.auto_close_checkbox.setChecked(self.default_browser_settings["auto_close"])
         self.page_timeout_spin.setValue(self.default_browser_settings["page_load_timeout"])
@@ -544,6 +553,7 @@ ND：{nd}
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
                     self.disable_images_checkbox.setChecked(browser_settings.get("disable_images", True))
+                    self.screenshots_checkbox.setChecked(browser_settings.get("enable_screenshots", True))
                     self.popup_checkbox.setChecked(browser_settings.get("show_popup", True))
                     self.auto_close_checkbox.setChecked(browser_settings.get("auto_close", False))
                     self.page_timeout_spin.setValue(browser_settings.get("page_load_timeout", 30))
@@ -598,6 +608,7 @@ ND：{nd}
             browser_settings = {
                 "headless": self.headless_checkbox.isChecked(),
                 "disable_images": self.disable_images_checkbox.isChecked(),
+                "enable_screenshots": self.screenshots_checkbox.isChecked(),
                 "show_popup": self.popup_checkbox.isChecked(),
                 "auto_close": self.auto_close_checkbox.isChecked(),
                 "page_load_timeout": self.page_timeout_spin.value(),
@@ -687,6 +698,7 @@ ND：{nd}
         browser_settings = {
             "headless": self.headless_checkbox.isChecked(),
             "disable_images": self.disable_images_checkbox.isChecked(),
+            "enable_screenshots": self.screenshots_checkbox.isChecked(),
             "show_popup": self.popup_checkbox.isChecked(),
             "auto_close": self.auto_close_checkbox.isChecked(),
             "page_load_timeout": self.page_timeout_spin.value(),

@@ -99,7 +99,8 @@ def _default_settings() -> Dict[str, Any]:
             "show_popup": True,
             "auto_close": True,
             "page_load_timeout": 30,
-            "script_timeout": 30
+            "script_timeout": 30,
+            "enable_screenshots": True
         },
         "mode": "simple",
         "show_mode_selection": False,
