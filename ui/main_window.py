@@ -1376,6 +1376,17 @@ ND：{nd}
         
         birth_date_group.setLayout(birth_date_layout)
         input_layout.addWidget(birth_date_group)
+
+        # 年齢情報表示用ラベル（生年月日入力欄の下に配置）
+        self.age_info_label = QLabel("")
+        self.age_info_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                padding-top: 2px;
+            }
+        """)
+        self.age_info_label.hide()  # 初期状態は非表示
+        input_layout.addWidget(self.age_info_label)
         
         # 受注者名
         input_layout.addWidget(QLabel("受注者名"))
@@ -3136,7 +3147,8 @@ ND：{nd}
 
     def check_birth_date_age(self):
         """
-        生年月日から年齢を計算し、80歳以上の場合に赤く表示する
+        生年月日から年齢を計算し、80歳以上の場合は年齢をわかりやすく表示する
+        （背景色の赤ハイライトは行わない）
         """
         try:
             # 現在の日付を取得
@@ -3167,22 +3179,30 @@ ND：{nd}
             
             # 80歳以上かどうかをチェック
             is_over_80 = age >= 80
-            
-            # 背景色を設定
+
+            # 以前の背景スタイルを必ずクリア（赤が残り続けないように）
+            self.era_combo.setStyleSheet("")
+            self.year_combo.setStyleSheet("")
+            self.month_combo.setStyleSheet("")
+            self.day_combo.setStyleSheet("")
+
+            # 年齢情報ラベルの表示/非表示とスタイル
             if is_over_80:
-                style = "background-color: #FFEBEE;"  # 赤系の背景色
-            else:
-                style = ""  # デフォルトの背景色
-            
-            # 各コンボボックスにスタイルを適用
-            self.era_combo.setStyleSheet(style)
-            self.year_combo.setStyleSheet(style)
-            self.month_combo.setStyleSheet(style)
-            self.day_combo.setStyleSheet(style)
-            
-            # 80歳以上の場合にログを出力
-            if is_over_80:
+                # 表示テキストとスタイル
+                self.age_info_label.setText(f"年齢: {age}歳（80歳以上）")
+                self.age_info_label.setStyleSheet("""
+                    QLabel {
+                        color: #C62828;  /* 赤系で注意喚起 */
+                        font-weight: bold;
+                        font-size: 12px;
+                        padding-top: 2px;
+                    }
+                """)
+                self.age_info_label.show()
                 logging.info(f"80歳以上の顧客が検出されました: {age}歳")
+            else:
+                # 80歳未満は非表示（もしくは必要なら年齢を淡色表示に変更可能）
+                self.age_info_label.hide()
             
         except Exception as e:
             logging.error(f"年齢チェック中にエラー: {e}")
