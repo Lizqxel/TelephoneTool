@@ -450,7 +450,7 @@ def handle_building_selection(driver, progress_callback=None, show_popup=True):
             progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
         # スクリーンショットを保存
         screenshot_path = f"apartment_detected.png"
-        take_full_page_screenshot(driver, screenshot_path)
+        take_screenshot_if_enabled(driver, screenshot_path)
         logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
         # 判定結果を返す
         return {
@@ -513,7 +513,48 @@ def create_driver(headless=False):
         logging.error(f"ドライバーの作成に失敗: {str(e)}")
         raise
 
-def take_full_page_screenshot(driver, save_path):
+# --- 追加: 設定読み込みとスクリーンショットの有効/無効ラッパ ---
+def _load_browser_settings(path="settings.json"):
+    """
+    settings.json から browser_settings を読み込んで返す。読めなければ空辞書を返す。
+    """
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                return cfg.get("browser_settings", {}) or {}
+    except Exception as e:
+        logging.warning(f"設定読み込みに失敗しました: {e}")
+    return {}
+
+
+_BROWSER_SETTINGS = _load_browser_settings()
+ENABLE_SCREENSHOTS = _BROWSER_SETTINGS.get("enable_screenshots", True)
+
+
+def take_screenshot_if_enabled(driver, save_path):
+    """
+    設定 `browser_settings.enable_screenshots` に応じて
+    `take_full_page_screenshot` を呼ぶラッパ。
+    無効の場合は何もしない（Noneを返す）。
+    """
+    # 設定ファイルの現在値を動的にチェックして即時反映させる
+    try:
+        cur = _load_browser_settings()
+        enabled = cur.get("enable_screenshots", ENABLE_SCREENSHOTS)
+    except Exception:
+        enabled = ENABLE_SCREENSHOTS
+    if not enabled:
+        logging.info(f"スクリーンショット無効のためスキップ: {save_path}")
+        return None
+    try:
+        return _take_full_page_screenshot_impl(driver, save_path)
+    except Exception as e:
+        logging.warning(f"スクリーンショット取得に失敗しました: {e}")
+        return None
+
+
+def _take_full_page_screenshot_impl(driver, save_path):
     """
     ページ全体のスクリーンショットを取得する（スクロール部分も含む）
 
@@ -622,6 +663,12 @@ def take_full_page_screenshot(driver, save_path):
         driver.set_window_size(original_size['width'], original_size['height'])
         driver.set_window_position(original_position['x'], original_position['y'])
         driver.execute_script(f"window.scrollTo(0, {original_scroll});")
+
+
+# 既存の呼び出しを壊さないために、元の名前を設定に従うラッパとして残す
+def take_full_page_screenshot(driver, save_path):
+    """互換ラッパ: settings の enable_screenshots を見て実行/スキップする"""
+    return take_screenshot_if_enabled(driver, save_path)
 
 def search_service_area(postal_code, address, progress_callback=None):
     """
