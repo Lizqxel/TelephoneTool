@@ -104,13 +104,11 @@ class SpreadsheetPostDialog(QDialog):
         layout.addWidget(self.kubunCombo)
 
         # 架電時間（J）
-        layout.addWidget(QLabel("架電時間 (HH:mm)"))
-        self.kadenTimeEdit = QTimeEdit()
-        self.kadenTimeEdit.setDisplayFormat("HH:mm")
-        nowTime = QTime.currentTime()
-        kadenTimeStr = self.values.get("kadenTime") or nowTime.toString("HH:mm")
-        self.kadenTimeEdit.setTime(QTime.fromString(kadenTimeStr, "HH:mm"))
-        layout.addWidget(self.kadenTimeEdit)
+        layout.addWidget(QLabel("架電時間"))
+        self.kadenTimeInput = QLineEdit()
+        # 初期値（従来のHH:mm形式をセット）
+        self.kadenTimeInput.setText(self.values.get("kadenTime") or QTime.currentTime().toString("HH:mm"))
+        layout.addWidget(self.kadenTimeInput)
 
         # フリーボックス（K）
         layout.addWidget(QLabel("フリーボックス"))
@@ -191,7 +189,7 @@ class SpreadsheetPostDialog(QDialog):
             "listName": self.listNameInput.text().strip(),
             "shozai": self.shozaiCombo.currentText(),
             "kubun": self.kubunCombo.currentText(),
-            "kadenTime": self.kadenTimeEdit.time().toString("HH:mm"),
+            "kadenTime": self.kadenTimeInput.text().strip(),
             "freeBox": self.freeBoxEdit.toPlainText().strip(),
             "tosDate": self.tosDateEdit.date().toString("yyyy-MM-dd"),
             "zenkakuCallDate": zenkakuDate,

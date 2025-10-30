@@ -261,8 +261,7 @@ class GoogleFormSender:
         if d.get("kakutokuId") and not re.match(r"^\d{4}_\d{6}_\d{8}$", str(d["kakutokuId"])):
             errors.append(f"獲得時管理番号の形式不正: {d.get('kakutokuId')}")
 
-        if d.get("kadenTime") and not re.match(r"^\d{2}:\d{2}$", str(d["kadenTime"])):
-            errors.append(f"架電時間の形式はHH:mmで指定してください: {d.get('kadenTime')}")
+        # 架電時間の形式チェックを廃止し、自由入力を許可
 
         def is_date_fmt(val: str) -> bool:
             return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", val))
