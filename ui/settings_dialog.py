@@ -645,12 +645,56 @@ ND：{nd}
                 gfp = {}
             gfp['destinations'] = self._collect_dest_table()
 
-            # 共有トークンのバリデーションと反映
+            # 共有トークンの反映（空文字も許容）。
+            # ユーザーが空欄にした場合は空文字を保存し、既存の値を保持する挙動ではなく
+            # 明示的に空文字を格納することで、settings.json の構造が常に存在するようにする。
             token_val = (self.token_edit.text() or '').strip()
-            if not token_val:
-                QMessageBox.warning(self, "入力エラー", "共有トークンは空にできません。入力してください。")
-                return False
             gfp['tokenValue'] = token_val
+
+            # Fill missing googleFormPosting keys with sensible defaults so that
+            # downstream code can assume their presence. These defaults mirror
+            # the ones used in first_run_setup.ensure_settings_file().
+            default_form_url = (
+                "https://docs.google.com/forms/d/e/1FAIpQLSfoDjvD0gyYxqcmADbwBtJ9CSsVB7QAHX8gSRG9sLXzsSNXYQ/formResponse"
+            )
+            if not gfp.get('formUrl'):
+                gfp['formUrl'] = default_form_url
+
+            if not gfp.get('timezone'):
+                gfp['timezone'] = 'Asia/Tokyo'
+
+            if not isinstance(gfp.get('retryPolicy'), dict):
+                gfp['retryPolicy'] = {"maxAttempts": 3, "backoffSeconds": [1, 3, 10]}
+
+            if not isinstance(gfp.get('defaults'), dict):
+                gfp['defaults'] = {
+                    "kanKatsu": "岩田管轄",
+                    "shozai": "NA光",
+                    "kubun": "新規",
+                    "zenkakuResult": "前確入力待ち"
+                }
+
+            if not isinstance(gfp.get('choices'), dict):
+                gfp['choices'] = {}
+
+            # entryMap default (same mapping as initial setup)
+            if not isinstance(gfp.get('entryMap'), dict):
+                gfp['entryMap'] = {
+                    "kanKatsu": "entry.1653774096",
+                    "kakutokuSha": "entry.990044023",
+                    "kakutokuId": "entry.20053472",
+                    "listName": "entry.311805903",
+                    "shozai": "entry.444975123",
+                    "kubun": "entry.858726565",
+                    "kadenTime": "entry.1423382151",
+                    "freeBox": "entry.1331784643",
+                    "tosDate": "entry.1643496135",
+                    "zenkakuCallDate": "entry.2129109581",
+                    "zenkakuResult": "entry.1899186247",
+                    "sharedToken": "entry.447700198",
+                    "spreadsheetUrl": "entry.574347119",
+                    "sheetName": "entry.556971462"
+                }
 
             base['googleFormPosting'] = gfp
 
