@@ -134,16 +134,6 @@ class SpreadsheetPostDialog(QDialog):
         self.zenkakuDateEdit.setDate(QDate.fromString(zenkakuDateStr, "yyyy-MM-dd"))
         layout.addWidget(self.zenkakuDateEdit)
 
-        # 前確コール日 空欄チェック
-        self.emptyZenkakuCheck = QCheckBox("前確コール日を空欄にする")
-        layout.addWidget(self.emptyZenkakuCheck)
-        # チェック状態に応じて日付入力の有効/無効を切り替え
-        def _toggle_zenkaku_enabled(checked: bool):
-            self.zenkakuDateEdit.setEnabled(not checked)
-        self.emptyZenkakuCheck.toggled.connect(_toggle_zenkaku_enabled)
-        # 既定の状態反映
-        _toggle_zenkaku_enabled(self.emptyZenkakuCheck.isChecked())
-
         # 前確コール結果（P）
         layout.addWidget(QLabel("前確コール結果"))
         self.zenkakuResultCombo = QComboBox()
@@ -177,7 +167,7 @@ class SpreadsheetPostDialog(QDialog):
         Returns:
             Dict[str, Any]: 送信直前の論理キー付きデータ
         """
-        zenkakuDate = "" if self.emptyZenkakuCheck.isChecked() else self.zenkakuDateEdit.date().toString("yyyy-MM-dd")
+        zenkakuDate = self.zenkakuDateEdit.date().toString("yyyy-MM-dd")
         sel = self.destCombo.currentData() or {}
         return {
             "routeLabel": self.destCombo.currentText() or "",
