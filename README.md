@@ -155,7 +155,8 @@ TelephoneTool/
     "page_load_timeout": 30           // ページ読み込みタイムアウト
   },
   "mode": "simple",                   // 起動モード
-  "show_mode_selection": false        // モード選択ダイアログ表示
+  "show_mode_selection": false,       // モード選択ダイアログ表示
+  "default_shozai": "NA光"            // スプレッドシート転記ダイアログの商材デフォルト（UIで更新可）
 }
 ```
 

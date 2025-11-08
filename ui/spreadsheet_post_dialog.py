@@ -89,12 +89,37 @@ class SpreadsheetPostDialog(QDialog):
         self.listNameInput = QLineEdit(self.values.get("listName", ""))
         layout.addWidget(self.listNameInput)
 
-        # 商材（H）
+        # 商材（H） + デフォルト設定チェックボックス
         layout.addWidget(QLabel("商材"))
         self.shozaiCombo = QComboBox()
-        self.shozaiCombo.addItems(["NA光", "NP光","サポート光","フレッツ光(1G)","フレッツ光(クロス)","USEN光(通常)","転用BIGLOBE光","くらサポ","くらサポ専売","NP光電話N","サポート光電話N","Nアナ戻し"])
-        self.shozaiCombo.setCurrentText(self.values.get("shozai", "NA光"))
+        products = [
+            "NA光", "NP光", "サポート光", "フレッツ光(1G)", "フレッツ光(クロス)", "USEN光(通常)",
+            "転用BIGLOBE光", "くらサポ", "くらサポ専売", "NP光電話N", "サポート光電話N", "Nアナ戻し"
+        ]
+        self.shozaiCombo.addItems(products)
+        # settings から default_shozai を読み、initialValues > settings > 既定 の優先順でセット
+        default_from_settings = None
+        try:
+            from utils.settings import settings as _global_settings  # ローカルインポートで失敗時も動作継続
+            if _global_settings:
+                # 優先: トップレベル default_shozai → 互換: googleFormPosting.defaults.shozai
+                default_from_settings = _global_settings.get("default_shozai")
+                if not default_from_settings:
+                    gfp = _global_settings.get("googleFormPosting", {}) or {}
+                    defs = gfp.get("defaults", {}) or {}
+                    v = defs.get("shozai")
+                    if v:
+                        default_from_settings = v
+        except Exception:
+            default_from_settings = None
+        initial_shozai = self.values.get("shozai") or default_from_settings or "NA光"
+        if initial_shozai not in products:
+            initial_shozai = "NA光"
+        self.shozaiCombo.setCurrentText(initial_shozai)
         layout.addWidget(self.shozaiCombo)
+        self.defaultShozaiCheck = QCheckBox("商材をデフォルトに設定する")
+        self.defaultShozaiCheck.setChecked(False)
+        layout.addWidget(self.defaultShozaiCheck)
 
         # 新規/見込み（I）
         layout.addWidget(QLabel("新規/見込み"))
@@ -156,6 +181,43 @@ class SpreadsheetPostDialog(QDialog):
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "入力エラー", "獲得時管理番号(C)が未入力です。入力してください。")
                 return
+            # デフォルト保存要求があれば settings.json に選択商材を記録
+            if self.defaultShozaiCheck.isChecked():
+                sel = self.shozaiCombo.currentText()
+                try:
+                    # 既存設定のマージ保存（settings.set は即ファイル書き込み）
+                    from utils.settings import settings as _global_settings
+                    if _global_settings:
+                        _global_settings.set("default_shozai", sel)
+                        gfp = _global_settings.get("googleFormPosting", {}) or {}
+                        defs = gfp.get("defaults", {}) or {}
+                        defs["shozai"] = sel
+                        gfp["defaults"] = defs
+                        _global_settings.set("googleFormPosting", gfp)
+                except Exception as _se:
+                    # フォールバック: 直接JSONを読みマージ後に再書き込み
+                    try:
+                        import json as _json, os as _os
+                        from pathlib import Path as _Path
+                        # settings探索候補と同様の扱い: dialog自身の __file__ からルートへ
+                        here = _Path(__file__).resolve().parents[1]
+                        candidate = here / "settings.json"
+                        data = {}
+                        if candidate.exists():
+                            try:
+                                data = _json.loads(candidate.read_text(encoding="utf-8")) or {}
+                            except Exception:
+                                data = {}
+                        data["default_shozai"] = sel
+                        gfp = data.get("googleFormPosting", {}) or {}
+                        defs = gfp.get("defaults", {}) or {}
+                        defs["shozai"] = sel
+                        gfp["defaults"] = defs
+                        data["googleFormPosting"] = gfp
+                        candidate.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        # 最終手段: 失敗は握りつぶし
+                        pass
             self.accept()
 
         self.okBtn.clicked.connect(_on_accept)

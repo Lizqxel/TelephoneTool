@@ -486,13 +486,27 @@ ND：{nd}
             except Exception:
                 destinations = []
 
+            # 商材既定値（settings の default_shozai または googleFormPosting.defaults.shozai を反映）
+            _default_shozai = 'NA光'
+            try:
+                # 直近でUIから更新された値を反映するため、グローバル settings を参照
+                from utils.settings import settings as _global_settings
+                if _global_settings:
+                    _default_shozai = _global_settings.get('default_shozai', _default_shozai)
+                    if not _default_shozai:
+                        _g = _global_settings.get('googleFormPosting', {}) or {}
+                        _defs = _g.get('defaults', {}) or {}
+                        _default_shozai = _defs.get('shozai', _default_shozai)
+            except Exception:
+                _default_shozai = 'NA光'
+
             initial_values = {
                 'destinations': destinations,
                 'kanKatsu': getattr(self, 'settings', {}).get('last_kanKatsu', '岩田管轄') if hasattr(self, 'settings') else '岩田管轄',
                 'kakutokuSha': getattr(self, 'order_person_input', None).text().strip() if hasattr(self, 'order_person_input') else '',
                 'kakutokuId': getattr(cti_data, 'management_id', '') if cti_data else '',
                 'listName': getattr(cti_data, 'list_name', '') if cti_data else (getattr(self, 'list_name_input', None).text().strip() if hasattr(self, 'list_name_input') else ''),
-                'shozai': 'NA光',
+                'shozai': _default_shozai,
                 'kubun': '新規',
                 'kadenTime': now_str,
                 'freeBox': '',
@@ -540,13 +554,26 @@ ND：{nd}
                 sender.send(payload)
                 # 入力された管轄を次回以降の既定として保存
                 try:
+                    # まずは共通の設定ユーティリティで保存（他の設定キーを壊さない）
+                    from utils.settings import settings as _global_settings
+                    _val = values.get('kanKatsu', '') or initial_values['kanKatsu']
+                    _global_settings.set('last_kanKatsu', _val)
+                    # 併せてメインウィンドウのself.settingsにも反映しておく
                     if hasattr(self, 'settings') and isinstance(self.settings, dict):
-                        self.settings['last_kanKatsu'] = values.get('kanKatsu', '') or initial_values['kanKatsu']
-                        with open(self.settings_file, 'w', encoding='utf-8') as f:
-                            import json as _json
-                            _json.dump(self.settings, f, ensure_ascii=False, indent=2)
+                        self.settings['last_kanKatsu'] = _val
                 except Exception as _se:
-                    logging.warning(f"管轄の既定値保存に失敗: {_se}")
+                    # フォールバック: 既存ファイルを読み込んでマージしてから保存
+                    try:
+                        import json as _json, os as _os
+                        existing = {}
+                        if getattr(self, 'settings_file', None) and _os.path.exists(self.settings_file):
+                            with open(self.settings_file, 'r', encoding='utf-8') as rf:
+                                existing = _json.load(rf) or {}
+                        existing['last_kanKatsu'] = values.get('kanKatsu', '') or initial_values['kanKatsu']
+                        with open(self.settings_file, 'w', encoding='utf-8') as wf:
+                            _json.dump(existing, wf, ensure_ascii=False, indent=2)
+                    except Exception as _se2:
+                        logging.warning(f"管轄の既定値保存に失敗: {_se2}")
                 # 転記先のラベルを含めてユーザーに案内
                 route_label = values.get('routeLabel') or ''
                 if route_label:
