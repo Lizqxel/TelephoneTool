@@ -22,7 +22,11 @@ import json
 import sys
 from pathlib import Path
 import logging
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit, QComboBox, QDateEdit, QTimeEdit, QPushButton, QCheckBox
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit,
+    QComboBox, QDateEdit, QTimeEdit, QPushButton, QCheckBox, QListWidget,
+    QListWidgetItem
+)
 from PySide6.QtCore import Qt, QDate, QTime
 
 
@@ -89,13 +93,10 @@ class SpreadsheetPostDialog(QDialog):
         self.listNameInput = QLineEdit(self.values.get("listName", ""))
         layout.addWidget(self.listNameInput)
 
-        # 商材（H） + デフォルト設定チェックボックス
+        # 商材（H） + デフォルト設定チェックボックス + 並べ替えボタン
         layout.addWidget(QLabel("商材"))
         self.shozaiCombo = QComboBox()
-        products = [
-            "NA光", "NP光", "サポート光", "フレッツ光(1G)", "フレッツ光(クロス)", "USEN光(通常)",
-            "転用BIGLOBE光", "くらサポ", "くらサポ専売", "NP光電話N", "サポート光電話N", "Nアナ戻し"
-        ]
+        products = self._get_products_ordered()
         self.shozaiCombo.addItems(products)
         # settings から default_shozai を読み、initialValues > settings > 既定 の優先順でセット
         default_from_settings = None
@@ -115,11 +116,19 @@ class SpreadsheetPostDialog(QDialog):
         initial_shozai = self.values.get("shozai") or default_from_settings or "NA光"
         if initial_shozai not in products:
             initial_shozai = "NA光"
+        # 正しいインデント位置に配置
         self.shozaiCombo.setCurrentText(initial_shozai)
         layout.addWidget(self.shozaiCombo)
+        # チェックボックス + 並べ替えボタンを横並び
+        shozaiCtlLayout = QHBoxLayout()
         self.defaultShozaiCheck = QCheckBox("商材をデフォルトに設定する")
         self.defaultShozaiCheck.setChecked(False)
-        layout.addWidget(self.defaultShozaiCheck)
+        self.reorderBtn = QPushButton("商材の並べ替え…")
+        self.reorderBtn.clicked.connect(self._on_reorder_products)
+        shozaiCtlLayout.addWidget(self.defaultShozaiCheck)
+        shozaiCtlLayout.addStretch(1)
+        shozaiCtlLayout.addWidget(self.reorderBtn)
+        layout.addLayout(shozaiCtlLayout)
 
         # 新規/見込み（I）
         layout.addWidget(QLabel("新規/見込み"))
@@ -247,6 +256,92 @@ class SpreadsheetPostDialog(QDialog):
             "zenkakuCallDate": zenkakuDate,
             "zenkakuResult": self.zenkakuResultCombo.currentText(),
         }
+
+    # ===== ヘルパ: 商材の順序管理 =====
+    def _base_products(self) -> List[str]:
+        return [
+            "NA光", "NP光", "サポート光", "フレッツ光(1G)", "フレッツ光(クロス)", "USEN光(通常)",
+            "転用BIGLOBE光", "くらサポ", "くらサポ専売", "NP光電話N", "サポート光電話N", "Nアナ戻し"
+        ]
+
+    def _get_products_ordered(self) -> List[str]:
+        base = self._base_products()
+        order: List[str] | None = None
+        try:
+            from utils.settings import settings as _global_settings
+            if _global_settings:
+                o = _global_settings.get("shozai_order")
+                if isinstance(o, list):
+                    order = [str(x) for x in o]
+        except Exception:
+            order = None
+        if not order:
+            return base
+        # order に含まれるベース項目を先に、残りを後ろに
+        seen = set()
+        ordered: List[str] = []
+        for x in order:
+            if x in base and x not in seen:
+                ordered.append(x)
+                seen.add(x)
+        for x in base:
+            if x not in seen:
+                ordered.append(x)
+        return ordered
+
+    def _on_reorder_products(self) -> None:
+        # 現在のリストを元に並べ替えダイアログを開く
+        current_list = self._get_products_ordered()
+        dlg = _ProductOrderDialog(self, current_list)
+        if dlg.exec():
+            new_order = dlg.get_order()
+            # 設定へ保存
+            try:
+                from utils.settings import settings as _global_settings
+                if _global_settings and isinstance(new_order, list):
+                    _global_settings.set("shozai_order", new_order)
+            except Exception:
+                pass
+            # コンボの並びを更新（選択は維持）
+            cur = self.shozaiCombo.currentText()
+            self.shozaiCombo.blockSignals(True)
+            self.shozaiCombo.clear()
+            self.shozaiCombo.addItems(self._get_products_ordered())
+            if cur:
+                self.shozaiCombo.setCurrentText(cur)
+            self.shozaiCombo.blockSignals(False)
+
+
+class _ProductOrderDialog(QDialog):
+    """商材の並べ替えダイアログ（ドラッグ&ドロップで順序入れ替え）"""
+    def __init__(self, parent, items: List[str]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("商材の並べ替え")
+        self.resize(360, 420)
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("ドラッグ&ドロップで順序を入れ替えてください"))
+        self.list = QListWidget()
+        self.list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        for s in items:
+            QListWidgetItem(s, self.list)
+        v.addWidget(self.list)
+        btns = QHBoxLayout()
+        ok = QPushButton("OK")
+        cancel = QPushButton("キャンセル")
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        btns.addStretch(1)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        v.addLayout(btns)
+
+    def get_order(self) -> List[str]:
+        out: List[str] = []
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            out.append(it.text())
+        return out
 
 
 def load_destinations_from_settings() -> List[Dict[str, str]]:
