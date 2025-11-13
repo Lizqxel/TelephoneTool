@@ -306,6 +306,82 @@ ND：{nd}
             # いいえが選択された場合は処理を中止
             if message_box.clickedButton() == no_button:
                 return None
+
+        # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで
+        # フリガナの苗字が異なる場合はユーザーに確認する
+        try:
+            def _surname_part(text: str) -> str:
+                if not text:
+                    return ""
+                for sep in (" ", "\u3000"):
+                    if sep in text:
+                        return text.split(sep)[0].strip()
+                return text.strip()
+
+            def _given_part(text: str) -> str:
+                """名前（名）の部分を返す。スペースで分割して先頭以外を結合して返す。スペースが無ければ空文字を返す。"""
+                if not text:
+                    return ""
+                for sep in (" ", "\u3000"):
+                    if sep in text:
+                        parts = text.split(sep)
+                        return sep.join(parts[1:]).strip()
+                return ""
+
+            contractor_name = getattr(self, 'contractor_input', None)
+            list_name = getattr(self, 'list_name_input', None)
+            contractor_furi = getattr(self, 'furigana_input', None)
+            list_furi = getattr(self, 'list_furigana_input', None)
+
+            if contractor_name and list_name and contractor_furi and list_furi:
+                kanji_contractor = _surname_part(contractor_name.text().strip())
+                kanji_list = _surname_part(list_name.text().strip())
+                furi_contractor = _surname_part(contractor_furi.text().strip())
+                furi_list = _surname_part(list_furi.text().strip())
+
+                if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
+                    # 苗字フリガナ不一致チェック（既存）
+                    if furi_contractor and furi_list and furi_contractor != furi_list:
+                        reply = QMessageBox.question(
+                            self,
+                            "確認",
+                            "苗字のフリガナが相違していますが大丈夫ですか？",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No
+                        )
+                        if reply == QMessageBox.StandardButton.No:
+                            logging.info("ユーザーによりCTI生成が中止されました: 苗字フリガナ不一致")
+                            return None
+
+                    # 名前（名）の漢字も一致しているかチェックし、名フリガナが不一致なら確認
+                    given_contractor = _given_part(contractor_name.text().strip())
+                    given_list = _given_part(list_name.text().strip())
+                    if given_contractor and given_list and given_contractor == given_list:
+                        # 名のフリガナ抽出（先頭以外を名として扱う）
+                        def _given_furi(text: str) -> str:
+                            if not text:
+                                return ""
+                            for sep in (" ", "\u3000"):
+                                if sep in text:
+                                    parts = text.split(sep)
+                                    return sep.join(parts[1:]).strip()
+                            return ""
+
+                        given_furi_contractor = _given_furi(contractor_furi.text().strip())
+                        given_furi_list = _given_furi(list_furi.text().strip())
+                        if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                            reply = QMessageBox.question(
+                                self,
+                                "確認",
+                                "名前のフリガナが相違していますが大丈夫ですか？",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No
+                            )
+                            if reply == QMessageBox.StandardButton.No:
+                                logging.info("ユーザーによりCTI生成が中止されました: 名前フリガナ不一致")
+                                return None
+        except Exception:
+            logging.exception("苗字フリガナの不一致チェック中にエラーが発生しました")
         
         # 日付の書式設定
         order_date = self.order_date_input.text().rstrip()
@@ -652,11 +728,15 @@ ND：{nd}
         
         # カタカナのみの文字列（フリガナとして扱う）
         if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF or c.isspace() for c in text):
-            self.list_furigana_input.setText(text)
+            # 既にユーザー入力がある場合は上書きしない
+            if not self.list_furigana_input.text().strip():
+                self.list_furigana_input.setText(text)
         
         # その他の文字列（名前として扱う）
         if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            self.list_name_input.setText(text)
+            # 既にユーザー入力がある場合は上書きしない
+            if not self.list_name_input.text().strip():
+                self.list_name_input.setText(text)
     
     def search_service_area(self):
         """提供エリア検索を実行"""
@@ -1076,8 +1156,10 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(name)
             if furigana:
-                self.furigana_input.setText(furigana)
-                logging.info(f"フリガナを自動生成しました: {name} → {furigana}")
+                # 既にユーザー入力がある場合は上書きしない
+                if not self.furigana_input.text().strip():
+                    self.furigana_input.setText(furigana)
+                    logging.info(f"フリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
             logging.error(f"フリガナ自動生成エラー: {str(e)}")
             
@@ -1096,8 +1178,10 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(name)
             if furigana:
-                self.list_furigana_input.setText(furigana)
-                logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
+                # 既にユーザー入力がある場合は上書きしない
+                if not self.list_furigana_input.text().strip():
+                    self.list_furigana_input.setText(furigana)
+                    logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
             logging.error(f"リストフリガナ自動生成エラー: {str(e)}")
             
@@ -1112,8 +1196,10 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(address)
             if furigana:
-                self.address_furigana_input.setText(furigana)
-                logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
+                # 既にユーザー入力がある場合は上書きしない
+                if not self.address_furigana_input.text().strip():
+                    self.address_furigana_input.setText(furigana)
+                    logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
         except Exception as e:
             logging.error(f"住所フリガナ自動生成エラー: {str(e)}")
             
@@ -1132,8 +1218,10 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(address)
             if furigana:
-                self.list_address_furigana_input.setText(furigana)
-                logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
+                # 既にユーザー入力がある場合は上書きしない
+                if not self.list_address_furigana_input.text().strip():
+                    self.list_address_furigana_input.setText(furigana)
+                    logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
         except Exception as e:
             logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
     
@@ -1161,6 +1249,85 @@ ND：{nd}
             # 受注データを取得
             if hasattr(self, 'order_data') and self.order_data:
                 data.update(self.order_data)
+
+            # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで
+            # フリガナの苗字が異なる場合はユーザーに確認する
+            try:
+                def _surname_part(text: str) -> str:
+                    if not text:
+                        return ""
+                    # 全角スペースと半角スペースで分割して先頭トークンを苗字とする
+                    for sep in (" ", "\u3000"):
+                        if sep in text:
+                            return text.split(sep)[0].strip()
+                    # スペースがない場合はそのまま返す
+                    return text.strip()
+
+                contractor_name = getattr(self, 'contractor_input', None)
+                list_name = getattr(self, 'list_name_input', None)
+                contractor_furi = getattr(self, 'furigana_input', None)
+                list_furi = getattr(self, 'list_furigana_input', None)
+
+                if contractor_name and list_name and contractor_furi and list_furi:
+                    kanji_contractor = _surname_part(contractor_name.text().strip())
+                    kanji_list = _surname_part(list_name.text().strip())
+                    furi_contractor = _surname_part(contractor_furi.text().strip())
+                    furi_list = _surname_part(list_furi.text().strip())
+
+                    # 漢字の苗字が空でないかつ一致している場合、苗字フリガナ不一致を確認
+                    if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
+                        if furi_contractor and furi_list and furi_contractor != furi_list:
+                            # ユーザーに確認（苗字）
+                            reply = QMessageBox.question(
+                                self,
+                                "確認",
+                                "苗字のフリガナが相違していますが大丈夫ですか？",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No
+                            )
+                            if reply == QMessageBox.StandardButton.No:
+                                logging.info("ユーザーによりプレビュー生成が中止されました: 苗字フリガナ不一致")
+                                return None
+
+                        # さらに名前（名）の漢字が一致しているか確認し、名フリガナ不一致なら確認
+                        def _given_part(text: str) -> str:
+                            if not text:
+                                return ""
+                            for sep in (" ", "\u3000"):
+                                if sep in text:
+                                    parts = text.split(sep)
+                                    return " ".join(parts[1:]).strip()
+                            return ""
+
+                        given_contractor = _given_part(contractor_name.text().strip())
+                        given_list = _given_part(list_name.text().strip())
+                        if given_contractor and given_list and given_contractor == given_list:
+                            # 名のフリガナ抽出（先頭以外を名として扱う）
+                            def _given_furi(text: str) -> str:
+                                if not text:
+                                    return ""
+                                for sep in (" ", "\u3000"):
+                                    if sep in text:
+                                        parts = text.split(sep)
+                                        return " ".join(parts[1:]).strip()
+                                return ""
+
+                            given_furi_contractor = _given_furi(contractor_furi.text().strip())
+                            given_furi_list = _given_furi(list_furi.text().strip())
+                            if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                                reply = QMessageBox.question(
+                                    self,
+                                    "確認",
+                                    "名前のフリガナが相違していますが大丈夫ですか？",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No
+                                )
+                                if reply == QMessageBox.StandardButton.No:
+                                    logging.info("ユーザーによりプレビュー生成が中止されました: 名前フリガナ不一致")
+                                    return None
+            except Exception:
+                # 確認処理が失敗してもプレビュー生成自体は継続させる
+                logging.exception("苗字フリガナの不一致チェック中にエラーが発生しました")
             
             # テンプレートを取得
             template = self.get_template()

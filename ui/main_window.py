@@ -4117,6 +4117,80 @@ class CancellationError(Exception):
                 data['judgment'] = self.judgment_combo.currentText().rstrip()
             
             # データが空の場合はエラー
+            # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで
+            # フリガナの苗字が異なる場合はユーザーに確認する（通常モード用）
+            try:
+                def _surname_part(text: str) -> str:
+                    if not text:
+                        return ""
+                    # 全角スペースと半角スペースで分割して先頭トークンを苗字とする
+                    for sep in (" ", "\u3000"):
+                        if sep in text:
+                            return text.split(sep)[0].strip()
+                    return text.strip()
+
+                contractor_name = getattr(self, 'contractor_input', None)
+                list_name = getattr(self, 'list_name_input', None)
+                contractor_furi = getattr(self, 'furigana_input', None)
+                list_furi = getattr(self, 'list_furigana_input', None)
+
+                if contractor_name and list_name and contractor_furi and list_furi:
+                    kanji_contractor = _surname_part(contractor_name.text().strip())
+                    kanji_list = _surname_part(list_name.text().strip())
+                    furi_contractor = _surname_part(contractor_furi.text().strip())
+                    furi_list = _surname_part(list_furi.text().strip())
+
+                    if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
+                            if furi_contractor and furi_list and furi_contractor != furi_list:
+                                reply = QMessageBox.question(
+                                    self,
+                                    "確認",
+                                    "苗字のフリガナが相違していますが大丈夫ですか？",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No
+                                )
+                                if reply == QMessageBox.StandardButton.No:
+                                    logging.info("ユーザーによりプレビュー生成が中止されました: 苗字フリガナ不一致 (通常モード)")
+                                    return None
+
+                            # 名（名前）の漢字も一致しているか確認し、名フリガナ不一致なら確認
+                            def _given_part(text: str) -> str:
+                                if not text:
+                                    return ""
+                                for sep in (" ", "\u3000"):
+                                    if sep in text:
+                                        parts = text.split(sep)
+                                        return " ".join(parts[1:]).strip()
+                                return ""
+
+                            given_contractor = _given_part(contractor_name.text().strip())
+                            given_list = _given_part(list_name.text().strip())
+                            if given_contractor and given_list and given_contractor == given_list:
+                                def _given_furi(text: str) -> str:
+                                    if not text:
+                                        return ""
+                                    for sep in (" ", "\u3000"):
+                                        if sep in text:
+                                            parts = text.split(sep)
+                                            return " ".join(parts[1:]).strip()
+                                    return ""
+
+                                given_furi_contractor = _given_furi(contractor_furi.text().strip())
+                                given_furi_list = _given_furi(list_furi.text().strip())
+                                if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                                    reply = QMessageBox.question(
+                                        self,
+                                        "確認",
+                                        "名前のフリガナが相違していますが大丈夫ですか？",
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                        QMessageBox.StandardButton.No
+                                    )
+                                    if reply == QMessageBox.StandardButton.No:
+                                        logging.info("ユーザーによりプレビュー生成が中止されました: 名前フリガナ不一致 (通常モード)")
+                                        return None
+            except Exception:
+                logging.exception("苗字フリガナの不一致チェック中にエラーが発生しました (通常モード)")
+
             if not data:
                 logging.error("プレビュー生成に必要なデータが取得できません")
                 return None
