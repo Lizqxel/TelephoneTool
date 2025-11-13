@@ -130,10 +130,10 @@ class SpreadsheetPostDialog(QDialog):
         shozaiCtlLayout.addWidget(self.reorderBtn)
         layout.addLayout(shozaiCtlLayout)
 
-        # 新規/見込み（I）
-        layout.addWidget(QLabel("新規/見込み"))
+        # 新規/見込（I）
+        layout.addWidget(QLabel("新規/見込"))
         self.kubunCombo = QComboBox()
-        self.kubunCombo.addItems(["新規", "見込み"])  # 現状は新規を想定
+        self.kubunCombo.addItems(["新規", "見込"])  # 現状は新規を想定
         self.kubunCombo.setCurrentText(self.values.get("kubun", "新規"))
         layout.addWidget(self.kubunCombo)
 
