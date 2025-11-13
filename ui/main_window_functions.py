@@ -340,12 +340,18 @@ ND：{nd}
                 furi_list = _surname_part(list_furi.text().strip())
 
                 if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
-                    # 苗字フリガナ不一致チェック（既存）
+                    # 苗字フリガナ不一致チェック（契約者名とリスト名の比較を明示・見比べ表示）
                     if furi_contractor and furi_list and furi_contractor != furi_list:
+                        message_text = (
+                            "契約者名とリスト名で姓のフリガナが一致しません。\n"
+                            f"契約者（姓）：{furi_contractor}\n"
+                            f"リスト（姓）：{furi_list}\n"
+                            "このまま続行しますか？"
+                        )
                         reply = QMessageBox.question(
                             self,
                             "確認",
-                            "苗字のフリガナが相違していますが大丈夫ですか？",
+                            message_text,
                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                             QMessageBox.StandardButton.No
                         )
@@ -370,10 +376,16 @@ ND：{nd}
                         given_furi_contractor = _given_furi(contractor_furi.text().strip())
                         given_furi_list = _given_furi(list_furi.text().strip())
                         if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                            message_text = (
+                                "契約者名とリスト名で名のフリガナが一致しません。\n"
+                                f"契約者（名）：{given_furi_contractor}\n"
+                                f"リスト（名）：{given_furi_list}\n"
+                                "このまま続行しますか？"
+                            )
                             reply = QMessageBox.question(
                                 self,
                                 "確認",
-                                "名前のフリガナが相違していますが大丈夫ですか？",
+                                message_text,
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No
                             )
@@ -1277,11 +1289,17 @@ ND：{nd}
                     # 漢字の苗字が空でないかつ一致している場合、苗字フリガナ不一致を確認
                     if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
                         if furi_contractor and furi_list and furi_contractor != furi_list:
-                            # ユーザーに確認（苗字）
+                            # ユーザーに確認（苗字）: 契約者名とリスト名を明示し、値を見比べ表示
+                            message_text = (
+                                "契約者名とリスト名で姓のフリガナが一致しません。\n"
+                                f"契約者（姓）：{furi_contractor}\n"
+                                f"リスト（姓）：{furi_list}\n"
+                                "このまま続行しますか？"
+                            )
                             reply = QMessageBox.question(
                                 self,
                                 "確認",
-                                "苗字のフリガナが相違していますが大丈夫ですか？",
+                                message_text,
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No
                             )
@@ -1315,10 +1333,16 @@ ND：{nd}
                             given_furi_contractor = _given_furi(contractor_furi.text().strip())
                             given_furi_list = _given_furi(list_furi.text().strip())
                             if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                                message_text = (
+                                    "契約者名とリスト名で名のフリガナが一致しません。\n"
+                                    f"契約者（名）：{given_furi_contractor}\n"
+                                    f"リスト（名）：{given_furi_list}\n"
+                                    "このまま続行しますか？"
+                                )
                                 reply = QMessageBox.question(
                                     self,
                                     "確認",
-                                    "名前のフリガナが相違していますが大丈夫ですか？",
+                                    message_text,
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No
                                 )
