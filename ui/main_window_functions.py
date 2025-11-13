@@ -1168,10 +1168,9 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(name)
             if furigana:
-                # 既にユーザー入力がある場合は上書きしない
-                if not self.furigana_input.text().strip():
-                    self.furigana_input.setText(furigana)
-                    logging.info(f"フリガナを自動生成しました: {name} → {furigana}")
+                # 自動モードでは常に最新の変換結果で更新する
+                self.furigana_input.setText(furigana)
+                logging.info(f"フリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
             logging.error(f"フリガナ自動生成エラー: {str(e)}")
             
@@ -1190,10 +1189,9 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(name)
             if furigana:
-                # 既にユーザー入力がある場合は上書きしない
-                if not self.list_furigana_input.text().strip():
-                    self.list_furigana_input.setText(furigana)
-                    logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
+                # 自動モードでは常に最新の変換結果で更新する
+                self.list_furigana_input.setText(furigana)
+                logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
         except Exception as e:
             logging.error(f"リストフリガナ自動生成エラー: {str(e)}")
             
@@ -1208,10 +1206,9 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(address)
             if furigana:
-                # 既にユーザー入力がある場合は上書きしない
-                if not self.address_furigana_input.text().strip():
-                    self.address_furigana_input.setText(furigana)
-                    logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
+                # 自動モードはないため、住所入力に追従して常に更新
+                self.address_furigana_input.setText(furigana)
+                logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
         except Exception as e:
             logging.error(f"住所フリガナ自動生成エラー: {str(e)}")
             
@@ -1230,10 +1227,9 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(address)
             if furigana:
-                # 既にユーザー入力がある場合は上書きしない
-                if not self.list_address_furigana_input.text().strip():
-                    self.list_address_furigana_input.setText(furigana)
-                    logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
+                # 自動モードでは常に最新の変換結果で更新する
+                self.list_address_furigana_input.setText(furigana)
+                logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
         except Exception as e:
             logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
     
