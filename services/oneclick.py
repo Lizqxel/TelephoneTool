@@ -980,7 +980,18 @@ class OneClickService:
         
         for control in controls:
             control_rect = control['rect']
-            
+
+            # サイズフィルタ: 幅や高さが極端に小さいコントロールは除外
+            width = control_rect[2] - control_rect[0]
+            height = control_rect[3] - control_rect[1]
+            if width < 20 or height < 10:
+                logging.debug(
+                    f"フィールド候補を除外 (サイズが小さすぎます): "
+                    f"text='{control['text']}', class='{control['class']}', "
+                    f"rect={control_rect}, width={width}, height={height}"
+                )
+                continue
+
             # コントロールの中心座標を計算
             control_center_x = (control_rect[0] + control_rect[2]) // 2
             control_center_y = (control_rect[1] + control_rect[3]) // 2
