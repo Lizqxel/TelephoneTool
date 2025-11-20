@@ -30,6 +30,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, QTime
 
 
+class _WheelDisabledComboBox(QComboBox):
+    """マウスホイールでの値変更を無効化したコンボボックス"""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class _WheelDisabledDateEdit(QDateEdit):
+    """マウスホイールでの値変更を無効化した日付入力"""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class SpreadsheetPostDialog(QDialog):
     """スプレッドシート転記前の最終確認ダイアログ"""
 
@@ -45,7 +57,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 転記先（スプレッドシートのURL/シート名）
         layout.addWidget(QLabel("転記先（スプレッドシート）"))
-        self.destCombo = QComboBox()
+        self.destCombo = _WheelDisabledComboBox()
 
         # settings.json から destinations を読み込み
         settings_items = load_destinations_from_settings()
@@ -60,7 +72,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 管轄（A）: 編集可能なプルダウン + 自由入力可（初期は未入力）
         layout.addWidget(QLabel("管轄"))
-        self.kanKatsuCombo = QComboBox()
+        self.kanKatsuCombo = _WheelDisabledComboBox()
         self.kanKatsuCombo.setEditable(True)
         # 先頭は空（未入力）を用意
         self.kanKatsuCombo.addItem("")
@@ -95,7 +107,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 商材（H） + デフォルト設定チェックボックス + 並べ替えボタン
         layout.addWidget(QLabel("商材"))
-        self.shozaiCombo = QComboBox()
+        self.shozaiCombo = _WheelDisabledComboBox()
         products = self._get_products_ordered()
         self.shozaiCombo.addItems(products)
         # settings から default_shozai を読み、initialValues > settings > 既定 の優先順でセット
@@ -132,7 +144,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 新規/見込（I）
         layout.addWidget(QLabel("新規/見込"))
-        self.kubunCombo = QComboBox()
+        self.kubunCombo = _WheelDisabledComboBox()
         self.kubunCombo.addItems(["新規", "見込"])  # 現状は新規を想定
         self.kubunCombo.setCurrentText(self.values.get("kubun", "新規"))
         layout.addWidget(self.kubunCombo)
@@ -151,7 +163,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # トス日（M）
         layout.addWidget(QLabel("トス日 (yyyy-MM-dd)"))
-        self.tosDateEdit = QDateEdit()
+        self.tosDateEdit = _WheelDisabledDateEdit()
         self.tosDateEdit.setDisplayFormat("yyyy-MM-dd")
         self.tosDateEdit.setCalendarPopup(True)
         today = QDate.currentDate()
@@ -161,7 +173,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 前確コール日（N）
         layout.addWidget(QLabel("前確コール日 (yyyy-MM-dd)"))
-        self.zenkakuDateEdit = QDateEdit()
+        self.zenkakuDateEdit = _WheelDisabledDateEdit()
         self.zenkakuDateEdit.setDisplayFormat("yyyy-MM-dd")
         self.zenkakuDateEdit.setCalendarPopup(True)
         zenkakuDateStr = self.values.get("zenkakuCallDate") or today.toString("yyyy-MM-dd")
@@ -170,7 +182,7 @@ class SpreadsheetPostDialog(QDialog):
 
         # 前確コール結果（P）
         layout.addWidget(QLabel("前確コール結果"))
-        self.zenkakuResultCombo = QComboBox()
+        self.zenkakuResultCombo = _WheelDisabledComboBox()
         self.zenkakuResultCombo.addItems(["前確待ち", "トス対象外", "再コール", "前確NG", "前確OK"])  # 既定=前確待ち
         self.zenkakuResultCombo.setCurrentText(self.values.get("zenkakuResult", "前確待ち"))
         layout.addWidget(self.zenkakuResultCombo)
