@@ -2948,6 +2948,9 @@ ND：{nd}
                         }
                     """)
                 logging.info("提供判定結果: 提供可能")
+                if hasattr(self, 'judgment_combo'):
+                    self.judgment_combo.setCurrentText("OK")
+                    logging.info("提供判定を「OK」に設定")
                 
             elif result["status"] == "unavailable":
                 # 提供不可
@@ -2964,6 +2967,9 @@ ND：{nd}
                         }
                     """)
                 logging.info("提供判定結果: 提供不可")
+                if hasattr(self, 'judgment_combo'):
+                    self.judgment_combo.setCurrentText("未提供")
+                    logging.info("提供判定を「未提供」に設定")
                 
             elif result["status"] == "error":
                 # エラー

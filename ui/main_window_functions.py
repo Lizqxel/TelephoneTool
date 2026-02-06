@@ -849,8 +849,8 @@ ND：{nd}
                         }
                     """)
                     if hasattr(self, 'judgment_combo'):
-                        self.judgment_combo.setCurrentText("提供可能")
-                        logging.info("提供判定を「提供可能」に設定")
+                        self.judgment_combo.setCurrentText("OK")
+                        logging.info("提供判定を「OK」に設定")
                 elif status == "unavailable":
                     # 未提供の場合
                     self.area_result_label.setText("提供エリア: 未提供")
@@ -880,9 +880,6 @@ ND：{nd}
                             color: #388E3C;
                         }
                     """)
-                    if hasattr(self, 'judgment_combo'):
-                        self.judgment_combo.setCurrentText("集合住宅")
-                        logging.info("提供判定を「集合住宅」に設定")
                 elif status == "failure":
                     # 判定失敗の場合
                     self.area_result_label.setText(f"提供エリア: {message}")
@@ -896,9 +893,6 @@ ND：{nd}
                             color: #F39C12;
                         }
                     """)
-                    if hasattr(self, 'judgment_combo'):
-                        self.judgment_combo.setCurrentText("検索失敗")
-                        logging.info("提供判定を「検索失敗」に設定")
                 else:
                     # その他の場合（エラーなど）
                     self.area_result_label.setText(f"提供エリア: {message}")
@@ -912,9 +906,6 @@ ND：{nd}
                             color: #E74C3C;
                         }
                     """)
-                    if hasattr(self, 'judgment_combo'):
-                        self.judgment_combo.setCurrentText("エラー")
-                        logging.info("提供判定を「エラー」に設定")
                 logging.info("area_result_labelの更新が完了")
                 
                 # UIの更新を確実に実行
@@ -957,15 +948,9 @@ ND：{nd}
                 logging.info("プレビューテキストの更新を開始")
                 # 提供判定の結果を更新
                 if status == "available":
-                    self.judgment_combo.setCurrentText("提供可能")
+                    self.judgment_combo.setCurrentText("OK")
                 elif status == "unavailable":
                     self.judgment_combo.setCurrentText("未提供")
-                elif status == "apartment":
-                    self.judgment_combo.setCurrentText("集合住宅")
-                elif status == "failure":
-                    self.judgment_combo.setCurrentText("検索失敗")
-                else:
-                    self.judgment_combo.setCurrentText("エラー")
                 
                 # プレビューテキストを生成
                 self.generate_preview_text()
