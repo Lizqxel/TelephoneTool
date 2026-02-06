@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
                               QSizePolicy, QProgressBar, QListView)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMetaObject, Q_ARG
-from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor
+from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor, QUndoStack, QUndoCommand, QKeySequence
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QRadioButton, QGroupBox,
                              QScrollArea, QSplitter, QToolTip, QMenuBar)
 from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot, QMetaObject, Q_ARG, QPoint, QEvent, QThread
-from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowEvent, QIcon
+from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowEvent, QIcon, QUndoStack, QUndoCommand, QKeySequence
 
 from ui.main_window_functions import MainWindowFunctions
 from services.oneclick import OneClickService
@@ -143,6 +143,45 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     # カスタムシグナル：CTI自動処理用
     trigger_auto_search = Signal()
+
+    class _TextChangeCommand(QUndoCommand):
+        """テキスト変更用のUndoコマンド"""
+        def __init__(self, widget, old_text, new_text, set_flag_callback, parent=None):
+            super().__init__(parent)
+            self.widget = widget
+            self.old_text = old_text
+            self.new_text = new_text
+            self.set_flag_callback = set_flag_callback
+
+        def _apply_text(self, text):
+            if self.widget is None:
+                return
+            try:
+                from PySide6.QtWidgets import QLineEdit, QTextEdit
+                if isinstance(self.widget, QLineEdit):
+                    self.widget.setText(text)
+                elif isinstance(self.widget, QTextEdit):
+                    self.widget.setPlainText(text)
+                try:
+                    self.widget.setFocus()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        def undo(self):
+            self.set_flag_callback(True)
+            try:
+                self._apply_text(self.old_text)
+            finally:
+                self.set_flag_callback(False)
+
+        def redo(self):
+            self.set_flag_callback(True)
+            try:
+                self._apply_text(self.new_text)
+            finally:
+                self.set_flag_callback(False)
     
     def set_font_size(self, size):
         """
@@ -202,6 +241,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         メインウィンドウの初期化
         """
         super().__init__()
+
+        # 最後にフォーカスされた入力ウィジェット
+        self.last_input_widget = None
+        # Undo/Redo スタック
+        self.undo_stack = QUndoStack(self)
+        self._undo_in_progress = False
+        self._last_text_map = {}
         
         # バージョン情報の設定
         self.version = "1.0.0"
@@ -319,6 +365,20 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # フォントサイズの設定
         font_size = self.settings.get('font_size', 10)
         self.set_font_size(font_size)
+
+        # 入力ウィジェットのUndo/Redoを有効化し、フォーカスを追跡
+        self.enable_undo_redo_for_inputs()
+
+        # Ctrl+Z / Ctrl+Y のショートカット（標準Undo/Redoアクション）
+        self._undo_action = self.undo_stack.createUndoAction(self, "Undo")
+        self._undo_action.setShortcut(QKeySequence.Undo)
+        self._undo_action.setShortcutContext(Qt.ApplicationShortcut)
+        self.addAction(self._undo_action)
+
+        self._redo_action = self.undo_stack.createRedoAction(self, "Redo")
+        self._redo_action.setShortcut(QKeySequence.Redo)
+        self._redo_action.setShortcutContext(Qt.ApplicationShortcut)
+        self.addAction(self._redo_action)
     
     def check_and_show_mode_selection(self):
         """
@@ -1185,6 +1245,45 @@ ND：{nd}
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(5, 2, 5, 2)
         top_bar_layout.setSpacing(4)
+
+        # 戻る/やり直し（矢印）ボタンを左上に配置
+        self.undo_btn = QPushButton("↩")
+        self.redo_btn = QPushButton("↪")
+        arrow_style = """
+            QPushButton {
+                color: white;
+                border: 1px solid white;
+                padding: 0px 6px;
+                border-radius: 2px;
+                min-height: 18px;
+                max-height: 22px;
+                font-size: 10pt;
+                min-width: 26px;
+                max-width: 26px;
+            }
+            QPushButton:hover {
+                background-color: #34495E;
+            }
+            QPushButton:pressed {
+                background-color: #2C3E50;
+            }
+        """
+        self.undo_btn.setStyleSheet(arrow_style)
+        self.redo_btn.setStyleSheet(arrow_style)
+        self.undo_btn.setToolTip("元に戻す(Ctrl+Z)")
+        self.redo_btn.setToolTip("やり直し(Ctrl+Y)")
+        # クリックしても入力欄のフォーカスを奪わない
+        self.undo_btn.setFocusPolicy(Qt.NoFocus)
+        self.redo_btn.setFocusPolicy(Qt.NoFocus)
+        try:
+            self.undo_btn.setShortcut("Ctrl+Z")
+            self.redo_btn.setShortcut("Ctrl+Y")
+        except Exception:
+            pass
+        self.undo_btn.clicked.connect(self.handle_undo)
+        self.redo_btn.clicked.connect(self.handle_redo)
+        top_bar_layout.addWidget(self.undo_btn)
+        top_bar_layout.addWidget(self.redo_btn)
         
         # ワンクリック取得ボタン（名称変更：顧客情報取得）
         self.oneclick_btn = QPushButton("顧客情報取得")
@@ -1255,6 +1354,97 @@ ND：{nd}
             top_bar_layout.addWidget(btn)
         
         parent_layout.addWidget(top_bar)
+
+    def enable_undo_redo_for_inputs(self):
+        """全入力ウィジェットのUndo/Redoを有効化し、フォーカスを追跡する"""
+        try:
+            from PySide6.QtWidgets import QLineEdit, QTextEdit
+            # 既存の入力ウィジェットに対して設定
+            for widget in self.findChildren(QLineEdit) + self.findChildren(QTextEdit):
+                try:
+                    widget.setUndoRedoEnabled(True)
+                except Exception:
+                    pass
+                widget.installEventFilter(self)
+                # 初期テキストを記録
+                self._last_text_map[widget] = self._get_widget_text(widget)
+                # テキスト変更を監視してUndoスタックへ
+                if isinstance(widget, QLineEdit):
+                    widget.textEdited.connect(lambda text, w=widget: self._on_text_edited(w, text))
+                elif isinstance(widget, QTextEdit):
+                    widget.textChanged.connect(lambda w=widget: self._on_text_changed(w))
+        except Exception as e:
+            logging.error(f"Undo/Redoの初期化中にエラー: {e}")
+
+    def eventFilter(self, obj, event):
+        """入力ウィジェットのフォーカスを追跡する"""
+        try:
+            # Ctrl+Z / Ctrl+Y を入力欄で捕捉してUndo/Redoを実行
+            if event.type() == QEvent.KeyPress:
+                try:
+                    if event.matches(QKeySequence.Undo):
+                        self.undo_stack.undo()
+                        return True
+                    if event.matches(QKeySequence.Redo):
+                        self.undo_stack.redo()
+                        return True
+                except Exception:
+                    pass
+            if event.type() == QEvent.FocusIn:
+                from PySide6.QtWidgets import QLineEdit, QTextEdit
+                if isinstance(obj, (QLineEdit, QTextEdit)):
+                    self.last_input_widget = obj
+                    # フォーカス時のテキストを保存
+                    self._last_text_map[obj] = self._get_widget_text(obj)
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
+
+    def _set_undo_flag(self, value: bool):
+        self._undo_in_progress = value
+
+    def _get_widget_text(self, widget):
+        from PySide6.QtWidgets import QLineEdit, QTextEdit
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        if isinstance(widget, QTextEdit):
+            return widget.toPlainText()
+        return ""
+
+    def _on_text_edited(self, widget, new_text):
+        if self._undo_in_progress:
+            return
+        old_text = self._last_text_map.get(widget, "")
+        if new_text == old_text:
+            return
+        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        self.undo_stack.push(cmd)
+        self._last_text_map[widget] = new_text
+
+    def _on_text_changed(self, widget):
+        if self._undo_in_progress:
+            return
+        new_text = self._get_widget_text(widget)
+        old_text = self._last_text_map.get(widget, "")
+        if new_text == old_text:
+            return
+        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        self.undo_stack.push(cmd)
+        self._last_text_map[widget] = new_text
+
+    def handle_undo(self):
+        """フォーカス中のテキスト入力に対してUndoを実行"""
+        try:
+            self.undo_stack.undo()
+        except Exception as e:
+            logging.error(f"Undo実行中にエラー: {e}")
+
+    def handle_redo(self):
+        """フォーカス中のテキスト入力に対してRedoを実行"""
+        try:
+            self.undo_stack.redo()
+        except Exception as e:
+            logging.error(f"Redo実行中にエラー: {e}")
     
     def create_input_form(self, parent_layout):
         """入力フォームを作成します"""
