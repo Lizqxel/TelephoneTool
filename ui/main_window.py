@@ -2348,13 +2348,20 @@ ND：{nd}
 
     def search_service_area(self):
         """提供エリア検索を開始"""
+        is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
+
+        if not self.refresh_address_from_cti():
+            if is_auto_processing:
+                logging.warning("CTI自動処理: CTIの住所取得に失敗したため検索をスキップします")
+                return
+            QMessageBox.warning(self, "CTI取得エラー", "CTIの住所取得に失敗したため、提供判定を開始できません。")
+            return
+
         postal_code = self.postal_code_input.text().strip()
         address = self.address_input.text().strip()
         
         if not postal_code or not address:
             # CTI自動処理中かどうかを判定
-            is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
-            
             if is_auto_processing:
                 # 自動処理ではメッセージボックスを表示しない
                 logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")

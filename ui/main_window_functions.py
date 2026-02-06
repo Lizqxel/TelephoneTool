@@ -21,6 +21,7 @@ from services import oneclick
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
+from utils.string_utils import convert_to_half_width_except_space
 
 
 class ServiceAreaSearchWorker(QThread):
@@ -754,6 +755,9 @@ ND：{nd}
         """提供エリア検索を実行"""
         try:
             logging.info("★★★ 提供エリア検索を開始します ★★★")
+            if not self.refresh_address_from_cti():
+                QMessageBox.warning(self, "CTI取得エラー", "CTIの住所取得に失敗したため、提供判定を開始できません。")
+                return
             # 郵便番号と住所を取得
             postal_code = self.postal_code_input.text().strip()
             address = self.address_input.text().strip()
@@ -810,6 +814,43 @@ ND：{nd}
         except Exception as e:
             logging.error(f"★★★ 提供エリア検索の開始中にエラーが発生: {e} ★★★")
             QMessageBox.critical(self, "エラー", f"提供エリア検索の開始中にエラーが発生しました: {e}")
+
+    def refresh_address_from_cti(self) -> bool:
+        """CTI上の住所で入力欄を更新する"""
+        try:
+            cti_service = getattr(self, 'cti_service', None)
+            if not cti_service or not hasattr(cti_service, 'get_all_fields_data'):
+                logging.warning("CTIサービスが利用できないため住所更新をスキップします")
+                return False
+
+            data = cti_service.get_all_fields_data()
+            if not data or not getattr(data, 'address', ''):
+                logging.warning("CTIから住所を取得できませんでした")
+                return False
+
+            postal_code = getattr(data, 'postal_code', '')
+            if not postal_code:
+                logging.warning("CTIから郵便番号を取得できませんでした")
+                return False
+
+            converted_address = data.address.replace('－', '-')
+            converted_address = converted_address.replace('ー', '-')
+            converted_address = converted_address.replace('−', '-')
+            converted_address = converted_address.replace(' ', '　')
+            converted_address = convert_to_half_width_except_space(converted_address)
+
+            self.address_input.setText(converted_address)
+            self.list_address_input.setText(converted_address)
+
+            converted_postal_code = convert_to_half_width_except_space(postal_code)
+            self.postal_code_input.setText(converted_postal_code)
+            self.list_postal_code_input.setText(converted_postal_code)
+
+            logging.info("CTI住所・郵便番号で入力欄を更新しました")
+            return True
+        except Exception as e:
+            logging.error(f"CTI住所更新中にエラーが発生しました: {e}")
+            return False
     
     def on_search_completed(self, result):
         """検索完了時の処理"""
