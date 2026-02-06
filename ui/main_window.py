@@ -1456,6 +1456,12 @@ ND：{nd}
         address_group = QGroupBox("住所情報")
         address_layout = QVBoxLayout()
         
+        # 提供判定
+        address_layout.addWidget(QLabel("提供判定"))
+        self.judgment_combo = CustomComboBox()
+        self.judgment_combo.addItems(["OK", "未提供"])
+        address_layout.addWidget(self.judgment_combo)
+
         # 郵便番号
         address_layout.addWidget(QLabel("郵便番号"))
         self.postal_code_input = QLineEdit()
@@ -1696,12 +1702,6 @@ ND：{nd}
         self.order_date_input.setText(f"{month}/{day}")
         self.order_date_input.setReadOnly(True)
         order_layout.addWidget(self.order_date_input)
-        
-        # 提供判定
-        order_layout.addWidget(QLabel("提供判定"))
-        self.judgment_combo = CustomComboBox()
-        self.judgment_combo.addItems(["OK", "NG"])
-        order_layout.addWidget(self.judgment_combo)
         
         order_group.setLayout(order_layout)
         parent_layout.addWidget(order_group)
