@@ -42,6 +42,47 @@ class OneClickService:
         }
         logging.debug("OneClickService initialized")
 
+    def _find_right_field_with_text(self, base_field, controls, max_dx=400, max_dy=30):
+        """基準フィールドの右側にある、同じ行のテキストフィールドを探す"""
+        if not base_field:
+            return None
+
+        base_rect = base_field.get('rect')
+        if not base_rect:
+            return None
+
+        base_center_y = (base_rect[1] + base_rect[3]) // 2
+        base_right_x = base_rect[2]
+
+        closest_field = None
+        min_dx = float('inf')
+
+        for control in controls or []:
+            if control.get('hwnd') == base_field.get('hwnd'):
+                continue
+            text = control.get('text') or ""
+            if not text.strip():
+                continue
+
+            rect = control.get('rect')
+            if not rect:
+                continue
+
+            center_y = (rect[1] + rect[3]) // 2
+            vertical_distance = abs(center_y - base_center_y)
+            if vertical_distance > max_dy:
+                continue
+
+            horizontal_distance = rect[0] - base_right_x
+            if horizontal_distance <= 0 or horizontal_distance > max_dx:
+                continue
+
+            if horizontal_distance < min_dx:
+                min_dx = horizontal_distance
+                closest_field = control
+
+        return closest_field
+
     def is_edit_control(self, hwnd):
         """
         コントロールが編集可能なテキストボックスかどうかを判定
@@ -497,6 +538,26 @@ class OneClickService:
                     logging.info(f"顧客名フィールドを直接検出: '{customer_field['text']}', "
                                f"handle={customer_field['hwnd']}, class='{customer_field['class']}', "
                                f"client_rect={customer_field['client_rect']}")
+                elif customer_field:
+                    # 左側が空欄の場合、右隣のボックスをチェック
+                    right_field = self._find_right_field_with_text(customer_field, controls)
+                    if right_field and right_field.get('text'):
+                        data.customer_name = right_field['text']
+                        logging.info(
+                            f"顧客名フィールド(右隣)を検出: '{right_field['text']}', "
+                            f"handle={right_field['hwnd']}, class='{right_field['class']}', "
+                            f"client_rect={right_field['client_rect']}"
+                        )
+                elif customer_field:
+                    # 左側が空欄の場合、右隣のボックスをチェック
+                    right_field = self._find_right_field_with_text(customer_field, controls)
+                    if right_field and right_field.get('text'):
+                        data.customer_name = right_field['text']
+                        logging.info(
+                            f"顧客名フィールド(右隣)を検出: '{right_field['text']}', "
+                            f"handle={right_field['hwnd']}, class='{right_field['class']}', "
+                            f"client_rect={right_field['client_rect']}"
+                        )
         
         # 従来の方法でも検出を試みる
         if not any([data.customer_name, data.address, data.phone, data.postal_code, data.management_id]):
