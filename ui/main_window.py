@@ -444,6 +444,21 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.current_mode = 'simple'
             self.save_mode_settings(self.current_mode, True)
             logging.info("モード選択がキャンセルされました。シンプルモードを使用します。")
+
+    def open_mode_selection_from_badge(self):
+        """
+        バッジクリックでモード選択を開く（キャンセル時は変更しない）
+        """
+        dialog = ModeSelectionDialog(self)
+        if dialog.exec():
+            selected_mode = dialog.get_selected_mode()
+            show_again = dialog.should_show_again()
+            self.save_mode_settings(selected_mode, show_again)
+            if selected_mode != self.current_mode:
+                self.current_mode = selected_mode
+                self.reconstruct_ui()
+            else:
+                self.current_mode = selected_mode
     
     def save_mode_settings(self, mode, show_again):
         """
@@ -559,7 +574,7 @@ ND：{nd}
         
         # メインレイアウトの設定
         main_layout = QVBoxLayout(main_widget)
-        
+
         # 設定ファイルのパスを確認
         if not hasattr(self, 'settings_file'):
             self.settings_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'settings.json')
@@ -1362,6 +1377,28 @@ ND：{nd}
         # ボタンをレイアウトに追加
         for btn in buttons:
             top_bar_layout.addWidget(btn)
+
+        mode_text, mode_color = self._get_mode_badge_spec()
+        self.mode_badge_label = QPushButton(f"モード: {mode_text}")
+        self.mode_badge_label.setStyleSheet(f"""
+            QPushButton {{
+                color: {mode_color};
+                background-color: transparent;
+                border: 1px solid {mode_color};
+                border-radius: 3px;
+                padding: 1px 6px;
+                font-weight: 600;
+                font-size: 9pt;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 0.08);
+            }}
+        """)
+        self.mode_badge_label.setFocusPolicy(Qt.NoFocus)
+        self.mode_badge_label.setToolTip("モード選択を開く")
+        self.mode_badge_label.clicked.connect(self.open_mode_selection_from_badge)
+        top_bar_layout.addStretch(1)
+        top_bar_layout.addWidget(self.mode_badge_label)
         
         parent_layout.addWidget(top_bar)
 
@@ -1409,6 +1446,13 @@ ND：{nd}
         except Exception:
             pass
         return super().eventFilter(obj, event)
+
+    def _get_mode_badge_spec(self):
+        if self.current_mode == 'corporate':
+            return "法人モード", "#FF9800"
+        if self.current_mode == 'simple':
+            return "通常モード", "#43A047"
+        return "誘導モード", "#2196F3"
 
     def _set_undo_flag(self, value: bool):
         self._undo_in_progress = value
