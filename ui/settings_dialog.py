@@ -232,17 +232,11 @@ ND：{nd}
         corporate_desc.setWordWrap(True)
         corporate_layout.addWidget(corporate_desc)
 
-        self.corporate_auto_copy_checkbox = QCheckBox("対応者入力時に契約者名・フリガナを自動反映する")
+        self.corporate_auto_copy_checkbox = QCheckBox("同期して自動入力する（対応者名・契約者名・フリガナ）")
         self.corporate_auto_copy_checkbox.setChecked(
             self.current_corporate_settings.get("auto_copy_operator_to_contractor", True)
         )
         corporate_layout.addWidget(self.corporate_auto_copy_checkbox)
-
-        self.corporate_manual_contractor_checkbox = QCheckBox("契約者名を手動入力できるようにする")
-        self.corporate_manual_contractor_checkbox.setChecked(
-            self.current_corporate_settings.get("allow_manual_contractor", False)
-        )
-        corporate_layout.addWidget(self.corporate_manual_contractor_checkbox)
 
         corporate_group.setLayout(corporate_layout)
         content_layout.addWidget(corporate_group)
@@ -593,12 +587,12 @@ ND：{nd}
                     # 法人モード設定の読み込み
                     corporate_settings = settings.get('corporate_settings', self.default_corporate_settings)
                     if isinstance(corporate_settings, dict):
-                        self.corporate_auto_copy_checkbox.setChecked(
-                            corporate_settings.get("auto_copy_operator_to_contractor", True)
-                        )
-                        self.corporate_manual_contractor_checkbox.setChecked(
-                            corporate_settings.get("allow_manual_contractor", False)
-                        )
+                        if "auto_copy_operator_to_contractor" in corporate_settings:
+                            auto_copy = corporate_settings.get("auto_copy_operator_to_contractor", True)
+                        else:
+                            allow_manual = corporate_settings.get("allow_manual_contractor", False)
+                            auto_copy = not allow_manual
+                        self.corporate_auto_copy_checkbox.setChecked(bool(auto_copy))
                     
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
@@ -628,9 +622,6 @@ ND：{nd}
                 self.corporate_auto_copy_checkbox.setChecked(
                     self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
                 )
-                self.corporate_manual_contractor_checkbox.setChecked(
-                    self.default_corporate_settings.get("allow_manual_contractor", False)
-                )
                 self.reset_browser_settings()
                 self.reset_cti_settings()  # CTI設定もデフォルトに
                 self._full_settings = {}
@@ -644,9 +635,6 @@ ND：{nd}
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
             self.corporate_auto_copy_checkbox.setChecked(
                 self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
-            )
-            self.corporate_manual_contractor_checkbox.setChecked(
-                self.default_corporate_settings.get("allow_manual_contractor", False)
             )
             self.reset_browser_settings()
             self.reset_cti_settings()  # CTI設定もデフォルトに
@@ -691,6 +679,7 @@ ND：{nd}
             except Exception:
                 base = {}
 
+            auto_copy = self.corporate_auto_copy_checkbox.isChecked()
             settings = {
                 'format_template': self.format_edit.toPlainText(),
                 'font_size': self.font_size_slider.value(),
@@ -699,8 +688,8 @@ ND：{nd}
                 'mode': new_mode,
                 'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
                 'corporate_settings': {
-                    'allow_manual_contractor': self.corporate_manual_contractor_checkbox.isChecked(),
-                    'auto_copy_operator_to_contractor': self.corporate_auto_copy_checkbox.isChecked()
+                    'allow_manual_contractor': not auto_copy,
+                    'auto_copy_operator_to_contractor': auto_copy
                 },
                 # CTI監視設定を追加
                 'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
@@ -803,9 +792,6 @@ ND：{nd}
         self.corporate_auto_copy_checkbox.setChecked(
             self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
         )
-        self.corporate_manual_contractor_checkbox.setChecked(
-            self.default_corporate_settings.get("allow_manual_contractor", False)
-        )
         self.reset_browser_settings()
         self.reset_cti_settings()  # CTI設定もデフォルトに戻す
     
@@ -834,6 +820,7 @@ ND：{nd}
         else:
             mode = 'easy'
         
+        auto_copy = self.corporate_auto_copy_checkbox.isChecked()
         return {
             'format_template': self.format_edit.toPlainText(),
             'font_size': self.font_size_slider.value(),
@@ -842,8 +829,8 @@ ND：{nd}
             'mode': mode,
             'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
             'corporate_settings': {
-                'allow_manual_contractor': self.corporate_manual_contractor_checkbox.isChecked(),
-                'auto_copy_operator_to_contractor': self.corporate_auto_copy_checkbox.isChecked()
+                'allow_manual_contractor': not auto_copy,
+                'auto_copy_operator_to_contractor': auto_copy
             },
             # CTI監視設定を追加
             'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),

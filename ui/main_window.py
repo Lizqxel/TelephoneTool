@@ -248,6 +248,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.undo_stack = QUndoStack(self)
         self._undo_in_progress = False
         self._last_text_map = {}
+        self._name_sync_in_progress = False
         
         # バージョン情報の設定
         self.version = "1.0.0"
@@ -605,6 +606,7 @@ ND：{nd}
         form_widget = QWidget()
         form_layout = QVBoxLayout(form_widget)
         self.create_input_form(form_layout)
+        self.apply_corporate_input_settings()
         
         # スクロールエリアの作成
         scroll_area = QScrollArea()
@@ -652,6 +654,7 @@ ND：{nd}
         
         # シグナルの設定
         self.setup_signals()
+        self.setup_corporate_name_sync()
         
         # Google Sheetsの設定
         self.setup_google_sheets()
@@ -2006,6 +2009,70 @@ ND：{nd}
             # プレビュー更新ボタンのシグナル接続
             if hasattr(self, 'update_preview_btn'):
                 self.update_preview_btn.clicked.connect(self.update_preview)
+
+    def _get_corporate_settings(self):
+        settings = getattr(self, 'settings', {})
+        if not isinstance(settings, dict):
+            return {}
+        corporate_settings = settings.get('corporate_settings', {})
+        if not isinstance(corporate_settings, dict):
+            return {}
+        return corporate_settings
+
+    def apply_corporate_input_settings(self):
+        if self.current_mode != 'corporate':
+            return
+
+        if hasattr(self, 'contractor_input'):
+            self.contractor_input.setReadOnly(False)
+        if hasattr(self, 'furigana_input'):
+            self.furigana_input.setReadOnly(False)
+        if hasattr(self, 'furigana_mode_combo'):
+            self.furigana_mode_combo.setEnabled(True)
+
+    def setup_corporate_name_sync(self):
+        if self.current_mode != 'corporate':
+            return
+
+        corporate_settings = self._get_corporate_settings()
+        if 'auto_copy_operator_to_contractor' in corporate_settings:
+            should_sync = corporate_settings.get('auto_copy_operator_to_contractor', True)
+        else:
+            should_sync = not corporate_settings.get('allow_manual_contractor', False)
+
+        if not (hasattr(self, 'operator_input') and hasattr(self, 'contractor_input')):
+            return
+
+        try:
+            self.operator_input.textEdited.disconnect(self._on_operator_name_edited)
+        except Exception:
+            pass
+        try:
+            self.contractor_input.textEdited.disconnect(self._on_contractor_name_edited)
+        except Exception:
+            pass
+
+        if should_sync:
+            self.operator_input.textEdited.connect(self._on_operator_name_edited)
+            self.contractor_input.textEdited.connect(self._on_contractor_name_edited)
+
+    def _on_operator_name_edited(self, text):
+        if self._name_sync_in_progress:
+            return
+        self._name_sync_in_progress = True
+        try:
+            self.contractor_input.setText(text)
+        finally:
+            self._name_sync_in_progress = False
+
+    def _on_contractor_name_edited(self, text):
+        if self._name_sync_in_progress:
+            return
+        self._name_sync_in_progress = True
+        try:
+            self.operator_input.setText(text)
+        finally:
+            self._name_sync_in_progress = False
     
     def show_settings(self):
         """設定ダイアログを表示"""
@@ -2054,6 +2121,9 @@ ND：{nd}
             
             # フォントサイズを適用
             self.apply_font_size()
+            # 法人モード入力設定・同期を反映
+            self.apply_corporate_input_settings()
+            self.setup_corporate_name_sync()
             # ウィジェットを更新
             self.update()
             # 全てのウィジェットを再描画
