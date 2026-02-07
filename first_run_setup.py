@@ -102,6 +102,10 @@ def _default_settings() -> Dict[str, Any]:
             "script_timeout": 30,
             "enable_screenshots": True
         },
+        "corporate_settings": {
+            "allow_manual_contractor": False,
+            "auto_copy_operator_to_contractor": True
+        },
         "mode": "simple",
         "show_mode_selection": False,
         "enable_cti_monitoring": True,

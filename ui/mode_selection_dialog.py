@@ -56,7 +56,8 @@ class ModeSelectionDialog(QDialog):
         # 説明ラベル
         description_label = QLabel(
             "通常モード：すべての入力項目を1画面で入力\n"
-            "誘導モード：入力項目を複数の画面に分けて入力"
+            "誘導モード：入力項目を複数の画面に分けて入力\n"
+            "法人モード：通常モードをベースに法人向け入力補助を追加"
         )
         description_label.setAlignment(Qt.AlignCenter)
         description_label.setStyleSheet("""
@@ -116,6 +117,29 @@ class ModeSelectionDialog(QDialog):
         """)
         easy_button.clicked.connect(lambda: self.select_mode('easy'))
         layout.addWidget(easy_button)
+
+        # 法人モードボタン
+        corporate_button = QPushButton("法人モード")
+        corporate_button.setMinimumHeight(50)
+        corporate_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 16px;
+                margin: 5px;
+            }
+            QPushButton:hover {
+                background-color: #FB8C00;
+            }
+            QPushButton:pressed {
+                background-color: #F57C00;
+            }
+        """)
+        corporate_button.clicked.connect(lambda: self.select_mode('corporate'))
+        layout.addWidget(corporate_button)
         
         # 次回から表示しないチェックボックス
         checkbox_widget = QWidget()
@@ -149,7 +173,7 @@ class ModeSelectionDialog(QDialog):
         モードを選択し、ダイアログを閉じる
         
         Args:
-            mode: 選択されたモード（'simple'または'easy'）
+            mode: 選択されたモード（'simple'、'easy'、'corporate'）
         """
         try:
             self.selected_mode = mode

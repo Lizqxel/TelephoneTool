@@ -248,6 +248,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.undo_stack = QUndoStack(self)
         self._undo_in_progress = False
         self._last_text_map = {}
+        self._name_sync_in_progress = False
         
         # バージョン情報の設定
         self.version = "1.0.0"
@@ -326,7 +327,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.show_mode_selection()
         
         # 選択されたモードに基づいてUIを初期化
-        if self.current_mode == 'simple':
+        if self.current_mode in ('simple', 'corporate'):
             self.init_simple_mode()
         else:
             self.init_easy_mode()
@@ -449,7 +450,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         モード設定を保存する
         
         Args:
-            mode: 選択されたモード（'simple'または'easy'）
+            mode: 選択されたモード（'simple'、'easy'、'corporate'）
             show_again: 次回から表示するかどうか
         """
         try:
@@ -518,6 +519,10 @@ ND：{nd}
                         'page_load_timeout': 30,
                         'script_timeout': 30
                     },
+                    'corporate_settings': {
+                        'allow_manual_contractor': False,
+                        'auto_copy_operator_to_contractor': True
+                    },
                     # CTI監視設定のデフォルト値（オンに設定）
                     'enable_cti_monitoring': True,
                     'enable_auto_cti_processing': True,
@@ -542,7 +547,10 @@ ND：{nd}
         logging.info("通常モードの初期化を開始")
         
         # 設定に基づいてウィンドウタイトルを設定
-        self.setWindowTitle("コールセンター業務効率化ツール - 通常モード")
+        if self.current_mode == 'corporate':
+            self.setWindowTitle("コールセンター業務効率化ツール - 法人モード")
+        else:
+            self.setWindowTitle("コールセンター業務効率化ツール - 通常モード")
         self.setMinimumSize(600, 400)
         
         # メインウィジェットの設定
@@ -598,6 +606,7 @@ ND：{nd}
         form_widget = QWidget()
         form_layout = QVBoxLayout(form_widget)
         self.create_input_form(form_layout)
+        self.apply_corporate_input_settings()
         
         # スクロールエリアの作成
         scroll_area = QScrollArea()
@@ -645,6 +654,7 @@ ND：{nd}
         
         # シグナルの設定
         self.setup_signals()
+        self.setup_corporate_name_sync()
         
         # Google Sheetsの設定
         self.setup_google_sheets()
@@ -1900,7 +1910,7 @@ ND：{nd}
         """プレビューエリアを作成"""
         try:
             # 誘導モードの場合のみ、提供判定結果を表示するエリアを追加
-            if self.current_mode != 'simple':
+            if self.current_mode not in ('simple', 'corporate'):
                 # 提供エリア検索結果表示用のラベル
                 self.judgment_result_label = QLabel("提供エリア: 未検索")
                 self.judgment_result_label.setStyleSheet("""
@@ -1951,7 +1961,7 @@ ND：{nd}
     
     def setup_signals(self):
         """シグナルの設定"""
-        if self.current_mode == 'simple':
+        if self.current_mode in ('simple', 'corporate'):
             # シンプルモード用のシグナル設定
             # 自動フォーマット用のシグナル
             self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
@@ -1999,6 +2009,70 @@ ND：{nd}
             # プレビュー更新ボタンのシグナル接続
             if hasattr(self, 'update_preview_btn'):
                 self.update_preview_btn.clicked.connect(self.update_preview)
+
+    def _get_corporate_settings(self):
+        settings = getattr(self, 'settings', {})
+        if not isinstance(settings, dict):
+            return {}
+        corporate_settings = settings.get('corporate_settings', {})
+        if not isinstance(corporate_settings, dict):
+            return {}
+        return corporate_settings
+
+    def apply_corporate_input_settings(self):
+        if self.current_mode != 'corporate':
+            return
+
+        if hasattr(self, 'contractor_input'):
+            self.contractor_input.setReadOnly(False)
+        if hasattr(self, 'furigana_input'):
+            self.furigana_input.setReadOnly(False)
+        if hasattr(self, 'furigana_mode_combo'):
+            self.furigana_mode_combo.setEnabled(True)
+
+    def setup_corporate_name_sync(self):
+        if self.current_mode != 'corporate':
+            return
+
+        corporate_settings = self._get_corporate_settings()
+        if 'auto_copy_operator_to_contractor' in corporate_settings:
+            should_sync = corporate_settings.get('auto_copy_operator_to_contractor', True)
+        else:
+            should_sync = not corporate_settings.get('allow_manual_contractor', False)
+
+        if not (hasattr(self, 'operator_input') and hasattr(self, 'contractor_input')):
+            return
+
+        try:
+            self.operator_input.textEdited.disconnect(self._on_operator_name_edited)
+        except Exception:
+            pass
+        try:
+            self.contractor_input.textEdited.disconnect(self._on_contractor_name_edited)
+        except Exception:
+            pass
+
+        if should_sync:
+            self.operator_input.textEdited.connect(self._on_operator_name_edited)
+            self.contractor_input.textEdited.connect(self._on_contractor_name_edited)
+
+    def _on_operator_name_edited(self, text):
+        if self._name_sync_in_progress:
+            return
+        self._name_sync_in_progress = True
+        try:
+            self.contractor_input.setText(text)
+        finally:
+            self._name_sync_in_progress = False
+
+    def _on_contractor_name_edited(self, text):
+        if self._name_sync_in_progress:
+            return
+        self._name_sync_in_progress = True
+        try:
+            self.operator_input.setText(text)
+        finally:
+            self._name_sync_in_progress = False
     
     def show_settings(self):
         """設定ダイアログを表示"""
@@ -2047,6 +2121,9 @@ ND：{nd}
             
             # フォントサイズを適用
             self.apply_font_size()
+            # 法人モード入力設定・同期を反映
+            self.apply_corporate_input_settings()
+            self.setup_corporate_name_sync()
             # ウィジェットを更新
             self.update()
             # 全てのウィジェットを再描画
@@ -2084,13 +2161,16 @@ ND：{nd}
             data: CTIから取得したデータ
         """
         try:
+            # 直近のCTIデータを保持（法人モードの営コメで管理番号を使う）
+            self.last_cti_data = data
             # 顧客名
             if data.customer_name:
                 # 半角スペースを全角スペースに変換
                 converted_customer_name = data.customer_name.replace(' ', '　')
                 converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
                 self.list_name_input.setText(converted_customer_name)
-                self.contractor_input.setText(converted_customer_name)
+                if self.current_mode != 'corporate':
+                    self.contractor_input.setText(converted_customer_name)
             
             # 住所
             if data.address:
@@ -3300,7 +3380,7 @@ ND：{nd}
             logging.info("UIの再構築を開始します")
             
             # 現在のモードに基づいてUIを再構築
-            if self.current_mode == 'simple':
+            if self.current_mode in ('simple', 'corporate'):
                 self.init_simple_mode()
             else:
                 self.init_easy_mode()

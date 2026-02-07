@@ -166,7 +166,7 @@ class BaseWindow(QMainWindow):
                 new_mode = self.new_mode
                 self.new_mode = None
                 
-                if new_mode == 'simple':
+                if new_mode in ('simple', 'corporate'):
                     self.init_simple_mode()
                 else:
                     self.init_easy_mode()
