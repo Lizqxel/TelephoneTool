@@ -435,6 +435,22 @@ ND：{nd}
         elif net_usage_text == "なし":
             net_usage_text = "なし"
 
+        other_number_text = self.other_number_combo.currentText().rstrip()
+        if other_number_text == "あり（番号が入力できる）":
+            number_value = ""
+            if hasattr(self, 'other_number_text_input'):
+                number_value = self.other_number_text_input.text().rstrip()
+            if number_value:
+                other_number_text = f"あり、{number_value}"
+            else:
+                other_number_text = "あり"
+        elif other_number_text == "FAXあり（同番）":
+            other_number_text = "FAXあり（同番）"
+        elif other_number_text == "あり（番号不明）":
+            other_number_text = "あり（番号不明）"
+        elif other_number_text == "なし":
+            other_number_text = "なし"
+
         format_data = {
             'operator': self.operator_input.text().rstrip(),
             'mobile': "",  # 携帯電話番号を空に
@@ -456,7 +472,7 @@ ND：{nd}
             'fee': self.fee_input.text().rstrip(),
             'net_usage': net_usage_text,
             'family_approval': self.family_approval_combo.currentText().rstrip(),
-            'other_number': self.other_number_input.text().rstrip(),
+            'other_number': other_number_text,
             'phone_device': self.phone_device_input.text().rstrip(),
             'forbidden_line': self.forbidden_line_input.text().rstrip(),
             'nd': self.nd_input.text().rstrip(),
@@ -516,7 +532,11 @@ ND：{nd}
         # self.order_person_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
-        self.other_number_input.setText("なし")
+        self.other_number_combo.setCurrentText("なし")
+        if hasattr(self, 'other_number_text_input'):
+            self.other_number_text_input.clear()
+        if hasattr(self, 'other_number_text_widget'):
+            self.other_number_text_widget.hide()
         self.phone_device_input.setText("プッシュホン")
         self.forbidden_line_input.setText("なし")
         

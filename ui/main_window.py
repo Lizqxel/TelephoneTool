@@ -1627,9 +1627,27 @@ ND：{nd}
         
         # 他番号
         input_layout.addWidget(QLabel("他番号"))
-        self.other_number_input = QLineEdit()
-        self.other_number_input.setText("なし")
-        input_layout.addWidget(self.other_number_input)
+        self.other_number_combo = CustomComboBox()
+        self.other_number_combo.addItems([
+            "なし",
+            "あり（番号が入力できる）",
+            "FAXあり（同番）",
+            "あり（番号不明）"
+        ])
+        self.other_number_combo.currentTextChanged.connect(self.on_other_number_changed)
+        input_layout.addWidget(self.other_number_combo)
+
+        # 他番号入力欄（他番号が「あり（番号が入力できる）」の時のみ表示）
+        self.other_number_text_widget = QWidget()
+        other_number_layout = QHBoxLayout(self.other_number_text_widget)
+        other_number_layout.setContentsMargins(0, 0, 0, 0)
+        other_number_layout.addWidget(QLabel("他番号"))
+        self.other_number_text_input = QLineEdit()
+        self.other_number_text_input.setPlaceholderText("例：FAX 0120-34-5678")
+        other_number_layout.addWidget(self.other_number_text_input)
+        input_layout.addWidget(self.other_number_text_widget)
+        self.other_number_text_widget.hide()
+        self.other_number_combo.setCurrentText("なし")
         
         # 電話機
         input_layout.addWidget(QLabel("電話機"))
@@ -2378,7 +2396,9 @@ ND：{nd}
         # self.fee_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
-        self.other_number_input.setText("なし")
+        self.other_number_combo.setCurrentText("なし")
+        self.other_number_text_input.clear()
+        self.other_number_text_widget.hide()
         self.phone_device_input.setText("プッシュホン")
         self.forbidden_line_input.setText("なし")
         
@@ -2395,6 +2415,9 @@ ND：{nd}
         self.net_usage_combo.setCurrentText("なし")
         self.net_line_name_input.clear()
         self.net_line_name_widget.hide()
+        self.other_number_combo.setCurrentText("なし")
+        self.other_number_text_input.clear()
+        self.other_number_text_widget.hide()
         self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         # 結果ラベルをクリア
         self.area_result_label.setText("提供エリア: 未検索")
@@ -3535,6 +3558,20 @@ ND：{nd}
             self.net_line_name_widget.hide()
             self.net_line_name_input.clear()
 
+    def on_other_number_changed(self, text):
+        """
+        他番号の選択が変更された時の処理
+
+        Args:
+            text (str): 選択されたテキスト
+        """
+        if text == "あり（番号が入力できる）":
+            self.other_number_text_widget.show()
+            self.other_number_text_input.setFocus()
+        else:
+            self.other_number_text_widget.hide()
+            self.other_number_text_input.clear()
+
     def on_cti_dialing_to_talking(self):
         """
         CTI状態が「発信中」→「通話中」に変化した時の自動処理
@@ -4367,6 +4404,24 @@ class CancellationError(Exception):
                 elif net_usage_text == "なし":
                     net_usage_text = "なし"
                 data['net_usage'] = net_usage_text
+
+            if hasattr(self, 'other_number_combo'):
+                other_number_text = self.other_number_combo.currentText().rstrip()
+                if other_number_text == "あり（番号が入力できる）":
+                    number_value = ""
+                    if hasattr(self, 'other_number_text_input'):
+                        number_value = self.other_number_text_input.text().rstrip()
+                    if number_value:
+                        other_number_text = f"あり、{number_value}"
+                    else:
+                        other_number_text = "あり"
+                elif other_number_text == "FAXあり（同番）":
+                    other_number_text = "FAXあり（同番）"
+                elif other_number_text == "あり（番号不明）":
+                    other_number_text = "あり（番号不明）"
+                elif other_number_text == "なし":
+                    other_number_text = "なし"
+                data['other_number'] = other_number_text
             
             # データが空の場合はエラー
             # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで
