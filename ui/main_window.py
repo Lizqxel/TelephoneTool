@@ -1518,6 +1518,16 @@ ND：{nd}
         
         input_layout.addWidget(self.time_preference_widget)
         self.time_preference_widget.hide()  # 初期状態では非表示
+
+        if self.current_mode == 'corporate':
+            self.call_preference_widget = QWidget()
+            call_preference_layout = QHBoxLayout(self.call_preference_widget)
+            call_preference_layout.setContentsMargins(0, 0, 0, 0)
+            call_preference_layout.addWidget(QLabel("★架電希望："))
+            self.call_preference_input = QLineEdit()
+            self.call_preference_input.setPlaceholderText("例：携帯へ / 固定へ")
+            call_preference_layout.addWidget(self.call_preference_input)
+            input_layout.addWidget(self.call_preference_widget)
         
         # 従来の出やすい時間帯入力欄（互換性のため保持、非表示）
         self.available_time_input = QLineEdit()
@@ -1683,6 +1693,23 @@ ND：{nd}
         self.relationship_input.setPlaceholderText("名義人の...")
         relationship_layout.addWidget(self.relationship_input)
         input_layout.addLayout(relationship_layout)
+
+        if self.current_mode == 'corporate':
+            business_status_layout = QHBoxLayout()
+            business_status_layout.addWidget(QLabel("事業継続"))
+            self.business_status_combo = CustomComboBox()
+            self.business_status_combo.addItems(["継続中", "廃業"])
+            self.business_status_combo.setCurrentText("継続中")
+            business_status_layout.addWidget(self.business_status_combo)
+            input_layout.addLayout(business_status_layout)
+
+            gender_layout = QHBoxLayout()
+            gender_layout.addWidget(QLabel("対応者性別"))
+            self.operator_gender_combo = CustomComboBox()
+            self.operator_gender_combo.addItems(["男性", "女性"])
+            self.operator_gender_combo.setCurrentText("男性")
+            gender_layout.addWidget(self.operator_gender_combo)
+            input_layout.addLayout(gender_layout)
         
         input_group.setLayout(input_layout)
         parent_layout.addWidget(input_group)
@@ -2035,6 +2062,10 @@ ND：{nd}
             self.fee_input.textChanged.connect(self.reset_background_color)
             self.relationship_input.textChanged.connect(self.reset_background_color)
             self.nd_input.textChanged.connect(self.reset_background_color)
+            if hasattr(self, 'call_preference_input'):
+                self.call_preference_input.textChanged.connect(self.reset_background_color)
+            if hasattr(self, 'operator_gender_combo'):
+                self.operator_gender_combo.currentTextChanged.connect(self.reset_background_color)
             
             # ボタンのシグナル接続
             self.area_search_btn.clicked.connect(self.search_service_area)
@@ -2485,6 +2516,12 @@ ND：{nd}
         # NDと備考（名義人との関係性）をクリア
         self.nd_input.clear()
         self.relationship_input.clear()
+        if hasattr(self, 'call_preference_input'):
+            self.call_preference_input.clear()
+        if hasattr(self, 'business_status_combo'):
+            self.business_status_combo.setCurrentText("継続中")
+        if hasattr(self, 'operator_gender_combo'):
+            self.operator_gender_combo.setCurrentText("男性")
         # コンボボックスをデフォルト値に
         self.era_combo.setCurrentIndex(0)
         self.year_combo.setCurrentIndex(0)
