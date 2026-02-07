@@ -1599,8 +1599,25 @@ ND：{nd}
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
         self.net_usage_combo = CustomComboBox()
-        self.net_usage_combo.addItems(["なし", "あり"])
+        self.net_usage_combo.addItems([
+            "あり（回線名が入力できる）",
+            "あり（回線不明）",
+            "なし"
+        ])
+        self.net_usage_combo.currentTextChanged.connect(self.on_net_usage_changed)
         input_layout.addWidget(self.net_usage_combo)
+
+        # 回線名入力欄（ネット利用が「あり（回線名が入力できる）」の時のみ表示）
+        self.net_line_name_widget = QWidget()
+        net_line_layout = QHBoxLayout(self.net_line_name_widget)
+        net_line_layout.setContentsMargins(0, 0, 0, 0)
+        net_line_layout.addWidget(QLabel("回線名"))
+        self.net_line_name_input = QLineEdit()
+        self.net_line_name_input.setPlaceholderText("例：フレッツ光")
+        net_line_layout.addWidget(self.net_line_name_input)
+        input_layout.addWidget(self.net_line_name_widget)
+        self.net_line_name_widget.hide()
+        self.net_usage_combo.setCurrentText("なし")
         
         # 家族了承
         input_layout.addWidget(QLabel("家族了承"))
@@ -2375,7 +2392,9 @@ ND：{nd}
         self.day_combo.setCurrentIndex(0)
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
-        self.net_usage_combo.setCurrentIndex(0)
+        self.net_usage_combo.setCurrentText("なし")
+        self.net_line_name_input.clear()
+        self.net_line_name_widget.hide()
         self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         # 結果ラベルをクリア
         self.area_result_label.setText("提供エリア: 未検索")
@@ -3502,6 +3521,20 @@ ND：{nd}
                 else:  # 携帯ありで番号がわからない
                     self.available_time_input.setText("携帯不明")
 
+    def on_net_usage_changed(self, text):
+        """
+        ネット利用の選択が変更された時の処理
+
+        Args:
+            text (str): 選択されたテキスト
+        """
+        if text == "あり（回線名が入力できる）":
+            self.net_line_name_widget.show()
+            self.net_line_name_input.setFocus()
+        else:
+            self.net_line_name_widget.hide()
+            self.net_line_name_input.clear()
+
     def on_cti_dialing_to_talking(self):
         """
         CTI状態が「発信中」→「通話中」に変化した時の自動処理
@@ -4318,6 +4351,22 @@ class CancellationError(Exception):
                 data['order_date'] = self.order_date_input.text().rstrip()
             if hasattr(self, 'judgment_combo'):
                 data['judgment'] = self.judgment_combo.currentText().rstrip()
+
+            if hasattr(self, 'net_usage_combo'):
+                net_usage_text = self.net_usage_combo.currentText().rstrip()
+                if net_usage_text == "あり（回線名が入力できる）":
+                    line_name = ""
+                    if hasattr(self, 'net_line_name_input'):
+                        line_name = self.net_line_name_input.text().rstrip()
+                    if line_name:
+                        net_usage_text = f"あり、{line_name}"
+                    else:
+                        net_usage_text = "あり"
+                elif net_usage_text == "あり（回線不明）":
+                    net_usage_text = "あり、回線名不明"
+                elif net_usage_text == "なし":
+                    net_usage_text = "なし"
+                data['net_usage'] = net_usage_text
             
             # データが空の場合はエラー
             # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで

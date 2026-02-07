@@ -421,6 +421,20 @@ ND：{nd}
                     logging.warning("生年月日の変換に失敗しました")
                     
         # フォーマットデータの準備（各フィールドの末尾のスペースを削除）
+        net_usage_text = self.net_usage_combo.currentText().rstrip()
+        if net_usage_text == "あり（回線名が入力できる）":
+            line_name = ""
+            if hasattr(self, 'net_line_name_input'):
+                line_name = self.net_line_name_input.text().rstrip()
+            if line_name:
+                net_usage_text = f"あり、{line_name}"
+            else:
+                net_usage_text = "あり"
+        elif net_usage_text == "あり（回線不明）":
+            net_usage_text = "あり、回線名不明"
+        elif net_usage_text == "なし":
+            net_usage_text = "なし"
+
         format_data = {
             'operator': self.operator_input.text().rstrip(),
             'mobile': "",  # 携帯電話番号を空に
@@ -440,7 +454,7 @@ ND：{nd}
             'order_person': self.order_person_input.text().rstrip(),
             'judgment': self.judgment_combo.currentText().rstrip(),
             'fee': self.fee_input.text().rstrip(),
-            'net_usage': self.net_usage_combo.currentText().rstrip(),
+            'net_usage': net_usage_text,
             'family_approval': self.family_approval_combo.currentText().rstrip(),
             'other_number': self.other_number_input.text().rstrip(),
             'phone_device': self.phone_device_input.text().rstrip(),
@@ -529,7 +543,11 @@ ND：{nd}
         self.day_combo.setCurrentIndex(0)
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
-        self.net_usage_combo.setCurrentIndex(0)  # "なし"が選択される
+        self.net_usage_combo.setCurrentText("なし")
+        if hasattr(self, 'net_line_name_input'):
+            self.net_line_name_input.clear()
+        if hasattr(self, 'net_line_name_widget'):
+            self.net_line_name_widget.hide()
         self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         
         # 受注日を今日の日付に更新（0埋めなし）
