@@ -92,17 +92,25 @@ ND：{nd}
             "script_timeout": 30,
             "auto_close": False
         }
+
+        # 法人モード設定のデフォルト
+        self.default_corporate_settings = {
+            "allow_manual_contractor": False,
+            "auto_copy_operator_to_contractor": True
+        }
         
         # 親ウィンドウから現在の設定を取得
         if parent and hasattr(parent, 'settings'):
             self.current_font_size = parent.settings.get('font_size', self.default_font_size)
             self.current_delay = parent.settings.get('delay_seconds', self.default_delay)
             self.current_browser_settings = parent.settings.get('browser_settings', self.default_browser_settings)
+            self.current_corporate_settings = parent.settings.get('corporate_settings', self.default_corporate_settings)
             current_call_duration = parent.settings.get('call_duration_threshold', 0)  # デフォルトは0秒
         else:
             self.current_font_size = self.default_font_size
             self.current_delay = self.default_delay
             self.current_browser_settings = self.default_browser_settings
+            self.current_corporate_settings = self.default_corporate_settings
             current_call_duration = 0
         
         # メインレイアウト
@@ -195,11 +203,18 @@ ND：{nd}
         self.easy_mode_radio = QRadioButton("誘導モード")
         self.easy_mode_radio.setToolTip("ステップバイステップで入力を誘導するモード")
         mode_select_layout.addWidget(self.easy_mode_radio)
+
+        # 法人モードラジオボタン
+        self.corporate_mode_radio = QRadioButton("法人モード")
+        self.corporate_mode_radio.setToolTip("法人向けの入力補助を追加するモード")
+        mode_select_layout.addWidget(self.corporate_mode_radio)
         
         # 現在のモードを設定
         if hasattr(parent, 'current_mode'):
             if parent.current_mode == 'simple':
                 self.simple_mode_radio.setChecked(True)
+            elif parent.current_mode == 'corporate':
+                self.corporate_mode_radio.setChecked(True)
             else:
                 self.easy_mode_radio.setChecked(True)
         else:
@@ -208,6 +223,29 @@ ND：{nd}
         mode_layout.addLayout(mode_select_layout)
         mode_group.setLayout(mode_layout)
         content_layout.addWidget(mode_group)
+
+        # 法人モード設定グループ
+        corporate_group = QGroupBox("法人モード設定")
+        corporate_layout = QVBoxLayout()
+
+        corporate_desc = QLabel("法人モードでの入力補助の設定です。")
+        corporate_desc.setWordWrap(True)
+        corporate_layout.addWidget(corporate_desc)
+
+        self.corporate_auto_copy_checkbox = QCheckBox("対応者入力時に契約者名・フリガナを自動反映する")
+        self.corporate_auto_copy_checkbox.setChecked(
+            self.current_corporate_settings.get("auto_copy_operator_to_contractor", True)
+        )
+        corporate_layout.addWidget(self.corporate_auto_copy_checkbox)
+
+        self.corporate_manual_contractor_checkbox = QCheckBox("契約者名を手動入力できるようにする")
+        self.corporate_manual_contractor_checkbox.setChecked(
+            self.current_corporate_settings.get("allow_manual_contractor", False)
+        )
+        corporate_layout.addWidget(self.corporate_manual_contractor_checkbox)
+
+        corporate_group.setLayout(corporate_layout)
+        content_layout.addWidget(corporate_group)
         
         # CTI監視設定グループ
         cti_monitor_group = QGroupBox("CTI監視設定")
@@ -547,8 +585,20 @@ ND：{nd}
                     # モード設定の読み込み
                     if mode == 'simple':
                         self.simple_mode_radio.setChecked(True)
+                    elif mode == 'corporate':
+                        self.corporate_mode_radio.setChecked(True)
                     else:
                         self.easy_mode_radio.setChecked(True)
+
+                    # 法人モード設定の読み込み
+                    corporate_settings = settings.get('corporate_settings', self.default_corporate_settings)
+                    if isinstance(corporate_settings, dict):
+                        self.corporate_auto_copy_checkbox.setChecked(
+                            corporate_settings.get("auto_copy_operator_to_contractor", True)
+                        )
+                        self.corporate_manual_contractor_checkbox.setChecked(
+                            corporate_settings.get("allow_manual_contractor", False)
+                        )
                     
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
@@ -575,6 +625,12 @@ ND：{nd}
                 self.font_size_slider.setValue(self.default_font_size)
                 self.delay_spin.setValue(self.default_delay)
                 self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
+                self.corporate_auto_copy_checkbox.setChecked(
+                    self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
+                )
+                self.corporate_manual_contractor_checkbox.setChecked(
+                    self.default_corporate_settings.get("allow_manual_contractor", False)
+                )
                 self.reset_browser_settings()
                 self.reset_cti_settings()  # CTI設定もデフォルトに
                 self._full_settings = {}
@@ -586,6 +642,12 @@ ND：{nd}
             self.font_size_slider.setValue(self.default_font_size)
             self.delay_spin.setValue(self.default_delay)
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
+            self.corporate_auto_copy_checkbox.setChecked(
+                self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
+            )
+            self.corporate_manual_contractor_checkbox.setChecked(
+                self.default_corporate_settings.get("allow_manual_contractor", False)
+            )
             self.reset_browser_settings()
             self.reset_cti_settings()  # CTI設定もデフォルトに
             self._full_settings = {}
@@ -602,7 +664,12 @@ ND：{nd}
                 previous_mode = 'simple'
             
             # 選択されたモードを取得
-            new_mode = 'simple' if self.simple_mode_radio.isChecked() else 'easy'
+            if self.simple_mode_radio.isChecked():
+                new_mode = 'simple'
+            elif self.corporate_mode_radio.isChecked():
+                new_mode = 'corporate'
+            else:
+                new_mode = 'easy'
             
             # ブラウザ設定を取得
             browser_settings = {
@@ -631,6 +698,10 @@ ND：{nd}
                 'browser_settings': browser_settings,
                 'mode': new_mode,
                 'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
+                'corporate_settings': {
+                    'allow_manual_contractor': self.corporate_manual_contractor_checkbox.isChecked(),
+                    'auto_copy_operator_to_contractor': self.corporate_auto_copy_checkbox.isChecked()
+                },
                 # CTI監視設定を追加
                 'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
                 'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
@@ -729,6 +800,12 @@ ND：{nd}
         self.font_size_slider.setValue(self.default_font_size)
         self.delay_spin.setValue(self.default_delay)
         self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
+        self.corporate_auto_copy_checkbox.setChecked(
+            self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
+        )
+        self.corporate_manual_contractor_checkbox.setChecked(
+            self.default_corporate_settings.get("allow_manual_contractor", False)
+        )
         self.reset_browser_settings()
         self.reset_cti_settings()  # CTI設定もデフォルトに戻す
     
@@ -750,7 +827,12 @@ ND：{nd}
         }
         
         # 選択されたモードを取得
-        mode = 'simple' if self.simple_mode_radio.isChecked() else 'easy'
+        if self.simple_mode_radio.isChecked():
+            mode = 'simple'
+        elif self.corporate_mode_radio.isChecked():
+            mode = 'corporate'
+        else:
+            mode = 'easy'
         
         return {
             'format_template': self.format_edit.toPlainText(),
@@ -759,6 +841,10 @@ ND：{nd}
             'browser_settings': browser_settings,
             'mode': mode,
             'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
+            'corporate_settings': {
+                'allow_manual_contractor': self.corporate_manual_contractor_checkbox.isChecked(),
+                'auto_copy_operator_to_contractor': self.corporate_auto_copy_checkbox.isChecked()
+            },
             # CTI監視設定を追加
             'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
             'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),

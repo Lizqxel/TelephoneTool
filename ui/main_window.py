@@ -326,7 +326,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.show_mode_selection()
         
         # 選択されたモードに基づいてUIを初期化
-        if self.current_mode == 'simple':
+        if self.current_mode in ('simple', 'corporate'):
             self.init_simple_mode()
         else:
             self.init_easy_mode()
@@ -449,7 +449,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         モード設定を保存する
         
         Args:
-            mode: 選択されたモード（'simple'または'easy'）
+            mode: 選択されたモード（'simple'、'easy'、'corporate'）
             show_again: 次回から表示するかどうか
         """
         try:
@@ -518,6 +518,10 @@ ND：{nd}
                         'page_load_timeout': 30,
                         'script_timeout': 30
                     },
+                    'corporate_settings': {
+                        'allow_manual_contractor': False,
+                        'auto_copy_operator_to_contractor': True
+                    },
                     # CTI監視設定のデフォルト値（オンに設定）
                     'enable_cti_monitoring': True,
                     'enable_auto_cti_processing': True,
@@ -542,7 +546,10 @@ ND：{nd}
         logging.info("通常モードの初期化を開始")
         
         # 設定に基づいてウィンドウタイトルを設定
-        self.setWindowTitle("コールセンター業務効率化ツール - 通常モード")
+        if self.current_mode == 'corporate':
+            self.setWindowTitle("コールセンター業務効率化ツール - 法人モード")
+        else:
+            self.setWindowTitle("コールセンター業務効率化ツール - 通常モード")
         self.setMinimumSize(600, 400)
         
         # メインウィジェットの設定
@@ -1900,7 +1907,7 @@ ND：{nd}
         """プレビューエリアを作成"""
         try:
             # 誘導モードの場合のみ、提供判定結果を表示するエリアを追加
-            if self.current_mode != 'simple':
+            if self.current_mode not in ('simple', 'corporate'):
                 # 提供エリア検索結果表示用のラベル
                 self.judgment_result_label = QLabel("提供エリア: 未検索")
                 self.judgment_result_label.setStyleSheet("""
@@ -1951,7 +1958,7 @@ ND：{nd}
     
     def setup_signals(self):
         """シグナルの設定"""
-        if self.current_mode == 'simple':
+        if self.current_mode in ('simple', 'corporate'):
             # シンプルモード用のシグナル設定
             # 自動フォーマット用のシグナル
             self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
@@ -2084,6 +2091,8 @@ ND：{nd}
             data: CTIから取得したデータ
         """
         try:
+            # 直近のCTIデータを保持（法人モードの営コメで管理番号を使う）
+            self.last_cti_data = data
             # 顧客名
             if data.customer_name:
                 # 半角スペースを全角スペースに変換
@@ -3300,7 +3309,7 @@ ND：{nd}
             logging.info("UIの再構築を開始します")
             
             # 現在のモードに基づいてUIを再構築
-            if self.current_mode == 'simple':
+            if self.current_mode in ('simple', 'corporate'):
                 self.init_simple_mode()
             else:
                 self.init_easy_mode()

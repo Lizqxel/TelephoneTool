@@ -454,6 +454,19 @@ ND：{nd}
         try:
             formatted_text = self.format_template.format(**format_data)
 
+            # 法人モードの場合は管理番号を先頭に挿入
+            if self.current_mode == 'corporate':
+                management_id = ""
+                try:
+                    cti_data = getattr(self, 'last_cti_data', None)
+                    if cti_data and hasattr(cti_data, 'management_id'):
+                        management_id = (cti_data.management_id or '').strip()
+                except Exception:
+                    management_id = ""
+
+                if management_id:
+                    formatted_text = f"{management_id}\n{formatted_text}"
+
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
             if maps_url:
