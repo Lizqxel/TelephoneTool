@@ -2099,7 +2099,8 @@ ND：{nd}
                 converted_customer_name = data.customer_name.replace(' ', '　')
                 converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
                 self.list_name_input.setText(converted_customer_name)
-                self.contractor_input.setText(converted_customer_name)
+                if self.current_mode != 'corporate':
+                    self.contractor_input.setText(converted_customer_name)
             
             # 住所
             if data.address:
