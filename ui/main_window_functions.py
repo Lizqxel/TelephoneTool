@@ -104,6 +104,22 @@ class ServiceAreaSearchWorker(QThread):
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
+
+    def _insert_call_preference_line(self, formatted_text, call_preference_text):
+        lines = formatted_text.splitlines()
+        inserted = False
+        call_line = f"★架電希望：{call_preference_text}"
+
+        for i, line in enumerate(lines):
+            if line.strip().startswith("★出やすい時間帯"):
+                lines.insert(i + 1, call_line)
+                inserted = True
+                break
+
+        if not inserted:
+            lines.insert(1, call_line)
+
+        return "\n".join(lines)
     
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
@@ -263,6 +279,9 @@ ND：{nd}
             'relationship': self.relationship_input,  # 名義人との関係性
             'nd': self.nd_input  # NDを追加
         }
+
+        if self.current_mode == 'corporate' and hasattr(self, 'call_preference_input'):
+            required_fields['call_preference'] = self.call_preference_input
         
         # 未入力項目の確認
         missing_fields = []
@@ -288,7 +307,8 @@ ND：{nd}
                 'available_time': '出やすい時間帯',
                 'fee': '料金認識',
                 'relationship': '名義人との関係性',
-                'nd': 'ND'
+                'nd': 'ND',
+                'call_preference': '架電希望'
             }
             
             missing_fields_ja = [field_names_ja.get(field, field) for field in missing_fields]
@@ -451,6 +471,29 @@ ND：{nd}
         elif other_number_text == "なし":
             other_number_text = "なし"
 
+        business_status_text = ""
+        if self.current_mode == 'corporate' and hasattr(self, 'business_status_combo'):
+            business_status_text = self.business_status_combo.currentText().rstrip()
+
+        operator_gender_text = ""
+        if self.current_mode == 'corporate' and hasattr(self, 'operator_gender_combo'):
+            operator_gender_text = self.operator_gender_combo.currentText().rstrip()
+
+        relationship_text = self.relationship_input.text().rstrip()
+        if business_status_text:
+            status_line = f"事業{business_status_text}"
+            if relationship_text:
+                relationship_text = f"{relationship_text}\n{status_line}"
+            else:
+                relationship_text = status_line
+
+        if operator_gender_text:
+            gender_line = f"対応者性別：{operator_gender_text}"
+            if relationship_text:
+                relationship_text = f"{relationship_text}\n{gender_line}"
+            else:
+                relationship_text = gender_line
+
         format_data = {
             'operator': self.operator_input.text().rstrip(),
             'mobile': "",  # 携帯電話番号を空に
@@ -476,9 +519,13 @@ ND：{nd}
             'phone_device': self.phone_device_input.text().rstrip(),
             'forbidden_line': self.forbidden_line_input.text().rstrip(),
             'nd': self.nd_input.text().rstrip(),
-            'relationship': self.relationship_input.text().rstrip(),
+            'relationship': relationship_text,
+            'call_preference': '',
             'employee_number': ''  # 社番は空で初期化
         }
+
+        if self.current_mode == 'corporate' and hasattr(self, 'call_preference_input'):
+            format_data['call_preference'] = self.call_preference_input.text().rstrip()
         
         # フォーマットテンプレートに値を埋め込む
         try:
@@ -496,6 +543,10 @@ ND：{nd}
 
                 if management_id:
                     formatted_text = f"{management_id}\n{formatted_text}"
+
+                call_preference_text = format_data.get('call_preference', '').strip()
+                if call_preference_text:
+                    formatted_text = self._insert_call_preference_line(formatted_text, call_preference_text)
 
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()

@@ -77,7 +77,7 @@ class ModeSelectionDialog(QDialog):
         simple_button.setMinimumHeight(50)
         simple_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #43A047;
                 color: white;
                 border: none;
                 padding: 10px;
@@ -86,10 +86,10 @@ class ModeSelectionDialog(QDialog):
                 margin: 5px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #388E3C;
             }
             QPushButton:pressed {
-                background-color: #3d8b40;
+                background-color: #2E7D32;
             }
         """)
         simple_button.clicked.connect(lambda: self.select_mode('simple'))
@@ -109,10 +109,10 @@ class ModeSelectionDialog(QDialog):
                 margin: 5px;
             }
             QPushButton:hover {
-                background-color: #1976D2;
+                background-color: #1E88E5;
             }
             QPushButton:pressed {
-                background-color: #1565C0;
+                background-color: #1976D2;
             }
         """)
         easy_button.clicked.connect(lambda: self.select_mode('easy'))
