@@ -421,6 +421,36 @@ ND：{nd}
                     logging.warning("生年月日の変換に失敗しました")
                     
         # フォーマットデータの準備（各フィールドの末尾のスペースを削除）
+        net_usage_text = self.net_usage_combo.currentText().rstrip()
+        if net_usage_text == "あり（回線名が入力できる）":
+            line_name = ""
+            if hasattr(self, 'net_line_name_input'):
+                line_name = self.net_line_name_input.text().rstrip()
+            if line_name:
+                net_usage_text = f"あり、{line_name}"
+            else:
+                net_usage_text = "あり"
+        elif net_usage_text == "あり（回線不明）":
+            net_usage_text = "あり、回線名不明"
+        elif net_usage_text == "なし":
+            net_usage_text = "なし"
+
+        other_number_text = self.other_number_combo.currentText().rstrip()
+        if other_number_text == "あり（番号が入力できる）":
+            number_value = ""
+            if hasattr(self, 'other_number_text_input'):
+                number_value = self.other_number_text_input.text().rstrip()
+            if number_value:
+                other_number_text = f"あり、{number_value}"
+            else:
+                other_number_text = "あり"
+        elif other_number_text == "FAXあり（同番）":
+            other_number_text = "FAXあり（同番）"
+        elif other_number_text == "あり（番号不明）":
+            other_number_text = "あり（番号不明）"
+        elif other_number_text == "なし":
+            other_number_text = "なし"
+
         format_data = {
             'operator': self.operator_input.text().rstrip(),
             'mobile': "",  # 携帯電話番号を空に
@@ -440,9 +470,9 @@ ND：{nd}
             'order_person': self.order_person_input.text().rstrip(),
             'judgment': self.judgment_combo.currentText().rstrip(),
             'fee': self.fee_input.text().rstrip(),
-            'net_usage': self.net_usage_combo.currentText().rstrip(),
+            'net_usage': net_usage_text,
             'family_approval': self.family_approval_combo.currentText().rstrip(),
-            'other_number': self.other_number_input.text().rstrip(),
+            'other_number': other_number_text,
             'phone_device': self.phone_device_input.text().rstrip(),
             'forbidden_line': self.forbidden_line_input.text().rstrip(),
             'nd': self.nd_input.text().rstrip(),
@@ -515,7 +545,11 @@ ND：{nd}
         # self.order_person_input.clear()
         
         # 他番号、電話機、禁止回線には初期値を設定
-        self.other_number_input.setText("なし")
+        self.other_number_combo.setCurrentText("なし")
+        if hasattr(self, 'other_number_text_input'):
+            self.other_number_text_input.clear()
+        if hasattr(self, 'other_number_text_widget'):
+            self.other_number_text_widget.hide()
         self.phone_device_input.setText("プッシュホン")
         self.forbidden_line_input.setText("なし")
         
@@ -542,7 +576,11 @@ ND：{nd}
         self.day_combo.setCurrentIndex(0)
         self.current_line_combo.setCurrentIndex(0)
         self.judgment_combo.setCurrentIndex(0)
-        self.net_usage_combo.setCurrentIndex(0)  # "なし"が選択される
+        self.net_usage_combo.setCurrentText("なし")
+        if hasattr(self, 'net_line_name_input'):
+            self.net_line_name_input.clear()
+        if hasattr(self, 'net_line_name_widget'):
+            self.net_line_name_widget.hide()
         self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
         
         # 受注日を今日の日付に更新（0埋めなし）
