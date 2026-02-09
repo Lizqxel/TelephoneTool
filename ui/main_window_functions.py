@@ -107,6 +107,12 @@ class MainWindowFunctions:
 
     def _insert_call_preference_line(self, formatted_text, call_preference_text):
         lines = formatted_text.splitlines()
+
+        # 既に「★架電希望」行がある場合は重複挿入しない
+        for line in lines:
+            if line.strip().startswith("★架電希望"):
+                return formatted_text
+
         inserted = False
         call_line = f"★架電希望：{call_preference_text}"
 
@@ -545,8 +551,8 @@ ND：{nd}
                     formatted_text = f"{management_id}\n{formatted_text}"
 
                 call_preference_text = format_data.get('call_preference', '').strip()
-                if call_preference_text:
-                    formatted_text = self._insert_call_preference_line(formatted_text, call_preference_text)
+                # 未入力でも「★架電希望：」行は必ず出力する
+                formatted_text = self._insert_call_preference_line(formatted_text, call_preference_text)
 
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
