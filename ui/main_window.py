@@ -157,6 +157,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             if self.widget is None:
                 return
             try:
+                try:
+                    from shiboken6 import isValid
+                    if not isValid(self.widget):
+                        return
+                except Exception:
+                    pass
                 from PySide6.QtWidgets import QLineEdit, QTextEdit
                 if isinstance(self.widget, QLineEdit):
                     self.widget.setText(text)
@@ -1417,7 +1423,7 @@ ND：{nd}
                 self._last_text_map[widget] = self._get_widget_text(widget)
                 # テキスト変更を監視してUndoスタックへ
                 if isinstance(widget, QLineEdit):
-                    widget.textEdited.connect(lambda text, w=widget: self._on_text_edited(w, text))
+                    widget.textChanged.connect(lambda _text, w=widget: self._on_text_changed(w))
                 elif isinstance(widget, QTextEdit):
                     widget.textChanged.connect(lambda w=widget: self._on_text_changed(w))
         except Exception as e:
@@ -1459,6 +1465,12 @@ ND：{nd}
 
     def _get_widget_text(self, widget):
         from PySide6.QtWidgets import QLineEdit, QTextEdit
+        try:
+            from shiboken6 import isValid
+            if not isValid(widget):
+                return ""
+        except Exception:
+            pass
         if isinstance(widget, QLineEdit):
             return widget.text()
         if isinstance(widget, QTextEdit):
@@ -1480,6 +1492,22 @@ ND：{nd}
             return
         new_text = self._get_widget_text(widget)
         old_text = self._last_text_map.get(widget, "")
+        if new_text == old_text:
+            return
+        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        self.undo_stack.push(cmd)
+        self._last_text_map[widget] = new_text
+
+    def _push_text_change(self, widget, new_text):
+        if widget is None:
+            return
+        try:
+            from shiboken6 import isValid
+            if not isValid(widget):
+                return
+        except Exception:
+            pass
+        old_text = self._get_widget_text(widget)
         if new_text == old_text:
             return
         cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
@@ -2273,14 +2301,15 @@ ND：{nd}
         try:
             # 直近のCTIデータを保持（法人モードの営コメで管理番号を使う）
             self.last_cti_data = data
+            self.undo_stack.beginMacro("CTI反映")
             # 顧客名
             if data.customer_name:
                 # 半角スペースを全角スペースに変換
                 converted_customer_name = data.customer_name.replace(' ', '　')
                 converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
-                self.list_name_input.setText(converted_customer_name)
+                self._push_text_change(self.list_name_input, converted_customer_name)
                 if self.current_mode != 'corporate':
-                    self.contractor_input.setText(converted_customer_name)
+                    self._push_text_change(self.contractor_input, converted_customer_name)
             
             # 住所
             if data.address:
@@ -2290,19 +2319,19 @@ ND：{nd}
                 converted_address = converted_address.replace('−', '-')  # 別種の全角ハイフンを半角に
                 converted_address = converted_address.replace(' ', '　')  # 半角スペースを全角に
                 converted_address = convert_to_half_width_except_space(converted_address)
-                self.address_input.setText(converted_address)
-                self.list_address_input.setText(converted_address)
+                self._push_text_change(self.address_input, converted_address)
+                self._push_text_change(self.list_address_input, converted_address)
             
             # 電話番号
             if data.phone:
                 converted_phone = convert_to_half_width_except_space(data.phone)
-                self.list_phone_input.setText(converted_phone)
+                self._push_text_change(self.list_phone_input, converted_phone)
             
             # 郵便番号
             if data.postal_code:
                 converted_postal_code = convert_to_half_width_except_space(data.postal_code)
-                self.postal_code_input.setText(converted_postal_code)
-                self.list_postal_code_input.setText(converted_postal_code)
+                self._push_text_change(self.postal_code_input, converted_postal_code)
+                self._push_text_change(self.list_postal_code_input, converted_postal_code)
                 
             # プレビューを更新しない（営業コメントを自動作成しない）
             # self.update_preview()
@@ -2313,6 +2342,8 @@ ND：{nd}
         except Exception as e:
             logging.error(f"フォーム更新中にエラー: {e}")
             QMessageBox.critical(self, "エラー", f"フォームの更新中にエラーが発生しました: {e}")
+        finally:
+            self.undo_stack.endMacro()
             
     def fetch_cti_data(self):
         """CTIデータを取得"""
@@ -2522,80 +2553,83 @@ ND：{nd}
 
     def clear_all_inputs(self):
         """全ての入力フィールドをクリア"""
-        # テキスト入力フィールドのクリア
-        self.operator_input.clear()
-        # 携帯電話番号入力エリアの参照を削除
-        self.available_time_input.clear()  # 出やすい時間帯をクリア
-        
-        # 新しい携帯番号入力欄のクリア
-        self.mobile_part1_input.clear()
-        self.mobile_part2_input.clear()
-        self.mobile_part3_input.clear()
-        self.mobile_pattern_combo.setCurrentText("②携帯なし")
-        self.mobile_number_widget.hide()
-        self.available_time_input.setText("携帯なし")
-        
-        self.contractor_input.clear()
-        self.furigana_input.clear()
-        self.postal_code_input.clear()
-        self.address_input.clear()
-        self.address_furigana_input.clear()  # 住所フリガナをクリア
-        self.list_name_input.clear()
-        self.list_furigana_input.clear()
-        self.list_phone_input.clear()
-        self.list_postal_code_input.clear()
-        self.list_address_input.clear()
-        # 受注者名はクリアしない（保持する）
-        # self.order_person_input.clear()
-        # 料金認識はクリアしない（保持する）
-        # self.fee_input.clear()
-        
-        # 他番号、電話機、禁止回線には初期値を設定
-        self.other_number_combo.setCurrentText("なし")
-        self.other_number_text_input.clear()
-        self.other_number_text_widget.hide()
-        self.phone_device_input.setText("プッシュホン")
-        self.forbidden_line_input.setText("なし")
-        
-        # NDと備考（名義人との関係性）をクリア
-        self.nd_input.clear()
-        self.relationship_input.clear()
-        if hasattr(self, 'call_preference_input'):
-            self.call_preference_input.clear()
-        if hasattr(self, 'business_status_combo'):
-            self.business_status_combo.setCurrentText("継続中")
-        if hasattr(self, 'operator_gender_combo'):
-            self.operator_gender_combo.setCurrentText("男性")
-        # コンボボックスをデフォルト値に
-        self.era_combo.setCurrentIndex(0)
-        self.year_combo.setCurrentIndex(0)
-        self.month_combo.setCurrentIndex(0)
-        self.day_combo.setCurrentIndex(0)
-        self.current_line_combo.setCurrentIndex(0)
-        self.judgment_combo.setCurrentIndex(0)
-        self.net_usage_combo.setCurrentText("なし")
-        self.net_line_name_input.clear()
-        self.net_line_name_widget.hide()
-        self.other_number_combo.setCurrentText("なし")
-        self.other_number_text_input.clear()
-        self.other_number_text_widget.hide()
-        self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
-        # 結果ラベルをクリア
-        self.area_result_label.setText("提供エリア: 未検索")
-        self.area_result_label.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #95a5a6;
-                border-radius: 4px;
-                background-color: #f8f9fa;
-                color: #95a5a6;
-            }
-        """)
-        # スクリーンショットボタンをクリア
-        self.update_screenshot_button()
-        # プレビューもクリア
-        self.preview_text.clear()
+        self.undo_stack.beginMacro("入力クリア")
+        try:
+            # テキスト入力フィールドのクリア
+            self._push_text_change(self.operator_input, "")
+            # 携帯電話番号入力エリアの参照を削除
+            self._push_text_change(self.available_time_input, "携帯なし")
+            
+            # 新しい携帯番号入力欄のクリア
+            self._push_text_change(self.mobile_part1_input, "")
+            self._push_text_change(self.mobile_part2_input, "")
+            self._push_text_change(self.mobile_part3_input, "")
+            self.mobile_pattern_combo.setCurrentText("②携帯なし")
+            self.mobile_number_widget.hide()
+            
+            self._push_text_change(self.contractor_input, "")
+            self._push_text_change(self.furigana_input, "")
+            self._push_text_change(self.postal_code_input, "")
+            self._push_text_change(self.address_input, "")
+            self._push_text_change(self.address_furigana_input, "")
+            self._push_text_change(self.list_name_input, "")
+            self._push_text_change(self.list_furigana_input, "")
+            self._push_text_change(self.list_phone_input, "")
+            self._push_text_change(self.list_postal_code_input, "")
+            self._push_text_change(self.list_address_input, "")
+            # 受注者名はクリアしない（保持する）
+            # self.order_person_input.clear()
+            # 料金認識はクリアしない（保持する）
+            # self.fee_input.clear()
+            
+            # 他番号、電話機、禁止回線には初期値を設定
+            self.other_number_combo.setCurrentText("なし")
+            self._push_text_change(self.other_number_text_input, "")
+            self.other_number_text_widget.hide()
+            self._push_text_change(self.phone_device_input, "プッシュホン")
+            self._push_text_change(self.forbidden_line_input, "なし")
+            
+            # NDと備考（名義人との関係性）をクリア
+            self._push_text_change(self.nd_input, "")
+            self._push_text_change(self.relationship_input, "")
+            if hasattr(self, 'call_preference_input'):
+                self._push_text_change(self.call_preference_input, "")
+            if hasattr(self, 'business_status_combo'):
+                self.business_status_combo.setCurrentText("継続中")
+            if hasattr(self, 'operator_gender_combo'):
+                self.operator_gender_combo.setCurrentText("男性")
+            # コンボボックスをデフォルト値に
+            self.era_combo.setCurrentIndex(0)
+            self.year_combo.setCurrentIndex(0)
+            self.month_combo.setCurrentIndex(0)
+            self.day_combo.setCurrentIndex(0)
+            self.current_line_combo.setCurrentIndex(0)
+            self.judgment_combo.setCurrentIndex(0)
+            self.net_usage_combo.setCurrentText("なし")
+            self._push_text_change(self.net_line_name_input, "")
+            self.net_line_name_widget.hide()
+            self.other_number_combo.setCurrentText("なし")
+            self._push_text_change(self.other_number_text_input, "")
+            self.other_number_text_widget.hide()
+            self.family_approval_combo.setCurrentIndex(0)  # okがインデックス0になる
+            # 結果ラベルをクリア
+            self.area_result_label.setText("提供エリア: 未検索")
+            self.area_result_label.setStyleSheet("""
+                QLabel {
+                    font-size: 14px;
+                    padding: 5px;
+                    border: 1px solid #95a5a6;
+                    border-radius: 4px;
+                    background-color: #f8f9fa;
+                    color: #95a5a6;
+                }
+            """)
+            # スクリーンショットボタンをクリア
+            self.update_screenshot_button()
+            # プレビューもクリア
+            self._push_text_change(self.preview_text, "")
+        finally:
+            self.undo_stack.endMacro()
 
     def init_menu(self):
         """メニューバーの初期化"""
@@ -3501,12 +3535,17 @@ ND：{nd}
         """
         try:
             logging.info("UIの再構築を開始します")
+
+            self.undo_stack.clear()
+            self._last_text_map = {}
             
             # 現在のモードに基づいてUIを再構築
             if self.current_mode in ('simple', 'corporate'):
                 self.init_simple_mode()
             else:
                 self.init_easy_mode()
+
+            self.enable_undo_redo_for_inputs()
             
             # フォントサイズを再適用
             font_size = self.settings.get('font_size', 10)
