@@ -548,7 +548,7 @@ ND：{nd}
                     management_id = ""
 
                 if management_id:
-                    formatted_text = f"{management_id}\n{formatted_text}"
+                    formatted_text = f"{management_id}\n\n{formatted_text}"
 
                 call_preference_text = format_data.get('call_preference', '').strip()
                 # 未入力でも「★架電希望：」行は必ず出力する
