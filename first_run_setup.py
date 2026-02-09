@@ -94,13 +94,13 @@ def _default_settings() -> Dict[str, Any]:
         "font_size": 9,
         "delay_seconds": 0,
         "browser_settings": {
-            "headless": True,
+            "headless": False,
             "disable_images": True,
             "show_popup": True,
-            "auto_close": True,
+            "auto_close": False,
             "page_load_timeout": 30,
             "script_timeout": 30,
-            "enable_screenshots": True
+            "enable_screenshots": False
         },
         "corporate_settings": {
             "allow_manual_contractor": False,

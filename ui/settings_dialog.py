@@ -86,7 +86,7 @@ ND：{nd}
         self.default_browser_settings = {
             "headless": False,
             "disable_images": True,
-            "enable_screenshots": True,
+            "enable_screenshots": False,
             "show_popup": True,
             "page_load_timeout": 30,
             "script_timeout": 30,
