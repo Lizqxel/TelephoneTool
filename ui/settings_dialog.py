@@ -199,11 +199,6 @@ ND：{nd}
         self.simple_mode_radio.setToolTip("機能をすべて表示するモード")
         mode_select_layout.addWidget(self.simple_mode_radio)
         
-        # 誘導モードラジオボタン
-        self.easy_mode_radio = QRadioButton("誘導モード")
-        self.easy_mode_radio.setToolTip("ステップバイステップで入力を誘導するモード")
-        mode_select_layout.addWidget(self.easy_mode_radio)
-
         # 法人モードラジオボタン
         self.corporate_mode_radio = QRadioButton("法人モード")
         self.corporate_mode_radio.setToolTip("法人向けの入力補助を追加するモード")
@@ -216,7 +211,7 @@ ND：{nd}
             elif parent.current_mode == 'corporate':
                 self.corporate_mode_radio.setChecked(True)
             else:
-                self.easy_mode_radio.setChecked(True)
+                self.simple_mode_radio.setChecked(True)
         else:
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
         
@@ -577,12 +572,10 @@ ND：{nd}
                     self.cti_cooldown_spin.setValue(int(cti_auto_processing_cooldown))
                     
                     # モード設定の読み込み
-                    if mode == 'simple':
-                        self.simple_mode_radio.setChecked(True)
-                    elif mode == 'corporate':
+                    if mode == 'corporate':
                         self.corporate_mode_radio.setChecked(True)
                     else:
-                        self.easy_mode_radio.setChecked(True)
+                        self.simple_mode_radio.setChecked(True)
 
                     # 法人モード設定の読み込み
                     corporate_settings = settings.get('corporate_settings', self.default_corporate_settings)
@@ -652,12 +645,10 @@ ND：{nd}
                 previous_mode = 'simple'
             
             # 選択されたモードを取得
-            if self.simple_mode_radio.isChecked():
-                new_mode = 'simple'
-            elif self.corporate_mode_radio.isChecked():
+            if self.corporate_mode_radio.isChecked():
                 new_mode = 'corporate'
             else:
-                new_mode = 'easy'
+                new_mode = 'simple'
             
             # ブラウザ設定を取得
             browser_settings = {
@@ -813,12 +804,10 @@ ND：{nd}
         }
         
         # 選択されたモードを取得
-        if self.simple_mode_radio.isChecked():
-            mode = 'simple'
-        elif self.corporate_mode_radio.isChecked():
+        if self.corporate_mode_radio.isChecked():
             mode = 'corporate'
         else:
-            mode = 'easy'
+            mode = 'simple'
         
         auto_copy = self.corporate_auto_copy_checkbox.isChecked()
         return {

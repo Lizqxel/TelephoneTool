@@ -2,7 +2,7 @@
 モード選択ダイアログ
 
 このモジュールは、アプリケーションのモード選択ダイアログを提供します。
-ユーザーは「シンプルモード」または「使いやすいモード」を選択できます。
+ユーザーは「通常モード」または「法人モード」を選択できます。
 """
 
 from PySide6.QtWidgets import (
@@ -56,7 +56,6 @@ class ModeSelectionDialog(QDialog):
         # 説明ラベル
         description_label = QLabel(
             "通常モード：すべての入力項目を1画面で入力\n"
-            "誘導モード：入力項目を複数の画面に分けて入力\n"
             "法人モード：通常モードをベースに法人向け入力補助を追加"
         )
         description_label.setAlignment(Qt.AlignCenter)
@@ -95,29 +94,6 @@ class ModeSelectionDialog(QDialog):
         simple_button.clicked.connect(lambda: self.select_mode('simple'))
         layout.addWidget(simple_button)
         
-        # 誘導モードボタン
-        easy_button = QPushButton("誘導モード")
-        easy_button.setMinimumHeight(50)
-        easy_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 10px;
-                border-radius: 5px;
-                font-size: 16px;
-                margin: 5px;
-            }
-            QPushButton:hover {
-                background-color: #1E88E5;
-            }
-            QPushButton:pressed {
-                background-color: #1976D2;
-            }
-        """)
-        easy_button.clicked.connect(lambda: self.select_mode('easy'))
-        layout.addWidget(easy_button)
-
         # 法人モードボタン
         corporate_button = QPushButton("法人モード")
         corporate_button.setMinimumHeight(50)
@@ -173,7 +149,7 @@ class ModeSelectionDialog(QDialog):
         モードを選択し、ダイアログを閉じる
         
         Args:
-            mode: 選択されたモード（'simple'、'easy'、'corporate'）
+            mode: 選択されたモード（'simple'、'corporate'）
         """
         try:
             self.selected_mode = mode
@@ -188,7 +164,7 @@ class ModeSelectionDialog(QDialog):
         選択されたモードを取得
         
         Returns:
-            str: 選択されたモード（'simple'または'easy'）
+            str: 選択されたモード（'simple'または'corporate'）
         """
         return self.selected_mode
         
