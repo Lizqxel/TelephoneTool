@@ -271,11 +271,19 @@ ND：{nd}
         # 現在のCTI自動処理設定を読み込み
         if hasattr(parent, 'settings'):
             current_auto_processing = parent.settings.get('enable_auto_cti_processing', True)
+            current_refresh_before_area_search = parent.settings.get('refresh_address_from_cti_before_area_search', True)
         else:
             current_auto_processing = True
+            current_refresh_before_area_search = True
             
         self.cti_auto_processing_checkbox.setChecked(current_auto_processing)
         cti_monitor_layout.addWidget(self.cti_auto_processing_checkbox)
+
+        # 提供判定開始時の住所取得設定
+        self.cti_refresh_before_area_search_checkbox = QCheckBox("提供判定開始時にCTI最新住所を優先取得する")
+        self.cti_refresh_before_area_search_checkbox.setChecked(current_refresh_before_area_search)
+        self.cti_refresh_before_area_search_checkbox.setToolTip("無効にすると、提供判定検索開始時は現在入力欄にある郵便番号・住所をそのまま使用します")
+        cti_monitor_layout.addWidget(self.cti_refresh_before_area_search_checkbox)
         
         # CTI監視間隔設定
         cti_interval_layout = QHBoxLayout()
@@ -536,6 +544,7 @@ ND：{nd}
         """CTI設定をデフォルトに戻す"""
         self.cti_monitoring_checkbox.setChecked(True)
         self.cti_auto_processing_checkbox.setChecked(True)
+        self.cti_refresh_before_area_search_checkbox.setChecked(True)
         self.cti_interval_spin.setValue(200)  # 0.2秒
         self.cti_cooldown_spin.setValue(3)  # 3秒
         self.call_duration_spin.setValue(0)  # 0秒
@@ -557,6 +566,7 @@ ND：{nd}
                     # CTI監視設定の読み込み
                     cti_monitoring_enabled = settings.get('enable_cti_monitoring', True)
                     cti_auto_processing_enabled = settings.get('enable_auto_cti_processing', True)
+                    cti_refresh_before_area_search = settings.get('refresh_address_from_cti_before_area_search', True)
                     cti_monitor_interval = settings.get('cti_monitor_interval', 0.2)
                     cti_auto_processing_cooldown = settings.get('cti_auto_processing_cooldown', 3.0)
                     current_call_duration = settings.get('call_duration_threshold', 0)  # デフォルトは0秒
@@ -568,6 +578,7 @@ ND：{nd}
                     # CTI監視設定の設定
                     self.cti_monitoring_checkbox.setChecked(cti_monitoring_enabled)
                     self.cti_auto_processing_checkbox.setChecked(cti_auto_processing_enabled)
+                    self.cti_refresh_before_area_search_checkbox.setChecked(cti_refresh_before_area_search)
                     self.cti_interval_spin.setValue(int(cti_monitor_interval * 1000))  # 秒をミリ秒に変換
                     self.cti_cooldown_spin.setValue(int(cti_auto_processing_cooldown))
                     
@@ -685,6 +696,7 @@ ND：{nd}
                 # CTI監視設定を追加
                 'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
                 'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
+                'refresh_address_from_cti_before_area_search': self.cti_refresh_before_area_search_checkbox.isChecked(),
                 'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
                 'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
                 'call_duration_threshold': self.call_duration_spin.value()
@@ -824,6 +836,7 @@ ND：{nd}
             # CTI監視設定を追加
             'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
             'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
+            'refresh_address_from_cti_before_area_search': self.cti_refresh_before_area_search_checkbox.isChecked(),
             'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
             'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
             'call_duration_threshold': self.call_duration_spin.value()

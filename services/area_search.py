@@ -144,6 +144,8 @@ def split_address(address):
         block = None
         number_part = None
         town = ""
+        number_prefix = None
+        number_suffix = None
         
         if prefecture:
             remaining_address = address[len(prefecture):].strip()
@@ -155,45 +157,59 @@ def split_address(address):
                 # 残りの住所から基本住所と番地を分離
                 remaining = remaining_address[len(city):].strip()
                 
-                # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
-                special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
-                
-                if special_location_match:
-                    # 番地のみを抽出（甲乙丙丁は除外）
-                    number_part = special_location_match.group(3)
-                    # 基本住所は市区町村までとする
-                    town = ""
+                # 甲乙丙丁・イロハを含む番地表記を優先的に抽出
+                symbolic_number_match = re.match(r'^(.*?)([甲乙丙丁])(\d+)([イロハ])?$', remaining)
+                trailing_symbol_match = re.match(r'^(.*?)(\d+)([イロハ])$', remaining)
+
+                if symbolic_number_match:
+                    town = symbolic_number_match.group(1).strip()
+                    number_prefix = symbolic_number_match.group(2)
+                    number_part = symbolic_number_match.group(3)
+                    number_suffix = symbolic_number_match.group(4)
+                elif trailing_symbol_match:
+                    town = trailing_symbol_match.group(1).strip()
+                    number_part = trailing_symbol_match.group(2)
+                    number_suffix = trailing_symbol_match.group(3)
                 else:
-                    # 丁目を含む場合は、丁目の後ろの番地を抽出
-                    chome_match = re.search(r'(\d+)丁目', remaining)
-                    if chome_match:
-                        # 丁目より後ろの部分から番地を探す
-                        after_chome = remaining[remaining.find('丁目') + 2:].strip()
-                        # ハイフンを含む番地のパターンを優先的に検索
-                        number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
-                        if number_match:
-                            number_part = number_match.group(1)
-                            town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
-                        else:
-                            number_part = None
-                            town = remaining[:remaining.find('丁目')].strip()
-                        block = chome_match.group(1)
+                    # 特殊な表記（大字、字、甲乙丙丁）を含む部分を抽出
+                    special_location_match = re.search(r'(大字.+?字.*?|大字.*?|字.*?)([甲乙丙丁])?(\d+)', remaining)
+                    
+                    if special_location_match:
+                        # 番地のみを抽出（甲乙丙丁は除外）
+                        number_part = special_location_match.group(3)
+                        # 基本住所は市区町村までとする
+                        town = ""
                     else:
-                        # ハイフンが2つある場合は、最初の数字を丁目として扱う
-                        double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
-                        if double_hyphen_match:
-                            block = double_hyphen_match.group(1)
-                            number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
-                            town = remaining[:double_hyphen_match.start()].strip()
-                        else:
-                            # 通常の番地パターンを検索
-                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                        # 丁目を含む場合は、丁目の後ろの番地を抽出
+                        chome_match = re.search(r'(\d+)丁目', remaining)
+                        if chome_match:
+                            # 丁目より後ろの部分から番地を探す
+                            after_chome = remaining[remaining.find('丁目') + 2:].strip()
+                            # ハイフンを含む番地のパターンを優先的に検索
+                            number_match = re.search(r'(\d+(?:[-－]\d+)?)', after_chome)
                             if number_match:
                                 number_part = number_match.group(1)
-                                town = remaining[:number_match.start()].strip()
+                                town = remaining[:remaining.find('丁目') - len(chome_match.group(1))].strip()
                             else:
                                 number_part = None
-                                town = remaining
+                                town = remaining[:remaining.find('丁目')].strip()
+                            block = chome_match.group(1)
+                        else:
+                            # ハイフンが2つある場合は、最初の数字を丁目として扱う
+                            double_hyphen_match = re.search(r'(\d+)-(\d+)-(\d+)', remaining)
+                            if double_hyphen_match:
+                                block = double_hyphen_match.group(1)
+                                number_part = f"{double_hyphen_match.group(2)}-{double_hyphen_match.group(3)}"
+                                town = remaining[:double_hyphen_match.start()].strip()
+                            else:
+                                # 通常の番地パターンを検索
+                                number_match = re.search(r'(\d+(?:[-－]\d+)?)', remaining)
+                                if number_match:
+                                    number_part = number_match.group(1)
+                                    town = remaining[:number_match.start()].strip()
+                                else:
+                                    number_part = None
+                                    town = remaining
                 
                 return {
                     'prefecture': prefecture,
@@ -201,6 +217,8 @@ def split_address(address):
                     'town': town if town else "",  # Noneの代わりに空文字列を返す
                     'block': block,
                     'number': number_part,
+                    'number_prefix': number_prefix,
+                    'number_suffix': number_suffix,
                     'building_id': None
                 }
             
@@ -210,6 +228,8 @@ def split_address(address):
                 'town': "",  # Noneの代わりに空文字列を返す
                 'block': None,
                 'number': None,
+                'number_prefix': None,
+                'number_suffix': None,
                 'building_id': None
             }
         
@@ -219,6 +239,8 @@ def split_address(address):
             'town': "",
             'block': None,
             'number': None,
+            'number_prefix': None,
+            'number_suffix': None,
             'building_id': None
         }
         
@@ -748,10 +770,14 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     # 番地と号を分離
     street_number = None
     building_number = None
+    number_prefix = address_parts.get('number_prefix')
+    number_suffix = address_parts.get('number_suffix')
     if address_parts['number']:
         parts = address_parts['number'].split('-')
         street_number = parts[0]
         building_number = parts[1] if len(parts) > 1 else None
+
+    logging.info(f"番地分割トークン - 接頭: {number_prefix}, 番地: {street_number}, 号: {building_number}, 接尾: {number_suffix}")
     
     # 郵便番号のフォーマットチェック
     postal_code_clean = postal_code.replace("-", "")
@@ -1088,6 +1114,23 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     # 番地を入力
                     input_street_number = street_number
                     logging.info(f"入力予定の番地: {input_street_number}")
+
+                    def add_candidate(candidates, token):
+                        if not token:
+                            return
+                        candidates.add(token)
+                        if any(ch.isdigit() for ch in token):
+                            zen_numbers_local = "０１２３４５６７８９"
+                            han_numbers_local = "0123456789"
+                            trans_table_local = str.maketrans(han_numbers_local, zen_numbers_local)
+                            candidates.add(token.translate(trans_table_local))
+
+                    banchi_candidates = set()
+                    add_candidate(banchi_candidates, input_street_number)
+                    add_candidate(banchi_candidates, number_prefix)
+                    add_candidate(banchi_candidates, f"{number_prefix}{input_street_number}" if number_prefix and input_street_number else None)
+                    add_candidate(banchi_candidates, f"{input_street_number}{number_suffix}" if input_street_number and number_suffix else None)
+                    logging.info(f"番地候補トークン: {sorted(banchi_candidates)}")
                     
                     # 全角数字に変換
                     zen_numbers = "０１２３４５６７８９"
@@ -1119,7 +1162,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 logging.info(f"番地ボタンのテキスト: {button_text}")
                                 
                                 # 目的の番地を優先的に探す
-                                if button_text == input_street_number or button_text == zen_street_number:
+                                if button_text in banchi_candidates:
                                     banchi_button = button
                                     logging.info(f"番地ボタンが見つかりました: {button_text}")
                                 # 番地なし系のボタンを探す
@@ -1140,7 +1183,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         # 優先順位に従ってボタンを選択
                         if banchi_button:
                             target_button = banchi_button
-                            logging.info(f"目的の番地ボタンを選択: {input_street_number}")
+                            try:
+                                selected_button_text = target_button.text.strip()
+                            except Exception:
+                                selected_button_text = "(取得失敗)"
+                            logging.info(f"番地ボタンを選択: 実際='{selected_button_text}' / 入力番地='{input_street_number}'")
                         elif banchi_nashi_button:
                             target_button = banchi_nashi_button
                             logging.info("「番地なし」系のボタンを選択")
@@ -1225,6 +1272,23 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 # 号を入力
                 input_building_number = building_number
                 logging.info(f"入力予定の号: {input_building_number}")
+
+                def add_candidate(candidates, token):
+                    if not token:
+                        return
+                    candidates.add(token)
+                    if any(ch.isdigit() for ch in token):
+                        zen_numbers_local = "０１２３４５６７８９"
+                        han_numbers_local = "0123456789"
+                        trans_table_local = str.maketrans(han_numbers_local, zen_numbers_local)
+                        candidates.add(token.translate(trans_table_local))
+
+                gou_candidates = set()
+                add_candidate(gou_candidates, input_building_number)
+                add_candidate(gou_candidates, number_suffix)
+                add_candidate(gou_candidates, street_number if (number_prefix or number_suffix) else None)
+                add_candidate(gou_candidates, f"{street_number}{number_suffix}" if street_number and number_suffix else None)
+                logging.info(f"号候補トークン: {sorted(gou_candidates)}")
                 
                 # 全角数字に変換（号がある場合のみ）
                 if input_building_number:
@@ -1248,6 +1312,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     
                     # 号ボタンを探す（優先順位付き）
                     gou_button = None
+                    gou_candidate_button = None
                     gou_nashi_button = None
                     banchi_nashi_button = None  # 番地なし系のボタンを追加
                     gaitou_nashi_button = None
@@ -1261,9 +1326,12 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             logging.info(f"号ボタンのテキスト: {button_text}")
                             
                             # 号の指定がある場合は目的の号を優先的に探す
-                            if input_building_number and (button_text == input_building_number or button_text == zen_building_number):
-                                gou_button = button
-                                logging.info(f"号ボタンが見つかりました: {button_text}")
+                            if button_text in gou_candidates:
+                                gou_candidate_button = button
+                                logging.info(f"号候補ボタンが見つかりました: {button_text}")
+                                if input_building_number and (button_text == input_building_number or button_text == zen_building_number):
+                                    gou_button = button
+                                    logging.info(f"号ボタンが見つかりました: {button_text}")
                             # 号なし系のボタンを探す
                             elif button_text == "（号なし）" or button_text == "号なし":
                                 gou_nashi_button = button
@@ -1285,15 +1353,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     
                     # 優先順位に従ってボタンを選択
                     # 号の指定がない場合は号なし系を優先
-                    if not input_building_number and gou_nashi_button:
+                    if gou_button:
+                        target_button = gou_button
+                        logging.info(f"目的の号ボタンを選択: {input_building_number}")
+                    elif gou_candidate_button:
+                        target_button = gou_candidate_button
+                        logging.info("号候補トークンに一致したボタンを選択")
+                    elif not input_building_number and gou_nashi_button:
                         target_button = gou_nashi_button
                         logging.info("号の指定がないため「号なし」系ボタンを選択")
                     elif not input_building_number and banchi_nashi_button:
                         target_button = banchi_nashi_button
                         logging.info("号の指定がないため「番地なし」系ボタンを選択")
-                    elif input_building_number and gou_button:
-                        target_button = gou_button
-                        logging.info(f"目的の号ボタンを選択: {input_building_number}")
                     elif gou_nashi_button:
                         target_button = gou_nashi_button
                         logging.info("「号なし」系のボタンを選択（フォールバック）")
@@ -1454,11 +1525,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 "//img[contains(@src, 'investigation')]"
                             ],
                             "status": "failure",
-                            "message": "判定失敗",
+                            "message": "要手動再検索（住所をご確認ください）",
                             "details": {
-                                "判定結果": "判定失敗",
+                                "判定結果": "要手動再検索",
                                 "提供エリア": "調査が必要なエリアです",
-                                "備考": "住所を特定できないため、担当者がお調べします"
+                                "備考": "建物名や枝番の影響で自動判定できない場合があります。住所を確認して手動で再検索してください"
                             }
                         },
                         "not_provided": {

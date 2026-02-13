@@ -547,6 +547,7 @@ ND：{nd}
                     # CTI監視設定のデフォルト値（オンに設定）
                     'enable_cti_monitoring': True,
                     'enable_auto_cti_processing': True,
+                    'refresh_address_from_cti_before_area_search': True,
                     'cti_monitor_interval': 0.5,
                     'cti_auto_processing_cooldown': 3.0,
                     'call_duration_threshold': 0
@@ -1001,6 +1002,8 @@ ND：{nd}
             elif status == "apartment":
                 # 集合住宅の場合は明示的に表示
                 self.update_judgment_result("集合住宅（アパート・マンション等）")
+            elif status == "failure":
+                self.update_judgment_result(result.get("message", "判定失敗"))
             else:
                 self.update_judgment_result("判定失敗")
             
@@ -2269,7 +2272,7 @@ ND：{nd}
                 if isinstance(widget, QListView):
                     widget.viewport().update()  # QListViewの場合はviewport()を更新
                 else:
-                    widget.update()
+                    QWidget.update(widget)
             logging.info("設定を更新しました")
     
     def update_countdown(self):
@@ -2776,13 +2779,19 @@ ND：{nd}
     def search_service_area(self):
         """提供エリア検索を開始"""
         is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
+        refresh_before_area_search = self.settings.get('refresh_address_from_cti_before_area_search', True)
 
-        if not self.refresh_address_from_cti():
-            if is_auto_processing:
-                logging.warning("CTI自動処理: CTIの住所取得に失敗したため検索をスキップします")
+        should_refresh_from_cti = is_auto_processing or refresh_before_area_search
+
+        if should_refresh_from_cti:
+            if not self.refresh_address_from_cti():
+                if is_auto_processing:
+                    logging.warning("CTI自動処理: CTIの住所取得に失敗したため検索をスキップします")
+                    return
+                QMessageBox.warning(self, "CTI取得エラー", "CTIの住所取得に失敗したため、提供判定を開始できません。")
                 return
-            QMessageBox.warning(self, "CTI取得エラー", "CTIの住所取得に失敗したため、提供判定を開始できません。")
-            return
+        else:
+            logging.info("設定により、提供判定開始時のCTI住所再取得をスキップします")
 
         postal_code = self.postal_code_input.text().strip()
         address = self.address_input.text().strip()
