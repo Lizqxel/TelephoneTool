@@ -1525,11 +1525,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 "//img[contains(@src, 'investigation')]"
                             ],
                             "status": "failure",
-                            "message": "判定失敗",
+                            "message": "要手動再検索（住所をご確認ください）",
                             "details": {
-                                "判定結果": "判定失敗",
+                                "判定結果": "要手動再検索",
                                 "提供エリア": "調査が必要なエリアです",
-                                "備考": "住所を特定できないため、担当者がお調べします"
+                                "備考": "建物名や枝番の影響で自動判定できない場合があります。住所を確認して手動で再検索してください"
                             }
                         },
                         "not_provided": {

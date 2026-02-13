@@ -1002,6 +1002,8 @@ ND：{nd}
             elif status == "apartment":
                 # 集合住宅の場合は明示的に表示
                 self.update_judgment_result("集合住宅（アパート・マンション等）")
+            elif status == "failure":
+                self.update_judgment_result(result.get("message", "判定失敗"))
             else:
                 self.update_judgment_result("判定失敗")
             
