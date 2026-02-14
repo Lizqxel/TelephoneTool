@@ -2347,6 +2347,29 @@ ND：{nd}
             QMessageBox.critical(self, "エラー", f"フォームの更新中にエラーが発生しました: {e}")
         finally:
             self.undo_stack.endMacro()
+
+    def _convert_address_english_to_katakana(self, address):
+        if not address or not re.search(r"[A-Za-z]", address):
+            return address
+        try:
+            from alkana import get_kana
+        except Exception as e:
+            logging.warning(f"alkanaの読み込みに失敗しました: {e}")
+            return address
+
+        def replace_word(match):
+            word = match.group(0)
+            kana = get_kana(word)
+            if not kana:
+                kana = get_kana(word.lower())
+            if not kana:
+                kana = get_kana(word.upper())
+            if not kana and len(word) > 1:
+                kana = get_kana(word.capitalize())
+            return kana if kana else word
+
+        return re.sub(r"[A-Za-z]+", replace_word, address)
+
             
     def fetch_cti_data(self):
         """CTIデータを取得"""
