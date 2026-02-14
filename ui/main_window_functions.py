@@ -242,6 +242,9 @@ ND：{nd}
     def update_year_combo(self, text):
         """元号に応じて年の選択肢を更新"""
         self.year_combo.clear()
+        if not text:
+            self.year_combo.addItems([""])
+            return
         if text == "昭和":
             self.year_combo.addItems([str(i) for i in range(1, 65)])  # 昭和1年～64年
         elif text == "平成":
@@ -264,9 +267,74 @@ ND：{nd}
             
             # 成功メッセージをステータスバーに表示
             self.statusBar().showMessage("営業コメントをクリップボードにコピーしました", 5000)
+
+    def _build_birth_date(self):
+        era = self.era_combo.currentText().rstrip()
+        year = self.year_combo.currentText().rstrip()
+        month = self.month_combo.currentText().rstrip()
+        day = self.day_combo.currentText().rstrip()
+
+        if not (era and year and month and day):
+            return ""
+
+        era_year_map = {"平成": 1988, "昭和": 1925, "西暦": 0}
+        if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
+            try:
+                jp_year = int(year)
+                if era == "西暦":
+                    western_year = jp_year
+                else:
+                    western_year = era_year_map[era] + jp_year
+                return f"{western_year}/{month}/{day}"
+            except (ValueError, TypeError):
+                logging.warning("生年月日の変換に失敗しました")
+        return ""
+
+    def _require_birth_date_for_comment(self):
+        birth_date = self._build_birth_date()
+        if not birth_date:
+            QMessageBox.warning(self, "入力エラー", "生年月日を入力してください。")
+            return None
+        return birth_date
+
+    def _validate_operator_contractor_match(self):
+        operator = self.operator_input.text().strip()
+        contractor = self.contractor_input.text().strip()
+        if not operator or not contractor:
+            QMessageBox.warning(self, "入力エラー", "対応者名と契約者名を入力してください。営コメを作成できません。")
+            return False
+        if operator != contractor:
+            QMessageBox.warning(self, "入力エラー", "対応者名と契約者名が一致しません。営コメを作成できません。")
+            return False
+        return True
+
+    def _validate_list_furigana_no_english(self):
+        if not hasattr(self, 'list_furigana_input'):
+            return True
+        list_furigana = self.list_furigana_input.text().strip()
+        if re.search(r"[A-Za-z]", list_furigana):
+            message_box = QMessageBox(self)
+            message_box.setWindowTitle("確認")
+            message_box.setText("フリガナに英語が含まれています。\nこのまま営コメを作成しますか？")
+            message_box.setIcon(QMessageBox.Warning)
+            ok_button = message_box.addButton("OK", QMessageBox.AcceptRole)
+            back_button = message_box.addButton("戻る", QMessageBox.RejectRole)
+            message_box.setDefaultButton(back_button)
+            message_box.exec()
+            if message_box.clickedButton() == back_button:
+                return False
+        return True
     
     def generate_cti_format(self):
         """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
+        if not self._validate_operator_contractor_match():
+            return None
+        if not self._validate_list_furigana_no_english():
+            return None
+        birth_date = self._require_birth_date_for_comment()
+        if not birth_date:
+            return None
+
         # 必須項目の検証
         required_fields = {
             'operator': self.operator_input,
@@ -425,26 +493,7 @@ ND：{nd}
         # 日付の書式設定
         order_date = self.order_date_input.text().rstrip()
         
-        # 生年月日の取得
-        birth_date = ""
-        era = self.era_combo.currentText().rstrip()
-        year = self.year_combo.currentText().rstrip()
-        month = self.month_combo.currentText().rstrip()
-        day = self.day_combo.currentText().rstrip()
-        
-        if era and year and month and day:
-            # 和暦から西暦への変換
-            era_year_map = {"平成": 1988, "昭和": 1925, "西暦": 0}
-            if era in era_year_map and year.isdigit() and month.isdigit() and day.isdigit():
-                try:
-                    jp_year = int(year)
-                    if era == "西暦":
-                        western_year = jp_year
-                    else:
-                        western_year = era_year_map[era] + jp_year
-                    birth_date = f"{western_year}/{month}/{day}"
-                except (ValueError, TypeError):
-                    logging.warning("生年月日の変換に失敗しました")
+        # 生年月日は必須（上で取得済み）
                     
         # フォーマットデータの準備（各フィールドの末尾のスペースを削除）
         net_usage_text = self.net_usage_combo.currentText().rstrip()
