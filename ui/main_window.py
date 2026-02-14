@@ -310,16 +310,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 生年月日入力用のコンボボックスを初期化
         self.era_combo = NoWheelComboBox()
-        self.era_combo.addItems(["西暦", "平成", "昭和"])
+        self.era_combo.addItems(["", "西暦", "平成", "昭和"])
         
         self.year_combo = NoWheelComboBox()
-        self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
+        self.year_combo.addItems([""] + [str(i) for i in range(1926, datetime.datetime.now().year + 1)])
         
         self.month_combo = NoWheelComboBox()
-        self.month_combo.addItems([str(i) for i in range(1, 13)])
+        self.month_combo.addItems([""] + [str(i) for i in range(1, 13)])
         
         self.day_combo = NoWheelComboBox()
-        self.day_combo.addItems([str(i) for i in range(1, 32)])
+        self.day_combo.addItems([""] + [str(i) for i in range(1, 32)])
         
         # メインウィジェットの設定
         main_widget = QWidget()
@@ -895,7 +895,7 @@ ND：{nd}
                 'available_time': '',  # 出やすい時間帯は空で初期化
                 'contractor': customer_name if customer_name else "",  # 変換済みの顧客名を使用
                 'furigana': customer_furigana,  # 自動生成したフリガナを設定
-                'birth_date': '1926/1/1',  # 誕生日の初期値を設定
+                'birth_date': '',  # 誕生日は未入力で開始
                 'order_person': '',  # 受注者名は空で初期化
                 'employee_number': '',  # 社番は空で初期化
                 'fee': '2500円～3000円',  # デフォルト値を設定
@@ -1634,30 +1634,35 @@ ND：{nd}
         
         # 元号選択
         self.era_combo = NoWheelComboBox()
-        self.era_combo.addItems(["西暦", "平成", "昭和"])
+        self.era_combo.addItems(["", "西暦", "平成", "昭和"])
         self.era_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.era_combo)
         
         # 年選択
         self.year_combo = NoWheelComboBox()
-        self.year_combo.addItems([str(i) for i in range(1926, datetime.datetime.now().year + 1)])
+        self.year_combo.addItems([""] + [str(i) for i in range(1926, datetime.datetime.now().year + 1)])
         self.year_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.year_combo)
         birth_date_layout.addWidget(QLabel("年"))
         
         # 月選択
         self.month_combo = NoWheelComboBox()
-        self.month_combo.addItems([str(i) for i in range(1, 13)])
+        self.month_combo.addItems([""] + [str(i) for i in range(1, 13)])
         self.month_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.month_combo)
         birth_date_layout.addWidget(QLabel("月"))
         
         # 日選択
         self.day_combo = NoWheelComboBox()
-        self.day_combo.addItems([str(i) for i in range(1, 32)])
+        self.day_combo.addItems([""] + [str(i) for i in range(1, 32)])
         self.day_combo.currentTextChanged.connect(self.check_birth_date_age)
         birth_date_layout.addWidget(self.day_combo)
         birth_date_layout.addWidget(QLabel("日"))
+
+        self.era_combo.setCurrentIndex(0)
+        self.year_combo.setCurrentIndex(0)
+        self.month_combo.setCurrentIndex(0)
+        self.day_combo.setCurrentIndex(0)
         
         birth_date_group.setLayout(birth_date_layout)
         input_layout.addWidget(birth_date_group)
@@ -4573,6 +4578,14 @@ class CancellationError(Exception):
                 logging.error("フォーマットテンプレートが設定されていません")
                 QMessageBox.warning(self, "警告", "フォーマットテンプレートが設定されていません。\n設定画面でテンプレートを設定してください。")
                 return None
+
+            if not self._validate_operator_contractor_match():
+                return None
+            if not self._validate_list_furigana_no_english():
+                return None
+            birth_date = self._require_birth_date_for_comment()
+            if not birth_date:
+                return None
             
             # データの初期化
             data = {}
@@ -4612,6 +4625,7 @@ class CancellationError(Exception):
                 data['phone_device'] = self.phone_device_input.text().rstrip()
             if hasattr(self, 'forbidden_line_input'):
                 data['forbidden_line'] = self.forbidden_line_input.text().rstrip()
+            data['birth_date'] = birth_date
             
             # コンボボックスからデータを取得
             if hasattr(self, 'current_line_combo'):
