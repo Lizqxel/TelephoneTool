@@ -1308,6 +1308,30 @@ ND：{nd}
         except Exception as e:
             logging.error(f"フリガナ自動生成エラー: {str(e)}")
             
+    def _apply_english_furigana_normalization(self, text):
+        if not text:
+            return text
+        if getattr(self, 'current_mode', None) != 'corporate':
+            return text
+
+        if hasattr(self, '_convert_address_english_to_katakana'):
+            text = self._convert_address_english_to_katakana(text)
+
+        if re.search(r"[A-Za-z]", text):
+            try:
+                import romkan2 as romkan
+
+                def _romkan_replace(match):
+                    token = match.group(0).lower()
+                    token = token.replace('l', 'r').replace('q', 'k').replace('c', 'k')
+                    return romkan.to_katakana(token)
+
+                text = re.sub(r"[A-Za-z]+", _romkan_replace, text)
+            except Exception as e:
+                logging.warning(f"romkan2変換に失敗しました: {e}")
+
+        return text
+
     def auto_generate_list_furigana(self):
         """リスト名からフリガナを自動生成する"""
         # 自動モードの場合のみ処理
@@ -1323,6 +1347,7 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(name)
             if furigana:
+                furigana = self._apply_english_furigana_normalization(furigana)
                 # 自動モードでは常に最新の変換結果で更新する
                 self.list_furigana_input.setText(furigana)
                 logging.info(f"リストフリガナを自動生成しました: {name} → {furigana}")
@@ -1340,6 +1365,7 @@ ND：{nd}
             # フリガナ変換APIを使用
             furigana = convert_to_furigana(address)
             if furigana:
+                furigana = self._apply_english_furigana_normalization(furigana)
                 # 自動モードはないため、住所入力に追従して常に更新
                 self.address_furigana_input.setText(furigana)
                 logging.info(f"住所フリガナを自動生成しました: {address} → {furigana}")
