@@ -10,11 +10,68 @@ import json
 import os
 import time
 import sys
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
+
+
+def _resolve_chromedriver_executable(installed_path: str) -> str:
+    """
+    webdriver_managerが返したパスから実行可能なchromedriver.exeを解決する
+
+    Args:
+        installed_path (str): webdriver_managerが返すパス
+
+    Returns:
+        str: chromedriver.exeの実パス
+    """
+    try:
+        if installed_path and installed_path.lower().endswith("chromedriver.exe") and os.path.exists(installed_path):
+            return installed_path
+
+        path_obj = Path(installed_path)
+        search_roots = []
+
+        if path_obj.exists():
+            if path_obj.is_dir():
+                search_roots.append(path_obj)
+            else:
+                search_roots.append(path_obj.parent)
+
+        # webdriver_managerのキャッシュ構造が変わった場合に備えて親階層も探索
+        for root in list(search_roots):
+            search_roots.append(root.parent)
+            search_roots.append(root.parent.parent)
+
+        checked = set()
+        for root in search_roots:
+            try:
+                root = root.resolve()
+            except Exception:
+                continue
+
+            if str(root) in checked or not root.exists() or not root.is_dir():
+                continue
+            checked.add(str(root))
+
+            direct_candidate = root / "chromedriver.exe"
+            if direct_candidate.exists():
+                return str(direct_candidate)
+
+            recursive_candidates = list(root.rglob("chromedriver.exe"))
+            if recursive_candidates:
+                # より深い階層の候補より、パスの短いものを優先
+                recursive_candidates.sort(key=lambda p: len(str(p)))
+                return str(recursive_candidates[0])
+
+        raise FileNotFoundError(f"chromedriver.exeが見つかりません: {installed_path}")
+
+    except Exception as e:
+        logging.warning(f"chromedriver.exeの解決に失敗: {str(e)}")
+        raise
 
 
 def create_driver(headless=False):
@@ -68,9 +125,19 @@ def create_driver(headless=False):
         except (ImportError, NameError):
             pass
         
-        # ChromeDriverManagerの設定
-        driver_manager = ChromeDriverManager()
-        service = Service(driver_manager.install())
+        driver = None
+
+        # ChromeDriverManagerの設定（失敗時はSelenium Managerへフォールバック）
+        try:
+            driver_manager = ChromeDriverManager()
+            installed_path = driver_manager.install()
+            executable_path = _resolve_chromedriver_executable(installed_path)
+            service = Service(executable_path=executable_path)
+            logging.info(f"ChromeDriverを使用: {executable_path}")
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+        except Exception as manager_error:
+            logging.warning(f"webdriver_manager経由の起動に失敗。Selenium Managerへフォールバックします: {str(manager_error)}")
+            driver = webdriver.Chrome(options=chrome_options)
         
         # キャンセルチェック（ドライバー起動直前）
         try:
@@ -78,9 +145,6 @@ def create_driver(headless=False):
             check_cancellation()
         except (ImportError, NameError):
             pass
-        
-        # WebDriverの作成
-        driver = webdriver.Chrome(service=service, options=chrome_options)
         
         # キャンセルチェック（ドライバー作成直後）
         try:

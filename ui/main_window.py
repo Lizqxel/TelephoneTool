@@ -4772,6 +4772,16 @@ class CancellationError(Exception):
             # プレビューテキストを設定
             if hasattr(self, 'preview_text'):
                 self.preview_text.setText(preview_text)
+
+            # MapFan詳細URLを追記（住所未入力時はスキップ）
+            try:
+                mapfan_url = self.get_mapfan_url_for_current_address()
+                if mapfan_url:
+                    preview_text += f"\n\nMapFan URL: {mapfan_url}"
+                    if hasattr(self, 'preview_text'):
+                        self.preview_text.setText(preview_text)
+            except Exception as mapfan_error:
+                logging.error(f"MapFan URL取得でエラー: {mapfan_error}")
             
             return preview_text
             

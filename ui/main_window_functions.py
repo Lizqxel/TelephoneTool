@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QMessageBox, QApplication
 from ui.settings_dialog import SettingsDialog
 from services import area_search
 from services import oneclick
+from services.mapfan_service import get_mapfan_detail_url
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
@@ -104,6 +105,31 @@ class ServiceAreaSearchWorker(QThread):
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
+
+    def get_mapfan_url_for_current_address(self):
+        """現在の住所入力からMapFan詳細URLを取得する"""
+        try:
+            if not hasattr(self, 'address_input'):
+                return None
+
+            address = self.address_input.text().strip()
+            if not address:
+                logging.info("MapFan検索をスキップ: 住所情報が未入力です")
+                return None
+
+            if hasattr(self, 'statusBar'):
+                self.statusBar().showMessage("MapFanで住所検索中...", 2000)
+
+            mapfan_url = get_mapfan_detail_url(address=address, debug=True, auto_close=False)
+            if mapfan_url:
+                logging.info(f"MapFan詳細URLを取得しました: {mapfan_url}")
+                return mapfan_url
+
+            logging.warning("MapFan詳細URLを取得できませんでした")
+            return None
+        except Exception as e:
+            logging.error(f"MapFan詳細URL取得中にエラー: {str(e)}")
+            return None
 
     def _insert_call_preference_line(self, formatted_text, call_preference_text):
         lines = formatted_text.splitlines()
@@ -607,6 +633,11 @@ ND：{nd}
             maps_url = self.get_google_maps_url()
             if maps_url:
                 formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+
+            # MapFan詳細URLを追加
+            mapfan_url = self.get_mapfan_url_for_current_address()
+            if mapfan_url:
+                formatted_text += f"\nMapFan URL: {mapfan_url}"
             
             # プレビューに表示
             self.preview_text.setText(formatted_text)
