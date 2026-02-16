@@ -76,10 +76,17 @@ class MapfanService:
         (By.CSS_SELECTOR, "a[class*='info']"),
     ]
 
-    def __init__(self, base_url: str = "https://mapfan.com/", timeout: int = 30, debug: bool = True):
+    def __init__(
+        self,
+        base_url: str = "https://mapfan.com/map",
+        timeout: int = 30,
+        debug: bool = True,
+        detailed_logging: bool = False
+    ):
         self.base_url = base_url
         self.timeout = timeout
         self.debug = debug
+        self.detailed_logging = detailed_logging
 
     def get_detail_url_from_address(self, address: str, auto_close: Optional[bool] = None) -> Optional[str]:
         """
@@ -107,11 +114,14 @@ class MapfanService:
 
         driver = None
         try:
-            driver = create_driver(headless=headless)
+            driver = create_driver(headless=headless, page_load_strategy="eager")
+            driver.implicitly_wait(0)
             wait = WebDriverWait(driver, self.timeout)
 
             driver.get(self.base_url)
-            wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+            WebDriverWait(driver, 12).until(
+                lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+            )
             logging.info(f"MapFanを表示しました: title={driver.title}")
 
             self._input_address_and_search(driver, wait, normalized_address)
@@ -153,7 +163,7 @@ class MapfanService:
         if not self._click_left_search_button(driver):
             raise TimeoutException("左側の検索ボタンをクリックできませんでした")
 
-        time.sleep(0.8)
+        time.sleep(0.2)
         self._dismiss_blocking_overlay(driver)
         self._log_search_inputs(driver, "左検索ボタン押下後")
 
@@ -230,6 +240,27 @@ class MapfanService:
         logging.info("MapFan検索結果の表示を確認しました")
 
     def _click_left_search_button(self, driver: WebDriver) -> bool:
+        try:
+            js_button = driver.execute_script(
+                "const nodes = Array.from(document.querySelectorAll('button, a'));"
+                "for (const el of nodes) {"
+                "  const r = el.getBoundingClientRect();"
+                "  const st = window.getComputedStyle(el);"
+                "  if (st.display === 'none' || st.visibility === 'hidden') continue;"
+                "  if (r.width < 20 || r.height < 20) continue;"
+                "  if (r.left > 320) continue;"
+                "  const label = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).replace(/\\s+/g, '');"
+                "  if (label.includes('検索')) return el;"
+                "}"
+                "return null;"
+            )
+            if js_button is not None:
+                self._safe_click(driver, js_button)
+                logging.info("左側の検索ボタンをクリックしました")
+                return True
+        except Exception:
+            pass
+
         for by, selector in self.LEFT_SEARCH_BUTTON_LOCATORS:
             try:
                 elements = driver.find_elements(by, selector)
@@ -499,6 +530,8 @@ class MapfanService:
         return None
 
     def _log_search_inputs(self, driver: WebDriver, phase: str) -> None:
+        if not self.detailed_logging:
+            return
         try:
             inputs = driver.find_elements(By.XPATH, "//input")
             logging.info(f"[MapFan入力欄デバッグ] {phase}: input要素数={len(inputs)}")
@@ -523,6 +556,8 @@ class MapfanService:
             logging.warning(f"入力欄デバッグログ取得に失敗: {e}")
 
     def _log_element_summary(self, element, label: str) -> None:
+        if not self.detailed_logging:
+            return
         try:
             placeholder = (element.get_attribute("placeholder") or "").strip()
             aria_label = (element.get_attribute("aria-label") or "").strip()
@@ -596,7 +631,7 @@ class MapfanService:
         except Exception:
             pass
 
-        return self._find_first_clickable(driver, self.SEARCH_BUTTON_LOCATORS, wait, timeout_per_locator=2)
+        return self._find_first_clickable(driver, self.SEARCH_BUTTON_LOCATORS, wait, timeout_per_locator=1)
 
     def _find_neighbor_search_button(self, driver: WebDriver, search_input):
         """検索入力欄の隣接アイコン/ボタンを取得"""
@@ -624,37 +659,24 @@ class MapfanService:
             key = (address or "").replace(" ", "").replace("　", "")
             key = key[:12] if key else ""
 
+            # 即時チェック（最速経路）
+            immediate_candidate = self._find_left_panel_info_button(driver, key)
+            if immediate_candidate is not None:
+                try:
+                    t = (immediate_candidate.text or "").strip()
+                    a = (immediate_candidate.get_attribute("aria-label") or "").strip()
+                    title = (immediate_candidate.get_attribute("title") or "").strip()
+                    logging.info(f"iボタン候補を採用: text='{t}', aria='{a}', title='{title}'")
+                except Exception:
+                    pass
+                self._safe_click(driver, immediate_candidate)
+                return True
+
             # まずは少し待って結果行の描画を待機
-            end_time = time.time() + 8
+            end_time = time.time() + 2.5
             while time.time() < end_time:
                 try:
-                    candidate = driver.execute_script(
-                        "const key = arguments[0];"
-                        "const nodes = Array.from(document.querySelectorAll('button, a'));"
-                        "let best = null;"
-                        "let bestScore = -1;"
-                        "for (const el of nodes) {"
-                        "  const r = el.getBoundingClientRect();"
-                        "  const st = window.getComputedStyle(el);"
-                        "  if (r.width < 14 || r.height < 14) continue;"
-                        "  if (st.display === 'none' || st.visibility === 'hidden') continue;"
-                        "  if (r.left > 500 || r.top > window.innerHeight - 20) continue;"
-                        "  const label = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase();"
-                        "  const isInfo = label.includes(' i ') || label.trim() === 'i' || label.includes('詳細') || label.includes('情報') || label.includes('info');"
-                        "  if (!isInfo) continue;"
-                        "  let score = 100;"
-                        "  if (label.includes('詳細') || label.includes('情報') || label.includes('info')) score += 80;"
-                        "  const row = el.closest('li, article, section, div');"
-                        "  if (row) {"
-                        "    const text = (row.textContent || '').replace(/\s+/g, '');"
-                        "    if (key && text.includes(key)) score += 120;"
-                        "  }"
-                        "  score += Math.max(0, 500 - r.left) * 0.01;"
-                        "  if (score > bestScore) { bestScore = score; best = el; }"
-                        "}"
-                        "return best;",
-                        key
-                    )
+                    candidate = self._find_left_panel_info_button(driver, key)
 
                     if candidate is not None:
                         try:
@@ -669,20 +691,67 @@ class MapfanService:
                 except Exception:
                     pass
 
-                time.sleep(0.2)
+                time.sleep(0.1)
 
             return False
         except Exception as e:
             logging.warning(f"左パネルiボタンの探索中にエラー: {e}")
             return False
 
+    def _find_left_panel_info_button(self, driver: WebDriver, key: str = ""):
+        try:
+            return driver.execute_script(
+                "const key = arguments[0];"
+                "const nodes = Array.from(document.querySelectorAll('button, a'));"
+                "let best = null;"
+                "let bestScore = -1;"
+                "for (const el of nodes) {"
+                "  const r = el.getBoundingClientRect();"
+                "  const st = window.getComputedStyle(el);"
+                "  if (r.width < 14 || r.height < 14) continue;"
+                "  if (st.display === 'none' || st.visibility === 'hidden') continue;"
+                "  if (r.left > 500 || r.top > window.innerHeight - 20) continue;"
+                "  const label = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase();"
+                "  const isInfo = label.includes(' i ') || label.trim() === 'i' || label.includes('詳細') || label.includes('情報') || label.includes('info');"
+                "  if (!isInfo) continue;"
+                "  let score = 100;"
+                "  if (label.includes('詳細') || label.includes('情報') || label.includes('info')) score += 80;"
+                "  const row = el.closest('li, article, section, div');"
+                "  if (row) {"
+                "    const text = (row.textContent || '').replace(/\s+/g, '');"
+                "    if (key && text.includes(key)) score += 120;"
+                "  }"
+                "  score += Math.max(0, 500 - r.left) * 0.01;"
+                "  if (score > bestScore) { bestScore = score; best = el; }"
+                "}"
+                "return best;",
+                key
+            )
+        except Exception:
+            return None
+
     def _wait_for_search_result(self, driver: WebDriver, wait: WebDriverWait) -> None:
-        for by, selector in self.SEARCH_RESULT_READY_LOCATORS:
+        end_time = time.time() + 12
+        while time.time() < end_time:
             try:
-                WebDriverWait(driver, 4).until(EC.presence_of_element_located((by, selector)))
-                return
+                ready = driver.execute_script(
+                    "if (document.querySelector(\"button[aria-label*='詳細'], button[title*='詳細']\")) return true;"
+                    "if (document.querySelector(\"button[aria-label*='情報'], button[title*='情報']\")) return true;"
+                    "if (document.querySelector(\"button, a\")) {"
+                    "  const nodes = Array.from(document.querySelectorAll('button, a'));"
+                    "  for (const el of nodes) {"
+                    "    const txt = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase();"
+                    "    if (txt.includes('info') || txt.includes('情報') || txt.trim() === 'i') return true;"
+                    "  }"
+                    "}"
+                    "if (document.querySelector(\"li[class*='result'], div[class*='result']\")) return true;"
+                    "return false;"
+                )
+                if ready:
+                    return
             except Exception:
-                continue
+                pass
+            time.sleep(0.15)
         raise TimeoutException("MapFan検索結果の表示を確認できませんでした")
 
     def _enter_map_view_if_needed(self, driver: WebDriver) -> None:

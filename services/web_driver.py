@@ -10,6 +10,8 @@ import json
 import os
 import time
 import sys
+import re
+import subprocess
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -74,7 +76,78 @@ def _resolve_chromedriver_executable(installed_path: str) -> str:
         raise
 
 
-def create_driver(headless=False):
+def _find_bundled_chromedriver() -> str:
+    """同梱済みのchromedriver.exeを探索して返す"""
+    candidates = []
+    try:
+        if getattr(sys, "frozen", False):
+            base_dir = Path(getattr(sys, "_MEIPASS", Path.cwd()))
+        else:
+            base_dir = Path(__file__).resolve().parent.parent
+
+        candidates.extend([
+            base_dir / "drivers" / "chromedriver-win32" / "chromedriver.exe",
+            base_dir / "chromedriver.exe",
+        ])
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
+    except Exception:
+        pass
+
+    return ""
+
+
+def _extract_major_version(version_text: str):
+    try:
+        match = re.search(r"(\d+)\.", version_text or "")
+        if match:
+            return int(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _get_binary_version_output(executable_path: str) -> str:
+    try:
+        if not executable_path:
+            return ""
+        output = subprocess.check_output(
+            [executable_path, "--version"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=3
+        )
+        return (output or "").strip()
+    except Exception:
+        return ""
+
+
+def _find_chrome_binary() -> str:
+    candidates = [
+        os.environ.get("CHROME_PATH", ""),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _get_chrome_major_version() -> int:
+    chrome_binary = _find_chrome_binary()
+    version_text = _get_binary_version_output(chrome_binary)
+    return _extract_major_version(version_text)
+
+
+def _get_chromedriver_major_version(chromedriver_path: str) -> int:
+    version_text = _get_binary_version_output(chromedriver_path)
+    return _extract_major_version(version_text)
+
+
+def create_driver(headless=False, page_load_strategy: str = "normal"):
     """
     Chrome WebDriverを作成する
     
@@ -85,6 +158,9 @@ def create_driver(headless=False):
         WebDriver: 作成されたWebDriverインスタンス
     """
     try:
+        logging.getLogger("WDM").setLevel(logging.WARNING)
+        logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
+
         # キャンセルチェック（ドライバー作成開始時）
         try:
             from services.area_search import check_cancellation
@@ -94,6 +170,8 @@ def create_driver(headless=False):
         
         # Chromeオプションの設定
         chrome_options = Options()
+        if page_load_strategy in ("normal", "eager", "none"):
+            chrome_options.page_load_strategy = page_load_strategy
         if headless:
             chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
@@ -127,16 +205,25 @@ def create_driver(headless=False):
         
         driver = None
 
-        # ChromeDriverManagerの設定（失敗時はSelenium Managerへフォールバック）
+        # 同梱ドライバ（バージョン一致時のみ）→ Selenium Manager の順で起動
         try:
-            driver_manager = ChromeDriverManager()
-            installed_path = driver_manager.install()
-            executable_path = _resolve_chromedriver_executable(installed_path)
-            service = Service(executable_path=executable_path)
-            logging.info(f"ChromeDriverを使用: {executable_path}")
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            bundled_driver = _find_bundled_chromedriver()
+            if bundled_driver:
+                chrome_major = _get_chrome_major_version()
+                driver_major = _get_chromedriver_major_version(bundled_driver)
+                if chrome_major and driver_major and chrome_major == driver_major:
+                    service = Service(executable_path=bundled_driver)
+                    logging.info(f"同梱ChromeDriverを使用: {bundled_driver}")
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                else:
+                    logging.info(
+                        f"同梱ChromeDriverをスキップ: browser={chrome_major}, driver={driver_major}"
+                    )
+
+            if driver is None:
+                driver = webdriver.Chrome(options=chrome_options)
         except Exception as manager_error:
-            logging.warning(f"webdriver_manager経由の起動に失敗。Selenium Managerへフォールバックします: {str(manager_error)}")
+            logging.warning(f"Chrome起動で例外。Selenium Managerへフォールバックします: {str(manager_error)}")
             driver = webdriver.Chrome(options=chrome_options)
         
         # キャンセルチェック（ドライバー起動直前）
