@@ -147,6 +147,44 @@ def _get_chromedriver_major_version(chromedriver_path: str) -> int:
     return _extract_major_version(version_text)
 
 
+def _use_bundled_driver_by_default() -> bool:
+    """配布互換性のため、同梱ドライバは明示指定時のみ使用する"""
+    env_value = (os.environ.get("USE_BUNDLED_CHROMEDRIVER", "") or "").strip().lower()
+    return env_value in ("1", "true", "yes", "on")
+
+
+def _build_user_agent_for_chrome_compat(chrome_version: str) -> str:
+    major = _extract_major_version(chrome_version) or 120
+    return (
+        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        f"AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
+def _apply_stealth_overrides(driver, browser_version: str = ""):
+    try:
+        ua = _build_user_agent_for_chrome_compat(browser_version)
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {"userAgent": ua, "platform": "Windows"})
+    except Exception:
+        pass
+
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['ja-JP', 'ja', 'en-US'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+"""
+            }
+        )
+    except Exception:
+        pass
+
+
 def create_driver(headless=False, page_load_strategy: str = "normal"):
     """
     Chrome WebDriverを作成する
@@ -173,7 +211,17 @@ def create_driver(headless=False, page_load_strategy: str = "normal"):
         if page_load_strategy in ("normal", "eager", "none"):
             chrome_options.page_load_strategy = page_load_strategy
         if headless:
-            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--headless=new')
+        else:
+            chrome_options.add_argument('--guest')
+            chrome_options.add_argument('--incognito')
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--no-default-browser-check')
+        chrome_options.add_argument('--lang=ja-JP')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--disable-features=SigninIntercept,SignInProfileCreation,ChromeWhatsNewUI')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-client-side-phishing-detection')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
@@ -188,11 +236,15 @@ def create_driver(headless=False, page_load_strategy: str = "normal"):
         chrome_options.add_argument('--ignore-ssl-errors')
         chrome_options.add_argument('--start-maximized')
         chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         
         # 画像を無効化
         prefs = {
             'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_setting_values.images': 2
+            'profile.default_content_setting_values.images': 2,
+            'credentials_enable_service': False,
+            'profile.password_manager_enabled': False
         }
         chrome_options.add_experimental_option('prefs', prefs)
         
@@ -204,27 +256,33 @@ def create_driver(headless=False, page_load_strategy: str = "normal"):
             pass
         
         driver = None
+        driver_source = "selenium-manager"
 
         # 同梱ドライバ（バージョン一致時のみ）→ Selenium Manager の順で起動
         try:
             bundled_driver = _find_bundled_chromedriver()
-            if bundled_driver:
+            if bundled_driver and _use_bundled_driver_by_default():
                 chrome_major = _get_chrome_major_version()
                 driver_major = _get_chromedriver_major_version(bundled_driver)
                 if chrome_major and driver_major and chrome_major == driver_major:
                     service = Service(executable_path=bundled_driver)
                     logging.info(f"同梱ChromeDriverを使用: {bundled_driver}")
                     driver = webdriver.Chrome(service=service, options=chrome_options)
+                    driver_source = "bundled"
                 else:
                     logging.info(
                         f"同梱ChromeDriverをスキップ: browser={chrome_major}, driver={driver_major}"
                     )
+            elif bundled_driver:
+                logging.info("同梱ChromeDriverは未使用（既定: Selenium Manager優先）。必要なら USE_BUNDLED_CHROMEDRIVER=1 を指定")
 
             if driver is None:
                 driver = webdriver.Chrome(options=chrome_options)
+                driver_source = "selenium-manager"
         except Exception as manager_error:
             logging.warning(f"Chrome起動で例外。Selenium Managerへフォールバックします: {str(manager_error)}")
             driver = webdriver.Chrome(options=chrome_options)
+            driver_source = "selenium-manager-fallback"
         
         # キャンセルチェック（ドライバー起動直前）
         try:
@@ -243,6 +301,18 @@ def create_driver(headless=False, page_load_strategy: str = "normal"):
         # タイムアウト設定
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(10)
+
+        try:
+            capabilities = driver.capabilities or {}
+            browser_version = capabilities.get("browserVersion")
+            chrome_info = capabilities.get("chrome") or {}
+            chromedriver_version = chrome_info.get("chromedriverVersion")
+            _apply_stealth_overrides(driver, browser_version or "")
+            logging.info(
+                f"Chrome起動情報: source={driver_source}, browserVersion={browser_version}, chromedriverVersion={chromedriver_version}"
+            )
+        except Exception:
+            pass
         
         return driver
         
@@ -259,6 +329,7 @@ def load_browser_settings():
     """
     default_settings = {
         "headless": True,
+        "mapfan_headless": True,
         "page_load_timeout": 30,
         "script_timeout": 30,
         "disable_images": True,

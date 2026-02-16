@@ -4803,6 +4803,7 @@ class CancellationError(Exception):
                 },
                 'browser_settings': {
                     'headless': True,
+                    'mapfan_headless': True,
                     'disable_images': True,
                     'show_popup': True,
                     'auto_close': True,

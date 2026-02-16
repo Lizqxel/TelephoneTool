@@ -85,6 +85,7 @@ ND：{nd}
         # デフォルトのブラウザ設定
         self.default_browser_settings = {
             "headless": False,
+            "mapfan_headless": True,
             "disable_images": True,
             "enable_screenshots": False,
             "show_popup": True,
@@ -350,6 +351,11 @@ ND：{nd}
         self.headless_checkbox.setChecked(self.current_browser_settings.get("headless", False))
         self.headless_checkbox.setToolTip("有効にするとブラウザが画面に表示されなくなり、処理が軽くなります")
         browser_layout.addWidget(self.headless_checkbox)
+
+        self.mapfan_headless_checkbox = QCheckBox("MapFan検索をヘッドレスで実行（営コメ作成時）")
+        self.mapfan_headless_checkbox.setChecked(self.current_browser_settings.get("mapfan_headless", True))
+        self.mapfan_headless_checkbox.setToolTip("有効にするとMapFanの自動操作画面を表示せずに実行します")
+        browser_layout.addWidget(self.mapfan_headless_checkbox)
         
         # 画像読み込み無効化設定
         self.disable_images_checkbox = QCheckBox("画像読み込みを無効化（高速化）")
@@ -532,6 +538,7 @@ ND：{nd}
     def reset_browser_settings(self):
         """ブラウザ設定をデフォルトに戻す"""
         self.headless_checkbox.setChecked(self.default_browser_settings["headless"])
+        self.mapfan_headless_checkbox.setChecked(self.default_browser_settings["mapfan_headless"])
         self.disable_images_checkbox.setChecked(self.default_browser_settings["disable_images"])
         # enable_screenshots をデフォルトに戻す
         self.screenshots_checkbox.setChecked(self.default_browser_settings.get("enable_screenshots", True))
@@ -600,6 +607,7 @@ ND：{nd}
                     
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
+                    self.mapfan_headless_checkbox.setChecked(browser_settings.get("mapfan_headless", True))
                     self.disable_images_checkbox.setChecked(browser_settings.get("disable_images", True))
                     self.screenshots_checkbox.setChecked(browser_settings.get("enable_screenshots", True))
                     self.popup_checkbox.setChecked(browser_settings.get("show_popup", True))
@@ -664,6 +672,7 @@ ND：{nd}
             # ブラウザ設定を取得
             browser_settings = {
                 "headless": self.headless_checkbox.isChecked(),
+                "mapfan_headless": self.mapfan_headless_checkbox.isChecked(),
                 "disable_images": self.disable_images_checkbox.isChecked(),
                 "enable_screenshots": self.screenshots_checkbox.isChecked(),
                 "show_popup": self.popup_checkbox.isChecked(),
@@ -807,6 +816,7 @@ ND：{nd}
         """現在の設定を取得する"""
         browser_settings = {
             "headless": self.headless_checkbox.isChecked(),
+            "mapfan_headless": self.mapfan_headless_checkbox.isChecked(),
             "disable_images": self.disable_images_checkbox.isChecked(),
             "enable_screenshots": self.screenshots_checkbox.isChecked(),
             "show_popup": self.popup_checkbox.isChecked(),

@@ -7,6 +7,9 @@ MapFan検索サービス
 
 import logging
 import time
+import threading
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from selenium.common.exceptions import TimeoutException
@@ -87,8 +90,35 @@ class MapfanService:
         self.timeout = timeout
         self.debug = debug
         self.detailed_logging = detailed_logging
+        self._cancel_event: Optional[threading.Event] = None
+        self._active_driver = None
 
-    def get_detail_url_from_address(self, address: str, auto_close: Optional[bool] = None) -> Optional[str]:
+    def request_cancel(self) -> None:
+        try:
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+            if self._active_driver is not None:
+                try:
+                    self._active_driver.quit()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _is_cancelled(self) -> bool:
+        return bool(self._cancel_event is not None and self._cancel_event.is_set())
+
+    def _check_cancel(self) -> None:
+        if self._is_cancelled():
+            raise TimeoutException("MapFan処理がキャンセルされました")
+
+    def get_detail_url_from_address(
+        self,
+        address: str,
+        auto_close: Optional[bool] = None,
+        force_headless: Optional[bool] = None,
+        cancel_event: Optional[threading.Event] = None
+    ) -> Optional[str]:
         """
         住所検索から詳細画面へ遷移し、遷移先URLを取得します。
 
@@ -106,24 +136,50 @@ class MapfanService:
 
         settings = load_browser_settings()
         headless = settings.get("headless", True)
-        if self.debug:
+        if force_headless is not None:
+            headless = bool(force_headless)
+        elif self.debug:
             headless = False
 
         if auto_close is None:
             auto_close = settings.get("auto_close", False)
 
+        self._cancel_event = cancel_event
         driver = None
         try:
+            self._check_cancel()
             driver = create_driver(headless=headless, page_load_strategy="eager")
+            self._active_driver = driver
             driver.implicitly_wait(0)
             wait = WebDriverWait(driver, self.timeout)
 
-            driver.get(self.base_url)
-            WebDriverWait(driver, 12).until(
-                lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
-            )
-            logging.info(f"MapFanを表示しました: title={driver.title}")
+            navigation_urls = [self.base_url]
+            if headless and self.base_url != "https://mapfan.com/":
+                navigation_urls.append("https://mapfan.com/")
 
+            page_title = ""
+            for index, target_url in enumerate(navigation_urls, start=1):
+                self._check_cancel()
+                driver.get(target_url)
+                WebDriverWait(driver, 12).until(
+                    lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+                )
+
+                page_title = (driver.title or "").strip()
+                logging.info(f"MapFanを表示しました: title={page_title}, url={target_url}")
+
+                if not self._is_mapfan_block_page(driver, page_title):
+                    break
+
+                self._log_block_page_diagnostics(driver, phase=f"initial-load-{index}")
+                if index < len(navigation_urls):
+                    logging.warning("MapFanブロックページを検出。ヘッドレスのまま別URLで再試行します")
+                    continue
+
+                logging.error("MapFanのブロック/エラーページを検出しました（ヘッドレス実行のまま終了）")
+                return None
+
+            self._check_cancel()
             self._input_address_and_search(driver, wait, normalized_address)
             previous_url = driver.current_url
 
@@ -144,12 +200,20 @@ class MapfanService:
             return detail_url
 
         except TimeoutException:
-            logging.error("MapFan操作中にタイムアウトが発生しました")
+            if self._is_cancelled():
+                logging.info("MapFan処理をキャンセルしました")
+            else:
+                logging.error("MapFan操作中にタイムアウトが発生しました")
+            if driver is not None:
+                self._log_block_page_diagnostics(driver, phase="timeout")
             return None
         except Exception as e:
             logging.error(f"MapFan詳細URL取得中にエラーが発生しました: {str(e)}")
+            if driver is not None:
+                self._log_block_page_diagnostics(driver, phase="exception")
             return None
         finally:
+            self._active_driver = None
             if driver is not None and auto_close:
                 try:
                     driver.quit()
@@ -157,6 +221,7 @@ class MapfanService:
                     logging.warning(f"MapFan用WebDriver終了時にエラーが発生しました: {str(e)}")
 
     def _input_address_and_search(self, driver: WebDriver, wait: WebDriverWait, address: str) -> None:
+        self._check_cancel()
         self._log_search_inputs(driver, "左検索ボタン押下前")
         self._dismiss_blocking_overlay(driver)
 
@@ -176,6 +241,7 @@ class MapfanService:
 
         value_after_input = ""
         for index in range(5):
+            self._check_cancel()
             try:
                 self._dismiss_blocking_overlay(driver)
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
@@ -282,6 +348,7 @@ class MapfanService:
     def _find_visible_search_input_after_left_click(self, driver: WebDriver):
         end_time = time.time() + 10
         while time.time() < end_time:
+            self._check_cancel()
             try:
                 candidates = driver.find_elements(By.XPATH, "//input[@type='search' or @type='text']")
                 best = None
@@ -675,6 +742,7 @@ class MapfanService:
             # まずは少し待って結果行の描画を待機
             end_time = time.time() + 2.5
             while time.time() < end_time:
+                self._check_cancel()
                 try:
                     candidate = self._find_left_panel_info_button(driver, key)
 
@@ -733,6 +801,7 @@ class MapfanService:
     def _wait_for_search_result(self, driver: WebDriver, wait: WebDriverWait) -> None:
         end_time = time.time() + 12
         while time.time() < end_time:
+            self._check_cancel()
             try:
                 ready = driver.execute_script(
                     "if (document.querySelector(\"button[aria-label*='詳細'], button[title*='詳細']\")) return true;"
@@ -770,6 +839,69 @@ class MapfanService:
             time.sleep(0.2)
         except Exception:
             pass
+
+    def _is_mapfan_block_page(self, driver: WebDriver, title: str = "") -> bool:
+        try:
+            normalized_title = (title or "").strip().lower()
+            if "request could not be satisfied" in normalized_title:
+                return True
+            if normalized_title == "error":
+                return True
+
+            body_text = (driver.find_element(By.TAG_NAME, "body").text or "").lower()
+            if "the request could not be satisfied" in body_text:
+                return True
+            if "generated by cloudfront" in body_text:
+                return True
+            if "access denied" in body_text and "cloudfront" in body_text:
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _log_block_page_diagnostics(self, driver: WebDriver, phase: str = "") -> None:
+        try:
+            now = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            output_dir = Path("logs") / "mapfan_debug"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            safe_phase = (phase or "unknown").replace(" ", "_")
+            base_name = f"mapfan_{safe_phase}_{now}"
+
+            current_url = ""
+            title = ""
+            body_text = ""
+            html = ""
+            try:
+                current_url = driver.current_url or ""
+                title = driver.title or ""
+                body_text = (driver.find_element(By.TAG_NAME, "body").text or "")[:500]
+                html = driver.page_source or ""
+            except Exception:
+                pass
+
+            html_path = output_dir / f"{base_name}.html"
+            png_path = output_dir / f"{base_name}.png"
+
+            if html:
+                try:
+                    html_path.write_text(html, encoding="utf-8")
+                except Exception:
+                    pass
+
+            try:
+                driver.save_screenshot(str(png_path))
+            except Exception:
+                pass
+
+            logging.warning(
+                f"[MapFan診断] phase={phase}, current_url={current_url}, title={title}, body_head={body_text}"
+            )
+            logging.warning(
+                f"[MapFan診断] artifacts html={html_path}, screenshot={png_path}"
+            )
+        except Exception as e:
+            logging.warning(f"MapFan診断ログ保存に失敗: {e}")
 
     def _find_first_clickable(
         self,
@@ -812,7 +944,18 @@ class MapfanService:
         ActionChains(driver).move_to_element(element).click().perform()
 
 
-def get_mapfan_detail_url(address: str, debug: bool = True, auto_close: Optional[bool] = None) -> Optional[str]:
+def get_mapfan_detail_url(
+    address: str,
+    debug: bool = True,
+    auto_close: Optional[bool] = None,
+    force_headless: Optional[bool] = None,
+    cancel_event: Optional[threading.Event] = None
+) -> Optional[str]:
     """MapFan詳細URL取得の簡易エントリーポイント"""
     service = MapfanService(debug=debug)
-    return service.get_detail_url_from_address(address=address, auto_close=auto_close)
+    return service.get_detail_url_from_address(
+        address=address,
+        auto_close=auto_close,
+        force_headless=force_headless,
+        cancel_event=cancel_event
+    )
