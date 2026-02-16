@@ -10,6 +10,9 @@ import json
 import os
 import time
 import sys
+import re
+import subprocess
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -17,7 +20,172 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 
 
-def create_driver(headless=False):
+def _resolve_chromedriver_executable(installed_path: str) -> str:
+    """
+    webdriver_managerが返したパスから実行可能なchromedriver.exeを解決する
+
+    Args:
+        installed_path (str): webdriver_managerが返すパス
+
+    Returns:
+        str: chromedriver.exeの実パス
+    """
+    try:
+        if installed_path and installed_path.lower().endswith("chromedriver.exe") and os.path.exists(installed_path):
+            return installed_path
+
+        path_obj = Path(installed_path)
+        search_roots = []
+
+        if path_obj.exists():
+            if path_obj.is_dir():
+                search_roots.append(path_obj)
+            else:
+                search_roots.append(path_obj.parent)
+
+        # webdriver_managerのキャッシュ構造が変わった場合に備えて親階層も探索
+        for root in list(search_roots):
+            search_roots.append(root.parent)
+            search_roots.append(root.parent.parent)
+
+        checked = set()
+        for root in search_roots:
+            try:
+                root = root.resolve()
+            except Exception:
+                continue
+
+            if str(root) in checked or not root.exists() or not root.is_dir():
+                continue
+            checked.add(str(root))
+
+            direct_candidate = root / "chromedriver.exe"
+            if direct_candidate.exists():
+                return str(direct_candidate)
+
+            recursive_candidates = list(root.rglob("chromedriver.exe"))
+            if recursive_candidates:
+                # より深い階層の候補より、パスの短いものを優先
+                recursive_candidates.sort(key=lambda p: len(str(p)))
+                return str(recursive_candidates[0])
+
+        raise FileNotFoundError(f"chromedriver.exeが見つかりません: {installed_path}")
+
+    except Exception as e:
+        logging.warning(f"chromedriver.exeの解決に失敗: {str(e)}")
+        raise
+
+
+def _find_bundled_chromedriver() -> str:
+    """同梱済みのchromedriver.exeを探索して返す"""
+    candidates = []
+    try:
+        if getattr(sys, "frozen", False):
+            base_dir = Path(getattr(sys, "_MEIPASS", Path.cwd()))
+        else:
+            base_dir = Path(__file__).resolve().parent.parent
+
+        candidates.extend([
+            base_dir / "drivers" / "chromedriver-win32" / "chromedriver.exe",
+            base_dir / "chromedriver.exe",
+        ])
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return str(candidate)
+    except Exception:
+        pass
+
+    return ""
+
+
+def _extract_major_version(version_text: str):
+    try:
+        match = re.search(r"(\d+)\.", version_text or "")
+        if match:
+            return int(match.group(1))
+    except Exception:
+        pass
+    return None
+
+
+def _get_binary_version_output(executable_path: str) -> str:
+    try:
+        if not executable_path:
+            return ""
+        output = subprocess.check_output(
+            [executable_path, "--version"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=3
+        )
+        return (output or "").strip()
+    except Exception:
+        return ""
+
+
+def _find_chrome_binary() -> str:
+    candidates = [
+        os.environ.get("CHROME_PATH", ""),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _get_chrome_major_version() -> int:
+    chrome_binary = _find_chrome_binary()
+    version_text = _get_binary_version_output(chrome_binary)
+    return _extract_major_version(version_text)
+
+
+def _get_chromedriver_major_version(chromedriver_path: str) -> int:
+    version_text = _get_binary_version_output(chromedriver_path)
+    return _extract_major_version(version_text)
+
+
+def _use_bundled_driver_by_default() -> bool:
+    """配布互換性のため、同梱ドライバは明示指定時のみ使用する"""
+    env_value = (os.environ.get("USE_BUNDLED_CHROMEDRIVER", "") or "").strip().lower()
+    return env_value in ("1", "true", "yes", "on")
+
+
+def _build_user_agent_for_chrome_compat(chrome_version: str) -> str:
+    major = _extract_major_version(chrome_version) or 120
+    return (
+        f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        f"AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
+def _apply_stealth_overrides(driver, browser_version: str = ""):
+    try:
+        ua = _build_user_agent_for_chrome_compat(browser_version)
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {"userAgent": ua, "platform": "Windows"})
+    except Exception:
+        pass
+
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['ja-JP', 'ja', 'en-US'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+"""
+            }
+        )
+    except Exception:
+        pass
+
+
+def create_driver(headless=False, page_load_strategy: str = "normal"):
     """
     Chrome WebDriverを作成する
     
@@ -28,6 +196,9 @@ def create_driver(headless=False):
         WebDriver: 作成されたWebDriverインスタンス
     """
     try:
+        logging.getLogger("WDM").setLevel(logging.WARNING)
+        logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
+
         # キャンセルチェック（ドライバー作成開始時）
         try:
             from services.area_search import check_cancellation
@@ -37,8 +208,20 @@ def create_driver(headless=False):
         
         # Chromeオプションの設定
         chrome_options = Options()
+        if page_load_strategy in ("normal", "eager", "none"):
+            chrome_options.page_load_strategy = page_load_strategy
         if headless:
-            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--headless=new')
+        else:
+            chrome_options.add_argument('--guest')
+            chrome_options.add_argument('--incognito')
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--no-default-browser-check')
+        chrome_options.add_argument('--lang=ja-JP')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--disable-features=SigninIntercept,SignInProfileCreation,ChromeWhatsNewUI')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-client-side-phishing-detection')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
@@ -53,11 +236,15 @@ def create_driver(headless=False):
         chrome_options.add_argument('--ignore-ssl-errors')
         chrome_options.add_argument('--start-maximized')
         chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         
         # 画像を無効化
         prefs = {
             'profile.managed_default_content_settings.images': 2,
-            'profile.default_content_setting_values.images': 2
+            'profile.default_content_setting_values.images': 2,
+            'credentials_enable_service': False,
+            'profile.password_manager_enabled': False
         }
         chrome_options.add_experimental_option('prefs', prefs)
         
@@ -68,9 +255,34 @@ def create_driver(headless=False):
         except (ImportError, NameError):
             pass
         
-        # ChromeDriverManagerの設定
-        driver_manager = ChromeDriverManager()
-        service = Service(driver_manager.install())
+        driver = None
+        driver_source = "selenium-manager"
+
+        # 同梱ドライバ（バージョン一致時のみ）→ Selenium Manager の順で起動
+        try:
+            bundled_driver = _find_bundled_chromedriver()
+            if bundled_driver and _use_bundled_driver_by_default():
+                chrome_major = _get_chrome_major_version()
+                driver_major = _get_chromedriver_major_version(bundled_driver)
+                if chrome_major and driver_major and chrome_major == driver_major:
+                    service = Service(executable_path=bundled_driver)
+                    logging.info(f"同梱ChromeDriverを使用: {bundled_driver}")
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                    driver_source = "bundled"
+                else:
+                    logging.info(
+                        f"同梱ChromeDriverをスキップ: browser={chrome_major}, driver={driver_major}"
+                    )
+            elif bundled_driver:
+                logging.info("同梱ChromeDriverは未使用（既定: Selenium Manager優先）。必要なら USE_BUNDLED_CHROMEDRIVER=1 を指定")
+
+            if driver is None:
+                driver = webdriver.Chrome(options=chrome_options)
+                driver_source = "selenium-manager"
+        except Exception as manager_error:
+            logging.warning(f"Chrome起動で例外。Selenium Managerへフォールバックします: {str(manager_error)}")
+            driver = webdriver.Chrome(options=chrome_options)
+            driver_source = "selenium-manager-fallback"
         
         # キャンセルチェック（ドライバー起動直前）
         try:
@@ -78,9 +290,6 @@ def create_driver(headless=False):
             check_cancellation()
         except (ImportError, NameError):
             pass
-        
-        # WebDriverの作成
-        driver = webdriver.Chrome(service=service, options=chrome_options)
         
         # キャンセルチェック（ドライバー作成直後）
         try:
@@ -92,6 +301,18 @@ def create_driver(headless=False):
         # タイムアウト設定
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(10)
+
+        try:
+            capabilities = driver.capabilities or {}
+            browser_version = capabilities.get("browserVersion")
+            chrome_info = capabilities.get("chrome") or {}
+            chromedriver_version = chrome_info.get("chromedriverVersion")
+            _apply_stealth_overrides(driver, browser_version or "")
+            logging.info(
+                f"Chrome起動情報: source={driver_source}, browserVersion={browser_version}, chromedriverVersion={chromedriver_version}"
+            )
+        except Exception:
+            pass
         
         return driver
         
@@ -108,6 +329,7 @@ def load_browser_settings():
     """
     default_settings = {
         "headless": True,
+        "mapfan_headless": True,
         "page_load_timeout": 30,
         "script_timeout": 30,
         "disable_images": True,

@@ -10,14 +10,16 @@ import logging
 import json
 import os
 import re
-from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar, QListView
-from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
+import threading
+from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar, QListView, QDialog, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QEventLoop
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QMessageBox, QApplication
 
 from ui.settings_dialog import SettingsDialog
 from services import area_search
 from services import oneclick
+from services.mapfan_service import MapfanService
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
@@ -102,8 +104,138 @@ class ServiceAreaSearchWorker(QThread):
             logging.error(f"ServiceAreaSearchWorkerの終了中にエラーが発生: {e}")
 
 
+class MapfanUrlWorker(QThread):
+    finished = Signal(object, bool)
+
+    def __init__(self, address: str, mapfan_headless: bool, auto_close: bool = False):
+        super().__init__()
+        self.address = address
+        self.mapfan_headless = mapfan_headless
+        self.auto_close = auto_close
+        self.cancel_event = threading.Event()
+        self._service: MapfanService | None = None
+
+    def cancel(self):
+        self.cancel_event.set()
+        try:
+            if self._service is not None:
+                self._service.request_cancel()
+        except Exception:
+            pass
+
+    def run(self):
+        try:
+            self._service = MapfanService(debug=not self.mapfan_headless)
+            url = self._service.get_detail_url_from_address(
+                address=self.address,
+                auto_close=self.auto_close,
+                force_headless=self.mapfan_headless,
+                cancel_event=self.cancel_event,
+            )
+            self.finished.emit(url, self.cancel_event.is_set())
+        except Exception as e:
+            logging.error(f"MapFanワーカーで例外が発生: {e}")
+            self.finished.emit(None, self.cancel_event.is_set())
+        finally:
+            self._service = None
+
+
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
+
+    def get_mapfan_url_for_current_address(self):
+        """現在の住所入力からMapFan詳細URLを取得する"""
+        try:
+            if not hasattr(self, 'address_input'):
+                return None
+
+            address = self.address_input.text().strip()
+            if not address:
+                logging.info("MapFan検索をスキップ: 住所情報が未入力です")
+                return None
+
+            if hasattr(self, 'statusBar'):
+                self.statusBar().showMessage("MapFanで住所検索中...", 2000)
+
+            browser_settings = {}
+            if hasattr(self, 'settings') and isinstance(self.settings, dict):
+                browser_settings = self.settings.get('browser_settings', {}) or {}
+
+            mapfan_headless = bool(browser_settings.get('mapfan_headless', True))
+            mapfan_url = self._get_mapfan_url_with_progress_dialog(
+                address=address,
+                mapfan_headless=mapfan_headless,
+                auto_close=False,
+            )
+            if mapfan_url:
+                logging.info(f"MapFan詳細URLを取得しました: {mapfan_url}")
+                return mapfan_url
+
+            logging.warning("MapFan詳細URLを取得できませんでした")
+            return None
+        except Exception as e:
+            logging.error(f"MapFan詳細URL取得中にエラー: {str(e)}")
+            return None
+
+    def _get_mapfan_url_with_progress_dialog(self, address: str, mapfan_headless: bool, auto_close: bool = False):
+        worker = MapfanUrlWorker(address=address, mapfan_headless=mapfan_headless, auto_close=auto_close)
+        self._mapfan_worker = worker
+
+        progress_dialog = QDialog(self)
+        progress_dialog.setWindowTitle("処理中")
+        progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress_dialog.setFixedSize(280, 110)
+
+        layout = QVBoxLayout(progress_dialog)
+        label = QLabel("営コメ作成中...")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+        cancel_button = QPushButton("キャンセル")
+        layout.addWidget(cancel_button)
+
+        event_loop = QEventLoop(progress_dialog)
+        result = {"url": None, "cancelled": False, "finished": False}
+
+        def on_worker_finished(url, cancelled):
+            result["finished"] = True
+            result["url"] = url
+            result["cancelled"] = bool(cancelled)
+            if progress_dialog.isVisible():
+                progress_dialog.close()
+            if event_loop.isRunning():
+                event_loop.quit()
+            self._mapfan_worker = None
+            worker.deleteLater()
+
+        def on_cancel_clicked():
+            result["cancelled"] = True
+            label.setText("キャンセル中...")
+            cancel_button.setEnabled(False)
+            worker.cancel()
+            if progress_dialog.isVisible():
+                progress_dialog.close()
+            if event_loop.isRunning():
+                event_loop.quit()
+
+        worker.finished.connect(on_worker_finished)
+        cancel_button.clicked.connect(on_cancel_clicked)
+
+        def on_dialog_rejected():
+            if not result["finished"] and not result["cancelled"]:
+                on_cancel_clicked()
+
+        progress_dialog.rejected.connect(on_dialog_rejected)
+
+        worker.start()
+        progress_dialog.show()
+        event_loop.exec()
+
+        if result["cancelled"]:
+            logging.info("MapFan検索をキャンセルしました")
+            return None
+
+        return result["url"]
 
     def _insert_call_preference_line(self, formatted_text, call_preference_text):
         lines = formatted_text.splitlines()
@@ -607,6 +739,11 @@ ND：{nd}
             maps_url = self.get_google_maps_url()
             if maps_url:
                 formatted_text += f"\n\nGoogleマップ URL: {maps_url}"
+
+            # MapFan詳細URLを追加
+            mapfan_url = self.get_mapfan_url_for_current_address()
+            if mapfan_url:
+                formatted_text += f"\n\nMapFan URL: {mapfan_url}"
             
             # プレビューに表示
             self.preview_text.setText(formatted_text)
