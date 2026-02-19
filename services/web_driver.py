@@ -333,6 +333,7 @@ def load_browser_settings():
     default_settings = {
         "headless": True,
         "mapfan_headless": True,
+        "mapfan_direct_url": True,
         "page_load_timeout": 30,
         "script_timeout": 30,
         "disable_images": True,
@@ -350,6 +351,9 @@ def load_browser_settings():
                 # auto_closeが設定に含まれていない場合はデフォルト値を使用
                 if "auto_close" not in browser_settings:
                     browser_settings["auto_close"] = default_settings["auto_close"]
+
+                if "mapfan_direct_url" not in browser_settings:
+                    browser_settings["mapfan_direct_url"] = default_settings["mapfan_direct_url"]
                     
                 return browser_settings
     except Exception as e:
