@@ -302,7 +302,7 @@ ND：{nd}
 
 備考：名義人の{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
             corporate_default_template = """{management_id}
 
@@ -339,7 +339,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
             default_templates = {
                 'simple': simple_default_template,
