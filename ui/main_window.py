@@ -147,14 +147,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     class _TextChangeCommand(QUndoCommand):
         """テキスト変更用のUndoコマンド"""
-        def __init__(self, widget, old_text, new_text, set_flag_callback, parent=None):
+        def __init__(self, widget, old_text, new_text, set_flag_callback, old_cursor_pos=None, new_cursor_pos=None, parent=None):
             super().__init__(parent)
             self.widget = widget
             self.old_text = old_text
             self.new_text = new_text
             self.set_flag_callback = set_flag_callback
+            self.old_cursor_pos = old_cursor_pos
+            self.new_cursor_pos = new_cursor_pos
 
-        def _apply_text(self, text):
+        def _apply_text(self, text, cursor_pos=None):
             if self.widget is None:
                 return
             try:
@@ -166,9 +168,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     pass
                 from PySide6.QtWidgets import QLineEdit, QTextEdit
                 if isinstance(self.widget, QLineEdit):
-                    self.widget.setText(text)
+                    if self.widget.text() != text:
+                        self.widget.setText(text)
+                    if cursor_pos is not None:
+                        self.widget.setCursorPosition(max(0, min(cursor_pos, len(self.widget.text()))))
                 elif isinstance(self.widget, QTextEdit):
-                    self.widget.setPlainText(text)
+                    if self.widget.toPlainText() != text:
+                        self.widget.setPlainText(text)
                 try:
                     self.widget.setFocus()
                 except Exception:
@@ -179,14 +185,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         def undo(self):
             self.set_flag_callback(True)
             try:
-                self._apply_text(self.old_text)
+                self._apply_text(self.old_text, self.old_cursor_pos)
             finally:
                 self.set_flag_callback(False)
 
         def redo(self):
             self.set_flag_callback(True)
             try:
-                self._apply_text(self.new_text)
+                self._apply_text(self.new_text, self.new_cursor_pos)
             finally:
                 self.set_flag_callback(False)
     
@@ -1568,7 +1574,23 @@ ND：{nd}
         old_text = self._last_text_map.get(widget, "")
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                new_cursor_pos = widget.cursorPosition()
+                old_cursor_pos = min(new_cursor_pos, len(old_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 
@@ -1579,7 +1601,23 @@ ND：{nd}
         old_text = self._last_text_map.get(widget, "")
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                new_cursor_pos = widget.cursorPosition()
+                old_cursor_pos = min(new_cursor_pos, len(old_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 
@@ -1595,7 +1633,23 @@ ND：{nd}
         old_text = self._get_widget_text(widget)
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                old_cursor_pos = widget.cursorPosition()
+                new_cursor_pos = min(old_cursor_pos, len(new_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 

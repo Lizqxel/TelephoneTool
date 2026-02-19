@@ -143,6 +143,40 @@ class MapfanUrlWorker(QThread):
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
 
+    def _cursor_pos_for_digit_index(self, text, digit_index):
+        """指定した数字インデックスに対応するカーソル位置を返す"""
+        if digit_index <= 0:
+            return 0
+
+        counted_digits = 0
+        for index, char in enumerate(text):
+            if char.isdigit():
+                counted_digits += 1
+                if counted_digits >= digit_index:
+                    return index + 1
+
+        return len(text)
+
+    def _apply_text_preserving_cursor(self, line_edit, new_text, preserve_by_digits=False):
+        """テキスト更新時にカーソル位置を維持する"""
+        if not line_edit:
+            return
+
+        current_text = line_edit.text()
+        if new_text == current_text:
+            return
+
+        current_cursor = line_edit.cursorPosition()
+
+        if preserve_by_digits:
+            digit_index = len(re.sub(r'\D', '', current_text[:current_cursor]))
+            new_cursor = self._cursor_pos_for_digit_index(new_text, digit_index)
+        else:
+            new_cursor = min(current_cursor, len(new_text))
+
+        line_edit.setText(new_text)
+        line_edit.setCursorPosition(new_cursor)
+
     def get_mapfan_url_for_current_address(self):
         """現在の住所入力からMapFan詳細URLを取得する"""
         try:
@@ -423,8 +457,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_phone_number(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def format_phone_number_without_hyphen(self):
         """電話番号の自動フォーマット処理（ハイフンなし）"""
@@ -432,8 +465,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_phone_number_without_hyphen(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def format_postal_code(self):
         """郵便番号の自動フォーマット処理"""
@@ -441,8 +473,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_postal_code(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def convert_to_half_width(self):
         """全角文字を半角に変換する処理"""
@@ -450,8 +481,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             converted_text = convert_to_half_width(current_text)
-            if converted_text != current_text:
-                sender.setText(converted_text)
+            self._apply_text_preserving_cursor(sender, converted_text)
     
     def update_year_combo(self, text):
         """元号に応じて年の選択肢を更新"""
