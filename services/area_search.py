@@ -476,34 +476,83 @@ def find_best_address_match(input_address, candidates):
 
 def handle_building_selection(driver, progress_callback=None, show_popup=True):
     """
-    建物選択モーダルの検出と集合住宅判定
-    モーダルが表示されない場合は正常に処理を続行
-    集合住宅と判定した場合はスクリーンショットを保存し、判定結果を返す
+    建物選択モーダルの検出と建物未指定ボタン選択
+    モーダルが表示された場合は優先順位に従って自動選択し、処理を続行する
     Args:
         driver: Selenium WebDriverインスタンス
         progress_callback: 進捗コールバック関数（任意）
         show_popup: ポップアップ表示フラグ
     Returns:
-        dict or None: 集合住宅判定時は判定結果辞書、それ以外はNone
+        dict or None: 基本はNone（処理継続）。選択不能時のみ集合住宅判定結果を返す
     """
     try:
         # 建物選択モーダルが表示されているか確認（短い待機時間で）
         modal = WebDriverWait(driver, 3).until(
             EC.visibility_of_element_located((By.ID, "buildingNameSelectModal"))
         )
-        
+
         if not modal.is_displayed():
             logging.info("建物選択モーダルは表示されていません - 処理を続行します")
             return None
-        
-        logging.info("建物選択モーダルが表示されました（集合住宅判定）")
+
+        logging.info("建物選択モーダルが表示されました（建物未指定で継続を試行）")
         if progress_callback:
-            progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
-        # スクリーンショットを保存
+            progress_callback("建物選択モーダルを処理中...")
+
+        def _find_clickable_by_text(candidates):
+            for text in candidates:
+                xpath = (
+                    "//*[@id='buildingNameSelectModal']"
+                    "//*[self::a or self::button]"
+                    f"[contains(normalize-space(.), '{text}')]"
+                )
+                try:
+                    element = WebDriverWait(driver, 1).until(
+                        EC.element_to_be_clickable((By.XPATH, xpath))
+                    )
+                    return element, text
+                except Exception:
+                    continue
+            return None, None
+
+        primary_labels = ["建物を選択しない", "建物名を選択しない", "建物名を入力しない"]
+        secondary_labels = ["該当する建物名がない", "該当する建物がない", "建物名が見つからない"]
+
+        target_button, selected_label = _find_clickable_by_text(primary_labels)
+        if target_button is None:
+            target_button, selected_label = _find_clickable_by_text(secondary_labels)
+
+        if target_button is not None:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
+            except Exception:
+                pass
+
+            try:
+                target_button.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", target_button)
+
+            logging.info(f"建物選択モーダルで「{selected_label}」を選択しました")
+            if progress_callback:
+                progress_callback(f"建物選択モーダル: 「{selected_label}」を選択")
+
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.ID, "buildingNameSelectModal"))
+                )
+            except TimeoutException:
+                logging.warning("建物選択モーダルが閉じるまでの待機でタイムアウトしましたが処理を続行します")
+
+            return None
+
+        logging.warning("建物選択モーダルに優先ボタンが見つからなかったため集合住宅判定にフォールバックします")
+        if progress_callback:
+            progress_callback("建物選択候補が見つからないため集合住宅判定にフォールバックします")
+
         screenshot_path = f"apartment_detected.png"
         take_screenshot_if_enabled(driver, screenshot_path)
         logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
-        # 判定結果を返す
         return {
             "status": "apartment",
             "message": "集合住宅（アパート・マンション等）",
@@ -520,7 +569,7 @@ def handle_building_selection(driver, progress_callback=None, show_popup=True):
         return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
-        driver.save_screenshot("debug_building_modal_error.png")
+        take_screenshot_if_enabled(driver, "debug_building_modal_error.png")
         raise
 
 def create_driver(headless=False):
