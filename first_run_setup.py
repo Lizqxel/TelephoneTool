@@ -58,6 +58,8 @@ def _masked_input(prompt: str) -> Optional[str]:
 def _default_settings() -> Dict[str, Any]:
     """転記機能以外のデフォルト設定を返す（既存仕様を変更しない）。"""
     default_format = (
+        "{management_id}\n"
+        "\n"
         "対応者（お客様の名前）：{operator}\n"
         "工事希望日\n"
         "★出やすい時間帯：{available_time} \n"
@@ -90,6 +92,8 @@ def _default_settings() -> Dict[str, Any]:
         "案内料金：3650円\n"
     )
     return {
+        "format_template_simple": default_format,
+        "format_template_corporate": default_format,
         "format_template": default_format,
         "font_size": 9,
         "delay_seconds": 0,

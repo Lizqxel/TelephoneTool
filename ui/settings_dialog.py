@@ -41,8 +41,9 @@ class SettingsDialog(QDialog):
         
         logging.info(f"設定ファイルのパス: {self.settings_file}")
         
-        # デフォルトのフォーマットテンプレート
-        self.default_format = """対応者（お客様の名前）：{operator}
+        self.default_format_simple = """{management_id}
+
+対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time}
 ★電話取次：アナログ→光電話
@@ -75,6 +76,51 @@ ND：{nd}
 備考：{relationship}
 お客様が今使っている回線：アナログ
 案内料金：2500円"""
+
+        self.default_format_corporate = """{management_id}
+
+★前確希望：{call_preference}
+★対応者（お客様の名前）：{operator}
+★フリガナ：{furigana}
+★生年月日：{birth_date}
+★携帯：{mobile}
+工事希望日
+出やすい時間帯：{available_time}
+電話取次：アナログ→光電話
+電話OP：
+無線
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円"""
+
+        default_mode = getattr(parent, 'current_mode', 'simple') if parent else 'simple'
+        self.default_format = self.default_format_corporate if default_mode == 'corporate' else self.default_format_simple
+        self.mode_templates = {
+            'simple': self.default_format_simple,
+            'corporate': self.default_format_corporate
+        }
+        self._active_template_mode = default_mode if default_mode in ('simple', 'corporate') else 'simple'
 
         # デフォルトのフォントサイズ
         self.default_font_size = 9
@@ -465,9 +511,9 @@ ND：{nd}
         # 説明ラベル
         description = QLabel("CTIフォーマットのテンプレートを編集できます。\n"
                             "以下のプレースホルダーが使用可能です：\n"
-                            "{operator}, {available_time}, {mobile}, {stakeholder}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
+                            "{management_id}, {operator}, {available_time}, {mobile}, {call_preference}, {stakeholder}, {contractor}, {furigana}, {birth_date}, {postal_code}, {address}, "
                             "{list_name}, {list_furigana}, {list_phone}, {list_postal_code}, {list_address}, "
-                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {remarks}, "
+                            "{current_line}, {order_date}, {order_person}, {judgment}, {fee}, {net_usage}, {family_approval}, {relationship}, {remarks}, "
                             "{other_number}, {phone_device}, {forbidden_line}, {nd}")
         description.setWordWrap(True)
         cti_format_layout.addWidget(description)
@@ -512,6 +558,10 @@ ND：{nd}
         # 設定の読み込み
         self.load_settings()
 
+        # モード切替時にテンプレート編集内容を切り替える
+        self.simple_mode_radio.toggled.connect(self._on_mode_radio_toggled)
+        self.corporate_mode_radio.toggled.connect(self._on_mode_radio_toggled)
+
         # 転記先ボタンのハンドラ
         self.dest_add_btn.clicked.connect(self._on_add_destination)
         self.dest_edit_btn.clicked.connect(self._on_edit_destination)
@@ -548,6 +598,25 @@ ND：{nd}
         self.cti_interval_spin.setValue(200)  # 0.2秒
         self.cti_cooldown_spin.setValue(3)  # 3秒
         self.call_duration_spin.setValue(0)  # 0秒
+
+    def _current_mode_key(self):
+        return 'corporate' if self.corporate_mode_radio.isChecked() else 'simple'
+
+    def _on_mode_radio_toggled(self, checked):
+        if not checked:
+            return
+
+        new_mode = self._current_mode_key()
+        if self._active_template_mode == new_mode:
+            return
+
+        # 直前モードの編集中テンプレートを退避
+        self.mode_templates[self._active_template_mode] = self.format_edit.toPlainText()
+        self._active_template_mode = new_mode
+
+        # 新モードのテンプレートを編集欄へ反映
+        self.default_format = self.default_format_corporate if new_mode == 'corporate' else self.default_format_simple
+        self.format_edit.setText(self.mode_templates.get(new_mode, self.default_format))
     
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
@@ -557,11 +626,41 @@ ND：{nd}
                     settings = json.load(f)
                     # フル設定を保持（保存時に他キーを保持するため）
                     self._full_settings = dict(settings)
-                    format_template = settings.get('format_template', self.default_format)
+                    mode = settings.get('mode', 'simple')
+                    if mode not in ('simple', 'corporate'):
+                        mode = 'simple'
+
+                    legacy_template = settings.get('format_template', '')
+                    simple_template = settings.get('format_template_simple')
+                    corporate_template = settings.get('format_template_corporate')
+
+                    if not simple_template:
+                        if mode == 'simple' and legacy_template:
+                            simple_template = legacy_template
+                        else:
+                            simple_template = self.default_format_simple
+
+                    if not corporate_template:
+                        if mode == 'corporate' and legacy_template:
+                            corporate_template = legacy_template
+                        else:
+                            corporate_template = self.default_format_corporate
+
+                    # 旧データ汚染対策: 法人テンプレが通常テンプレと同一なら法人初期テンプレへ補正
+                    if mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
+                        corporate_template = self.default_format_corporate
+
+                    self.mode_templates = {
+                        'simple': simple_template,
+                        'corporate': corporate_template
+                    }
                     font_size = settings.get('font_size', self.default_font_size)
                     delay_seconds = settings.get('delay_seconds', self.default_delay)
                     browser_settings = settings.get('browser_settings', self.default_browser_settings)
-                    mode = settings.get('mode', 'simple')
+
+                    self.default_format = self.default_format_corporate if mode == 'corporate' else self.default_format_simple
+                    self._active_template_mode = mode if mode in ('simple', 'corporate') else 'simple'
+                    format_template = self.mode_templates.get(self._active_template_mode, self.default_format)
                     
                     # CTI監視設定の読み込み
                     cti_monitoring_enabled = settings.get('enable_cti_monitoring', True)
@@ -619,7 +718,12 @@ ND：{nd}
                     except Exception:
                         self.token_edit.setText('')
             else:
-                self.format_edit.setText(self.default_format)
+                self.mode_templates = {
+                    'simple': self.default_format_simple,
+                    'corporate': self.default_format_corporate
+                }
+                self._active_template_mode = 'simple'
+                self.format_edit.setText(self.mode_templates['simple'])
                 self.font_size_slider.setValue(self.default_font_size)
                 self.delay_spin.setValue(self.default_delay)
                 self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
@@ -633,7 +737,12 @@ ND：{nd}
                 self.token_edit.setText('')
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の読み込みに失敗しました: {str(e)}")
-            self.format_edit.setText(self.default_format)
+            self.mode_templates = {
+                'simple': self.default_format_simple,
+                'corporate': self.default_format_corporate
+            }
+            self._active_template_mode = 'simple'
+            self.format_edit.setText(self.mode_templates['simple'])
             self.font_size_slider.setValue(self.default_font_size)
             self.delay_spin.setValue(self.default_delay)
             self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
@@ -660,6 +769,9 @@ ND：{nd}
                 new_mode = 'corporate'
             else:
                 new_mode = 'simple'
+
+            # 編集中テンプレートを現在選択モードへ反映
+            self.mode_templates[new_mode] = self.format_edit.toPlainText()
             
             # ブラウザ設定を取得
             browser_settings = {
@@ -683,7 +795,9 @@ ND：{nd}
 
             auto_copy = self.corporate_auto_copy_checkbox.isChecked()
             settings = {
-                'format_template': self.format_edit.toPlainText(),
+                'format_template': self.mode_templates.get(new_mode, self.default_format_corporate if new_mode == 'corporate' else self.default_format_simple),
+                'format_template_simple': self.mode_templates.get('simple', self.default_format_simple),
+                'format_template_corporate': self.mode_templates.get('corporate', self.default_format_corporate),
                 'font_size': self.font_size_slider.value(),
                 'delay_seconds': self.delay_spin.value(),
                 'browser_settings': browser_settings,
@@ -788,10 +902,13 @@ ND：{nd}
     
     def reset_to_default(self):
         """設定をデフォルトに戻す"""
+        mode = 'corporate' if self.corporate_mode_radio.isChecked() else 'simple'
+        self.default_format = self.default_format_corporate if mode == 'corporate' else self.default_format_simple
+        self.mode_templates[mode] = self.default_format
+        self._active_template_mode = mode
         self.format_edit.setText(self.default_format)
         self.font_size_slider.setValue(self.default_font_size)
         self.delay_spin.setValue(self.default_delay)
-        self.simple_mode_radio.setChecked(True)  # デフォルトは通常モード
         self.corporate_auto_copy_checkbox.setChecked(
             self.default_corporate_settings.get("auto_copy_operator_to_contractor", True)
         )
@@ -822,8 +939,11 @@ ND：{nd}
             mode = 'simple'
         
         auto_copy = self.corporate_auto_copy_checkbox.isChecked()
+        self.mode_templates[mode] = self.format_edit.toPlainText()
         return {
-            'format_template': self.format_edit.toPlainText(),
+            'format_template': self.mode_templates.get(mode, self.default_format),
+            'format_template_simple': self.mode_templates.get('simple', self.default_format_simple),
+            'format_template_corporate': self.mode_templates.get('corporate', self.default_format_corporate),
             'font_size': self.font_size_slider.value(),
             'delay_seconds': self.delay_spin.value(),
             'browser_settings': browser_settings,

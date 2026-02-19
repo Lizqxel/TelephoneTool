@@ -105,8 +105,76 @@ class ServiceAreaSearchWorker(QThread):
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
 
-    def _get_corporate_comment_template(self):
-        return """★前確希望：{call_preference}
+    def _insert_call_preference_line(self, formatted_text, call_preference_text):
+        lines = formatted_text.splitlines()
+
+        # 既に「★架電希望」行がある場合は重複挿入しない
+        for line in lines:
+            if line.strip().startswith("★架電希望"):
+                return formatted_text
+
+        inserted = False
+        call_line = f"★架電希望：{call_preference_text}"
+
+        for i, line in enumerate(lines):
+            if line.strip().startswith("★出やすい時間帯"):
+                lines.insert(i + 1, call_line)
+                inserted = True
+                break
+
+        if not inserted:
+            lines.insert(1, call_line)
+
+        return "\n".join(lines)
+    
+    def load_settings(self):
+        """設定ファイルから設定を読み込む"""
+        try:
+            # 初期設定を設定
+            self.settings = {
+                'format_template': "",
+                'font_size': 10  # デフォルトのフォントサイズ
+            }
+            
+            simple_default_template = """{management_id}
+
+対応者（お客様の名前）：{operator}
+工事希望日
+★出やすい時間帯：{available_time}
+★電話取次：アナログ→光電話
+★電話OP：
+★無線
+契約者(書類名義)：{contractor}
+フリガナ：{furigana}
+生年月日：{birth_date}
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：名義人の{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円"""
+
+            corporate_default_template = """{management_id}
+
+★前確希望：{call_preference}
 ★対応者（お客様の名前）：{operator}
 ★フリガナ：{furigana}
 ★生年月日：{birth_date}
@@ -141,83 +209,59 @@ ND：{nd}
 お客様が今使っている回線：アナログ
 案内料金：2500円"""
 
-    def _insert_call_preference_line(self, formatted_text, call_preference_text):
-        lines = formatted_text.splitlines()
-
-        # 既に「★架電希望」行がある場合は重複挿入しない
-        for line in lines:
-            if line.strip().startswith("★架電希望"):
-                return formatted_text
-
-        inserted = False
-        call_line = f"★架電希望：{call_preference_text}"
-
-        for i, line in enumerate(lines):
-            if line.strip().startswith("★出やすい時間帯"):
-                lines.insert(i + 1, call_line)
-                inserted = True
-                break
-
-        if not inserted:
-            lines.insert(1, call_line)
-
-        return "\n".join(lines)
-    
-    def load_settings(self):
-        """設定ファイルから設定を読み込む"""
-        try:
-            # 初期設定を設定
-            self.settings = {
-                'format_template': "",
-                'font_size': 10  # デフォルトのフォントサイズ
+            default_templates = {
+                'simple': simple_default_template,
+                'corporate': corporate_default_template
             }
-            
-            # デフォルトのフォーマットテンプレート
-            default_template = """対応者（お客様の名前）：{operator}
-工事希望日
-★出やすい時間帯：{available_time}
-★電話取次：アナログ→光電話
-★電話OP：
-★無線
-契約者(書類名義)：{contractor}
-フリガナ：{furigana}
-生年月日：{birth_date}
-郵便番号：{postal_code}
-住所：{address}
-リスト名：{list_name}
-リスト名フリガナ：{list_furigana}
-電話番号：{list_phone}
-リスト郵便番号：{list_postal_code}
-リスト住所：{list_address}
-現状回線：{current_line}
-受注日：{order_date}
-受注者：{order_person}
-提供判定：{judgment}
 
-料金認識：{fee}
-ネット利用：{net_usage}
-家族了承：{family_approval}
-
-他番号：{other_number}
-電話機：{phone_device}
-禁止回線：{forbidden_line}
-ND：{nd}
-
-備考：名義人の{relationship}
-お客様が今使っている回線：アナログ
-案内料金：2500円"""
+            default_template = corporate_default_template if getattr(self, 'current_mode', 'simple') == 'corporate' else simple_default_template
             
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
+                    settings_mode = settings.get('mode', getattr(self, 'current_mode', 'simple'))
+                    if settings_mode not in default_templates:
+                        settings_mode = 'simple'
+
+                    legacy_template = settings.get('format_template', '')
+                    simple_template = settings.get('format_template_simple')
+                    corporate_template = settings.get('format_template_corporate')
+
+                    if not simple_template:
+                        if settings_mode == 'simple' and legacy_template:
+                            simple_template = legacy_template
+                        else:
+                            simple_template = simple_default_template
+
+                    if not corporate_template:
+                        if settings_mode == 'corporate' and legacy_template:
+                            corporate_template = legacy_template
+                        else:
+                            corporate_template = corporate_default_template
+
+                    # 旧データ汚染対策: 法人テンプレが通常テンプレと同一で前確希望プレースホルダーが無い場合は法人初期へ補正
+                    if settings_mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
+                        corporate_template = corporate_default_template
+
+                    settings['format_template_simple'] = simple_template
+                    settings['format_template_corporate'] = corporate_template
+
+                    mode_key = f'format_template_{settings_mode}'
+                    selected_template = settings.get(mode_key) or default_templates[settings_mode]
+
+                    # 互換用: 既存参照向けに現在モードのテンプレをformat_templateへ同期
+                    settings['format_template'] = selected_template
+
                     # format_templateを直接self.format_templateに設定
-                    self.format_template = settings.get('format_template', default_template)
+                    self.format_template = selected_template
                     # settingsオブジェクトを更新
                     self.settings = settings
             else:
                 # デフォルトのフォーマットテンプレートを設定
                 self.format_template = default_template
                 # デフォルト設定をsettingsに保存
+                self.settings['format_template_simple'] = simple_default_template
+                self.settings['format_template_corporate'] = corporate_default_template
                 self.settings['format_template'] = self.format_template
                 
                 # デフォルト設定をファイルに保存
@@ -233,6 +277,8 @@ ND：{nd}
             
             # エラーが発生した場合でもデフォルト設定を使用
             self.settings = {
+                'format_template_simple': simple_default_template,
+                'format_template_corporate': corporate_default_template,
                 'format_template': default_template,
                 'font_size': 10
             }
@@ -596,6 +642,14 @@ ND：{nd}
             else:
                 relationship_text = gender_line
 
+        management_id = ""
+        try:
+            cti_data = getattr(self, 'last_cti_data', None)
+            if cti_data and hasattr(cti_data, 'management_id'):
+                management_id = (cti_data.management_id or '').strip()
+        except Exception:
+            management_id = ""
+
         mobile_text = ""
         available_time_text = self.available_time_input.text().rstrip()
         if self.current_mode == 'corporate':
@@ -640,6 +694,7 @@ ND：{nd}
             'forbidden_line': self.forbidden_line_input.text().rstrip(),
             'nd': self.nd_input.text().rstrip(),
             'relationship': relationship_text,
+            'management_id': management_id,
             'call_preference': '',
             'employee_number': ''  # 社番は空で初期化
         }
@@ -657,21 +712,12 @@ ND：{nd}
         
         # フォーマットテンプレートに値を埋め込む
         try:
-            template = self._get_corporate_comment_template() if self.current_mode == 'corporate' else self.format_template
+            template = self.format_template
             formatted_text = template.format(**format_data)
 
-            # 法人モードの場合は管理番号を先頭に挿入
-            if self.current_mode == 'corporate':
-                management_id = ""
-                try:
-                    cti_data = getattr(self, 'last_cti_data', None)
-                    if cti_data and hasattr(cti_data, 'management_id'):
-                        management_id = (cti_data.management_id or '').strip()
-                except Exception:
-                    management_id = ""
-
-                if management_id:
-                    formatted_text = f"{management_id}\n\n{formatted_text}"
+            # 旧テンプレ互換：management_idプレースホルダー未使用時は従来通り先頭に挿入
+            if self.current_mode == 'corporate' and management_id and '{management_id}' not in template:
+                formatted_text = f"{management_id}\n\n{formatted_text}"
 
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()

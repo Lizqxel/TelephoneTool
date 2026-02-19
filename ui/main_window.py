@@ -475,24 +475,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             show_again: 次回から表示するかどうか
         """
         try:
-            # 初期設定ファイル生成かどうかをチェック
-            is_initial_setup = not os.path.exists(self.settings_file)
-            
-            # 設定ファイルの読み込み
-            settings = {}
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-            
-            # モード設定を更新
-            settings['mode'] = mode
-            settings['show_mode_selection'] = show_again
-            
-            # 初期設定ファイル生成時のデフォルト値を設定
-            if is_initial_setup:
-                logging.info("初期設定ファイルを生成します（CTI監視設定を含む）")
-                # デフォルトのフォーマットテンプレート
-                default_format = """対応者（お客様の名前）：{operator}
+            simple_default_format = """{management_id}
+
+対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time} 
 ★電話取次：アナログ→光電話
@@ -526,9 +511,98 @@ ND：{nd}
 お客様が今使っている回線：アナログ
 案内料金：2500円
 """
+
+            corporate_default_format = """{management_id}
+
+★前確希望：{call_preference}
+★対応者（お客様の名前）：{operator}
+★フリガナ：{furigana}
+★生年月日：{birth_date}
+★携帯：{mobile}
+工事希望日
+出やすい時間帯：{available_time}
+電話取次：アナログ→光電話
+電話OP：
+無線
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+"""
+
+            # 初期設定ファイル生成かどうかをチェック
+            is_initial_setup = not os.path.exists(self.settings_file)
+            
+            # 設定ファイルの読み込み
+            settings = {}
+            previous_mode = 'simple'
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                    previous_mode = settings.get('mode', 'simple')
+                    if previous_mode not in ('simple', 'corporate'):
+                        previous_mode = 'simple'
+            
+            # モード設定を更新
+            settings['mode'] = mode
+            settings['show_mode_selection'] = show_again
+
+            # モード別テンプレートの既定値を確保
+            legacy_template = settings.get('format_template', '')
+            simple_template = settings.get('format_template_simple')
+            corporate_template = settings.get('format_template_corporate')
+
+            if not simple_template:
+                if previous_mode == 'simple' and legacy_template:
+                    simple_template = legacy_template
+                else:
+                    simple_template = simple_default_format
+
+            if not corporate_template:
+                if previous_mode == 'corporate' and legacy_template:
+                    corporate_template = legacy_template
+                else:
+                    corporate_template = corporate_default_format
+
+            # 旧データ汚染対策: 法人テンプレが通常テンプレと同一で前確希望プレースホルダーも無い場合は法人初期へ補正
+            if mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
+                corporate_template = corporate_default_format
+
+            settings['format_template_simple'] = simple_template
+            settings['format_template_corporate'] = corporate_template
+
+            # 互換用: 現在モードのテンプレートをformat_templateへ同期
+            settings['format_template'] = settings['format_template_corporate'] if mode == 'corporate' else settings['format_template_simple']
+            
+            # 初期設定ファイル生成時のデフォルト値を設定
+            if is_initial_setup:
+                logging.info("初期設定ファイルを生成します（CTI監視設定を含む）")
+                default_format = corporate_default_format if mode == 'corporate' else simple_default_format
                 
                 # 初期設定のデフォルト値を設定
                 settings.update({
+                    'format_template_simple': simple_default_format,
+                    'format_template_corporate': corporate_default_format,
                     'format_template': default_format,
                     'font_size': 9,
                     'delay_seconds': 0,
@@ -556,6 +630,10 @@ ND：{nd}
             # 設定ファイルに保存
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
+
+            # 実行中インスタンスにも即時反映（切替直後の営コメ作成で旧テンプレを使わないようにする）
+            self.settings = settings
+            self.format_template = settings.get('format_template', self.format_template if hasattr(self, 'format_template') else '')
             
             logging.info(f"モード設定を保存しました: mode={mode}, show_mode_selection={show_again}")
             if is_initial_setup:
@@ -592,18 +670,17 @@ ND：{nd}
         # 設定を読み込む
         if not hasattr(self, 'settings'):
             self.settings = {}
-        
-        # format_templateを設定
-        if not hasattr(self, 'format_template') or not self.format_template:
-            logging.info("format_templateを設定します")
-            self.load_settings()
-            if hasattr(self, 'settings') and 'format_template' in self.settings:
-                self.format_template = self.settings['format_template']
-                logging.info(f"format_templateを設定しました: {self.format_template[:100]}...")
-            else:
-                logging.error("format_templateの設定に失敗しました")
-                QMessageBox.warning(self, "エラー", "テンプレートの設定に失敗しました。")
-                return
+
+        # format_templateを現在モードで再読込（モード切替時も反映）
+        logging.info("format_templateを現在モードで再読込します")
+        self.load_settings()
+        if hasattr(self, 'settings') and 'format_template' in self.settings:
+            self.format_template = self.settings['format_template']
+            logging.info(f"format_templateを設定しました: {self.format_template[:100]}...")
+        else:
+            logging.error("format_templateの設定に失敗しました")
+            QMessageBox.warning(self, "エラー", "テンプレートの設定に失敗しました。")
+            return
         
         # トップバーの作成
         self.create_top_bar(main_layout)
@@ -4793,6 +4870,81 @@ class CancellationError(Exception):
     def load_settings(self):
         """設定ファイルを読み込む"""
         try:
+            simple_default_format = """{management_id}
+
+対応者（お客様の名前）：{operator}
+工事希望日
+★出やすい時間帯：{available_time} 
+★電話取次：アナログ→光電話
+★電話OP：
+★無線
+契約者(書類名義)：{contractor}
+フリガナ：{furigana}
+生年月日：{birth_date}
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+"""
+
+            corporate_default_format = """{management_id}
+
+★前確希望：{call_preference}
+★対応者（お客様の名前）：{operator}
+★フリガナ：{furigana}
+★生年月日：{birth_date}
+★携帯：{mobile}
+工事希望日
+出やすい時間帯：{available_time}
+電話取次：アナログ→光電話
+電話OP：
+無線
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円
+"""
+
             # 初期設定を設定
             self.settings = {
                 'font_size': 11,
@@ -4817,6 +4969,34 @@ class CancellationError(Exception):
                     loaded_settings = json.load(f)
                     # 既存の設定を更新
                     self.settings.update(loaded_settings)
+
+                mode = self.settings.get('mode', 'simple')
+                if mode not in ('simple', 'corporate'):
+                    mode = 'simple'
+
+                legacy_template = self.settings.get('format_template', '')
+                simple_template = self.settings.get('format_template_simple')
+                corporate_template = self.settings.get('format_template_corporate')
+
+                if not simple_template:
+                    if mode == 'simple' and legacy_template:
+                        simple_template = legacy_template
+                    else:
+                        simple_template = simple_default_format
+
+                if not corporate_template:
+                    if mode == 'corporate' and legacy_template:
+                        corporate_template = legacy_template
+                    else:
+                        corporate_template = corporate_default_format
+
+                # 旧データ汚染対策: 法人テンプレが通常テンプレと同一の場合は法人初期テンプレへ補正
+                if mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
+                    corporate_template = corporate_default_format
+
+                self.settings['format_template_simple'] = simple_template
+                self.settings['format_template_corporate'] = corporate_template
+                self.settings['format_template'] = corporate_template if mode == 'corporate' else simple_template
             else:
                 # デフォルト設定をファイルに保存
                 self.save_settings()
