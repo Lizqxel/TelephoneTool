@@ -17,6 +17,32 @@ import logging
 # import requests  # よみたんAPI無効化に伴い未使用
 # from urllib.parse import quote, unquote  # 未使用
 
+
+def _expand_iteration_mark_in_hira_tokens(tokens) -> str:
+    """
+    pykakasiのトークン列から、々（繰り返し記号）を直前の読みで展開する。
+
+    例: ["とう", "々", "び"] -> "とうとうび"
+    """
+    expanded = []
+    previous_hira = ""
+
+    for token in tokens:
+        hira = token.get("hira", "")
+
+        if hira == "々":
+            if previous_hira:
+                expanded.append(previous_hira)
+            else:
+                logging.warning("フリガナ変換: 先頭の々を展開できませんでした")
+            continue
+
+        expanded.append(hira)
+        if hira:
+            previous_hira = hira
+
+    return "".join(expanded)
+
 def convert_to_furigana_with_pykakasi(text: str) -> str:
     """
     pykakasiを使用して漢字テキストをカタカナに変換する
@@ -38,8 +64,13 @@ def convert_to_furigana_with_pykakasi(text: str) -> str:
         # テキストを変換
         result = kks.convert(text)
         
-        # ひらがなをカタカナに変換して結合
-        furigana = "".join([r['hira'] for r in result])
+        # ひらがなを結合（々は直前の読みで展開）
+        furigana = _expand_iteration_mark_in_hira_tokens(result)
+
+        # 念のため残存する々を除去（バリデーションで弾かれないようにする）
+        if "々" in furigana:
+            logging.warning(f"フリガナ変換: 残存した々を除去します: {text} -> {furigana}")
+            furigana = furigana.replace("々", "")
         
         # ひらがなをカタカナに変換
         import jaconv
