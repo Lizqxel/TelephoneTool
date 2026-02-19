@@ -234,9 +234,12 @@ def create_driver(headless=False, page_load_strategy: str = "normal"):
         chrome_options.add_argument('--disable-web-security')
         chrome_options.add_argument('--ignore-certificate-errors')
         chrome_options.add_argument('--ignore-ssl-errors')
+        chrome_options.add_argument('--log-level=3')
+        chrome_options.add_argument('--silent')
+        chrome_options.add_argument('--disable-features=OptimizationGuideModelDownloading,OptimizationHints,OptimizationTargetPrediction,OptimizationGuideOnDeviceModel')
         chrome_options.add_argument('--start-maximized')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
         # 画像を無効化
