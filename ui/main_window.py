@@ -1598,10 +1598,14 @@ ND：{nd}
             self.call_preference_widget = QWidget()
             call_preference_layout = QHBoxLayout(self.call_preference_widget)
             call_preference_layout.setContentsMargins(0, 0, 0, 0)
-            call_preference_layout.addWidget(QLabel("★架電希望："))
-            self.call_preference_input = QLineEdit()
-            self.call_preference_input.setPlaceholderText("例：携帯へ / 固定へ")
+            call_preference_layout.addWidget(QLabel("前確希望："))
+            self.call_preference_input = CustomComboBox()
+            self.call_preference_input.addItems(["", "固定", "携帯"])
             call_preference_layout.addWidget(self.call_preference_input)
+            call_preference_layout.addSpacing(8)
+            self.call_preference_time_input = QLineEdit()
+            self.call_preference_time_input.setPlaceholderText("何時ごろ（５時～６時）")
+            call_preference_layout.addWidget(self.call_preference_time_input)
             input_layout.addWidget(self.call_preference_widget)
         
         # 従来の出やすい時間帯入力欄（互換性のため保持、非表示）
@@ -1613,10 +1617,13 @@ ND：{nd}
         self.mobile_number_widget.hide()
         self.available_time_input.setText("携帯なし")
         
-        # 契約者名
-        input_layout.addWidget(QLabel("契約者名"))
+        # 契約者名（法人モードでは入力欄を表示しない）
         self.contractor_input = QLineEdit()
-        input_layout.addWidget(self.contractor_input)
+        if self.current_mode != 'corporate':
+            input_layout.addWidget(QLabel("契約者名"))
+            input_layout.addWidget(self.contractor_input)
+        else:
+            self.contractor_input.hide()
         
         # フリガナ
         furigana_layout = QHBoxLayout()
@@ -2143,7 +2150,9 @@ ND：{nd}
             self.relationship_input.textChanged.connect(self.reset_background_color)
             self.nd_input.textChanged.connect(self.reset_background_color)
             if hasattr(self, 'call_preference_input'):
-                self.call_preference_input.textChanged.connect(self.reset_background_color)
+                self.call_preference_input.currentTextChanged.connect(self.reset_background_color)
+            if hasattr(self, 'call_preference_time_input'):
+                self.call_preference_time_input.textChanged.connect(self.reset_background_color)
             if hasattr(self, 'operator_gender_combo'):
                 self.operator_gender_combo.currentTextChanged.connect(self.reset_background_color)
             
@@ -2624,7 +2633,9 @@ ND：{nd}
             self._push_text_change(self.nd_input, "")
             self._push_text_change(self.relationship_input, "")
             if hasattr(self, 'call_preference_input'):
-                self._push_text_change(self.call_preference_input, "")
+                self.call_preference_input.setCurrentText("")
+            if hasattr(self, 'call_preference_time_input'):
+                self._push_text_change(self.call_preference_time_input, "")
             if hasattr(self, 'business_status_combo'):
                 self.business_status_combo.setCurrentText("継続中")
             if hasattr(self, 'operator_gender_combo'):

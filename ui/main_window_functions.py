@@ -105,6 +105,42 @@ class ServiceAreaSearchWorker(QThread):
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
 
+    def _get_corporate_comment_template(self):
+        return """★前確希望：{call_preference}
+★対応者（お客様の名前）：{operator}
+★フリガナ：{furigana}
+★生年月日：{birth_date}
+★携帯：{mobile}
+工事希望日
+出やすい時間帯：{available_time}
+電話取次：アナログ→光電話
+電話OP：
+無線
+郵便番号：{postal_code}
+住所：{address}
+リスト名：{list_name}
+リスト名フリガナ：{list_furigana}
+電話番号：{list_phone}
+リスト郵便番号：{list_postal_code}
+リスト住所：{list_address}
+現状回線：{current_line}
+受注日：{order_date}
+受注者：{order_person}
+提供判定：{judgment}
+
+料金認識：{fee}
+ネット利用：{net_usage}
+家族了承：{family_approval}
+
+他番号：{other_number}
+電話機：{phone_device}
+禁止回線：{forbidden_line}
+ND：{nd}
+
+備考：{relationship}
+お客様が今使っている回線：アナログ
+案内料金：2500円"""
+
     def _insert_call_preference_line(self, formatted_text, call_preference_text):
         lines = formatted_text.splitlines()
 
@@ -327,8 +363,9 @@ ND：{nd}
     
     def generate_cti_format(self):
         """CTIフォーマットを生成するだけで、クリップボードへのコピーは行わない"""
-        if not self._validate_operator_contractor_match():
-            return None
+        if self.current_mode != 'corporate':
+            if not self._validate_operator_contractor_match():
+                return None
         if not self._validate_list_furigana_no_english():
             return None
         birth_date = self._require_birth_date_for_comment()
@@ -338,7 +375,6 @@ ND：{nd}
         # 必須項目の検証
         required_fields = {
             'operator': self.operator_input,
-            'contractor': self.contractor_input,
             'furigana': self.furigana_input,
             'address': self.address_input,
             'postal_code': self.postal_code_input,  # 郵便番号を追加
@@ -354,13 +390,23 @@ ND：{nd}
             'nd': self.nd_input  # NDを追加
         }
 
+        if self.current_mode != 'corporate':
+            required_fields['contractor'] = self.contractor_input
+
         if self.current_mode == 'corporate' and hasattr(self, 'call_preference_input'):
             required_fields['call_preference'] = self.call_preference_input
+
+        def _get_field_text(field):
+            if hasattr(field, 'text'):
+                return field.text().strip()
+            if hasattr(field, 'currentText'):
+                return field.currentText().strip()
+            return ''
         
         # 未入力項目の確認
         missing_fields = []
         for field_name, field in required_fields.items():
-            if not field.text().strip():
+            if not _get_field_text(field):
                 missing_fields.append(field_name)
         
         # 未入力項目がある場合は警告を表示
@@ -382,7 +428,7 @@ ND：{nd}
                 'fee': '料金認識',
                 'relationship': '名義人との関係性',
                 'nd': 'ND',
-                'call_preference': '架電希望'
+                'call_preference': '前確希望'
             }
             
             missing_fields_ja = [field_names_ja.get(field, field) for field in missing_fields]
@@ -404,77 +450,44 @@ ND：{nd}
 
         # 追加チェック: リスト名と契約者名の苗字（漢字）が同じで
         # フリガナの苗字が異なる場合はユーザーに確認する
-        try:
-            def _surname_part(text: str) -> str:
-                if not text:
+        if self.current_mode != 'corporate':
+            try:
+                def _surname_part(text: str) -> str:
+                    if not text:
+                        return ""
+                    for sep in (" ", "\u3000"):
+                        if sep in text:
+                            return text.split(sep)[0].strip()
+                    return text.strip()
+
+                def _given_part(text: str) -> str:
+                    """名前（名）の部分を返す。スペースで分割して先頭以外を結合して返す。スペースが無ければ空文字を返す。"""
+                    if not text:
+                        return ""
+                    for sep in (" ", "\u3000"):
+                        if sep in text:
+                            parts = text.split(sep)
+                            return sep.join(parts[1:]).strip()
                     return ""
-                for sep in (" ", "\u3000"):
-                    if sep in text:
-                        return text.split(sep)[0].strip()
-                return text.strip()
 
-            def _given_part(text: str) -> str:
-                """名前（名）の部分を返す。スペースで分割して先頭以外を結合して返す。スペースが無ければ空文字を返す。"""
-                if not text:
-                    return ""
-                for sep in (" ", "\u3000"):
-                    if sep in text:
-                        parts = text.split(sep)
-                        return sep.join(parts[1:]).strip()
-                return ""
+                contractor_name = getattr(self, 'contractor_input', None)
+                list_name = getattr(self, 'list_name_input', None)
+                contractor_furi = getattr(self, 'furigana_input', None)
+                list_furi = getattr(self, 'list_furigana_input', None)
 
-            contractor_name = getattr(self, 'contractor_input', None)
-            list_name = getattr(self, 'list_name_input', None)
-            contractor_furi = getattr(self, 'furigana_input', None)
-            list_furi = getattr(self, 'list_furigana_input', None)
+                if contractor_name and list_name and contractor_furi and list_furi:
+                    kanji_contractor = _surname_part(contractor_name.text().strip())
+                    kanji_list = _surname_part(list_name.text().strip())
+                    furi_contractor = _surname_part(contractor_furi.text().strip())
+                    furi_list = _surname_part(list_furi.text().strip())
 
-            if contractor_name and list_name and contractor_furi and list_furi:
-                kanji_contractor = _surname_part(contractor_name.text().strip())
-                kanji_list = _surname_part(list_name.text().strip())
-                furi_contractor = _surname_part(contractor_furi.text().strip())
-                furi_list = _surname_part(list_furi.text().strip())
-
-                if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
-                    # 苗字フリガナ不一致チェック（契約者名とリスト名の比較を明示・見比べ表示）
-                    if furi_contractor and furi_list and furi_contractor != furi_list:
-                        message_text = (
-                            "契約者名とリスト名で姓のフリガナが一致しません。\n"
-                            f"契約者（姓）：{furi_contractor}\n"
-                            f"リスト（姓）：{furi_list}\n"
-                            "このまま続行しますか？"
-                        )
-                        reply = QMessageBox.question(
-                            self,
-                            "確認",
-                            message_text,
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                            QMessageBox.StandardButton.No
-                        )
-                        if reply == QMessageBox.StandardButton.No:
-                            logging.info("ユーザーによりCTI生成が中止されました: 苗字フリガナ不一致")
-                            return None
-
-                    # 名前（名）の漢字も一致しているかチェックし、名フリガナが不一致なら確認
-                    given_contractor = _given_part(contractor_name.text().strip())
-                    given_list = _given_part(list_name.text().strip())
-                    if given_contractor and given_list and given_contractor == given_list:
-                        # 名のフリガナ抽出（先頭以外を名として扱う）
-                        def _given_furi(text: str) -> str:
-                            if not text:
-                                return ""
-                            for sep in (" ", "\u3000"):
-                                if sep in text:
-                                    parts = text.split(sep)
-                                    return sep.join(parts[1:]).strip()
-                            return ""
-
-                        given_furi_contractor = _given_furi(contractor_furi.text().strip())
-                        given_furi_list = _given_furi(list_furi.text().strip())
-                        if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                    if kanji_contractor and kanji_list and kanji_contractor == kanji_list:
+                        # 苗字フリガナ不一致チェック（契約者名とリスト名の比較を明示・見比べ表示）
+                        if furi_contractor and furi_list and furi_contractor != furi_list:
                             message_text = (
-                                "契約者名とリスト名で名のフリガナが一致しません。\n"
-                                f"契約者（名）：{given_furi_contractor}\n"
-                                f"リスト（名）：{given_furi_list}\n"
+                                "契約者名とリスト名で姓のフリガナが一致しません。\n"
+                                f"契約者（姓）：{furi_contractor}\n"
+                                f"リスト（姓）：{furi_list}\n"
                                 "このまま続行しますか？"
                             )
                             reply = QMessageBox.question(
@@ -485,10 +498,44 @@ ND：{nd}
                                 QMessageBox.StandardButton.No
                             )
                             if reply == QMessageBox.StandardButton.No:
-                                logging.info("ユーザーによりCTI生成が中止されました: 名前フリガナ不一致")
+                                logging.info("ユーザーによりCTI生成が中止されました: 苗字フリガナ不一致")
                                 return None
-        except Exception:
-            logging.exception("苗字フリガナの不一致チェック中にエラーが発生しました")
+
+                        # 名前（名）の漢字も一致しているかチェックし、名フリガナが不一致なら確認
+                        given_contractor = _given_part(contractor_name.text().strip())
+                        given_list = _given_part(list_name.text().strip())
+                        if given_contractor and given_list and given_contractor == given_list:
+                            # 名のフリガナ抽出（先頭以外を名として扱う）
+                            def _given_furi(text: str) -> str:
+                                if not text:
+                                    return ""
+                                for sep in (" ", "\u3000"):
+                                    if sep in text:
+                                        parts = text.split(sep)
+                                        return sep.join(parts[1:]).strip()
+                                return ""
+
+                            given_furi_contractor = _given_furi(contractor_furi.text().strip())
+                            given_furi_list = _given_furi(list_furi.text().strip())
+                            if given_furi_contractor and given_furi_list and given_furi_contractor != given_furi_list:
+                                message_text = (
+                                    "契約者名とリスト名で名のフリガナが一致しません。\n"
+                                    f"契約者（名）：{given_furi_contractor}\n"
+                                    f"リスト（名）：{given_furi_list}\n"
+                                    "このまま続行しますか？"
+                                )
+                                reply = QMessageBox.question(
+                                    self,
+                                    "確認",
+                                    message_text,
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No
+                                )
+                                if reply == QMessageBox.StandardButton.No:
+                                    logging.info("ユーザーによりCTI生成が中止されました: 名前フリガナ不一致")
+                                    return None
+            except Exception:
+                logging.exception("苗字フリガナの不一致チェック中にエラーが発生しました")
         
         # 日付の書式設定
         order_date = self.order_date_input.text().rstrip()
@@ -549,10 +596,28 @@ ND：{nd}
             else:
                 relationship_text = gender_line
 
+        mobile_text = ""
+        available_time_text = self.available_time_input.text().rstrip()
+        if self.current_mode == 'corporate':
+            pattern_text = self.mobile_pattern_combo.currentText().rstrip() if hasattr(self, 'mobile_pattern_combo') else ''
+            if pattern_text == "①携帯ありで番号がわかる":
+                part1 = self.mobile_part1_input.text().strip() if hasattr(self, 'mobile_part1_input') else ''
+                part2 = self.mobile_part2_input.text().strip() if hasattr(self, 'mobile_part2_input') else ''
+                part3 = self.mobile_part3_input.text().strip() if hasattr(self, 'mobile_part3_input') else ''
+                if part1 and part2 and part3:
+                    mobile_text = f"{part1}-{part2}-{part3}"
+            elif pattern_text == "②携帯なし":
+                mobile_text = "携帯なし"
+            elif pattern_text == "③携帯ありで番号がわからない":
+                mobile_text = "携帯不明"
+
+            if hasattr(self, 'time_preference_input'):
+                available_time_text = self.time_preference_input.text().rstrip()
+
         format_data = {
             'operator': self.operator_input.text().rstrip(),
-            'mobile': "",  # 携帯電話番号を空に
-            'available_time': self.available_time_input.text().rstrip(),  # 出やすい時間帯を追加
+            'mobile': mobile_text,
+            'available_time': available_time_text,
             'contractor': self.contractor_input.text().rstrip(),
             'furigana': self.furigana_input.text().rstrip(),
             'birth_date': birth_date,
@@ -580,11 +645,20 @@ ND：{nd}
         }
 
         if self.current_mode == 'corporate' and hasattr(self, 'call_preference_input'):
-            format_data['call_preference'] = self.call_preference_input.text().rstrip()
+            call_preference_type = self.call_preference_input.currentText().rstrip()
+            call_preference_time = self.call_preference_time_input.text().rstrip() if hasattr(self, 'call_preference_time_input') else ''
+
+            if call_preference_type and call_preference_time:
+                format_data['call_preference'] = f"{call_preference_type} {call_preference_time}"
+            elif call_preference_type:
+                format_data['call_preference'] = call_preference_type
+            else:
+                format_data['call_preference'] = call_preference_time
         
         # フォーマットテンプレートに値を埋め込む
         try:
-            formatted_text = self.format_template.format(**format_data)
+            template = self._get_corporate_comment_template() if self.current_mode == 'corporate' else self.format_template
+            formatted_text = template.format(**format_data)
 
             # 法人モードの場合は管理番号を先頭に挿入
             if self.current_mode == 'corporate':
@@ -598,10 +672,6 @@ ND：{nd}
 
                 if management_id:
                     formatted_text = f"{management_id}\n\n{formatted_text}"
-
-                call_preference_text = format_data.get('call_preference', '').strip()
-                # 未入力でも「★架電希望：」行は必ず出力する
-                formatted_text = self._insert_call_preference_line(formatted_text, call_preference_text)
 
             # GoogleマップのURLを追加
             maps_url = self.get_google_maps_url()
