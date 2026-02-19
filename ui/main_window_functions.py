@@ -24,6 +24,7 @@ from utils.format_utils import (format_phone_number, format_phone_number_without
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
 from utils.string_utils import convert_to_half_width_except_space
+from version import VERSION
 
 
 class ServiceAreaSearchWorker(QThread):
@@ -385,29 +386,46 @@ ND：{nd}
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
+                    settings_changed = False
                     settings_mode = settings.get('mode', getattr(self, 'current_mode', 'simple'))
                     if settings_mode not in default_templates:
                         settings_mode = 'simple'
 
+                    template_defaults_version_key = 'template_defaults_version'
+                    applied_template_version = str(settings.get(template_defaults_version_key, '')).strip()
+                    should_refresh_templates = applied_template_version != VERSION
+
                     legacy_template = settings.get('format_template', '')
                     simple_template = settings.get('format_template_simple')
                     corporate_template = settings.get('format_template_corporate')
+
+                    if should_refresh_templates:
+                        simple_template = simple_default_template
+                        corporate_template = corporate_default_template
+                        settings[template_defaults_version_key] = VERSION
+                        settings_changed = True
+                        logging.info(
+                            f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                        )
 
                     if not simple_template:
                         if settings_mode == 'simple' and legacy_template:
                             simple_template = legacy_template
                         else:
                             simple_template = simple_default_template
+                        settings_changed = True
 
                     if not corporate_template:
                         if settings_mode == 'corporate' and legacy_template:
                             corporate_template = legacy_template
                         else:
                             corporate_template = corporate_default_template
+                        settings_changed = True
 
                     # 旧データ汚染対策: 法人テンプレが通常テンプレと同一で前確希望プレースホルダーが無い場合は法人初期へ補正
                     if settings_mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
                         corporate_template = corporate_default_template
+                        settings_changed = True
 
                     settings['format_template_simple'] = simple_template
                     settings['format_template_corporate'] = corporate_template
@@ -417,6 +435,10 @@ ND：{nd}
 
                     # 互換用: 既存参照向けに現在モードのテンプレをformat_templateへ同期
                     settings['format_template'] = selected_template
+
+                    if settings_changed:
+                        with open(self.settings_file, 'w', encoding='utf-8') as wf:
+                            json.dump(settings, wf, ensure_ascii=False, indent=2)
 
                     # format_templateを直接self.format_templateに設定
                     self.format_template = selected_template

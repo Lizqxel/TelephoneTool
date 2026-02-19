@@ -5051,33 +5051,55 @@ ND：{nd}
                     # 既存の設定を更新
                     self.settings.update(loaded_settings)
 
+                settings_changed = False
+
                 mode = self.settings.get('mode', 'simple')
                 if mode not in ('simple', 'corporate'):
                     mode = 'simple'
 
+                template_defaults_version_key = 'template_defaults_version'
+                applied_template_version = str(self.settings.get(template_defaults_version_key, '')).strip()
+                should_refresh_templates = applied_template_version != VERSION
+
                 legacy_template = self.settings.get('format_template', '')
                 simple_template = self.settings.get('format_template_simple')
                 corporate_template = self.settings.get('format_template_corporate')
+
+                if should_refresh_templates:
+                    simple_template = simple_default_format
+                    corporate_template = corporate_default_format
+                    self.settings[template_defaults_version_key] = VERSION
+                    settings_changed = True
+                    logging.info(
+                        f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                    )
 
                 if not simple_template:
                     if mode == 'simple' and legacy_template:
                         simple_template = legacy_template
                     else:
                         simple_template = simple_default_format
+                    settings_changed = True
 
                 if not corporate_template:
                     if mode == 'corporate' and legacy_template:
                         corporate_template = legacy_template
                     else:
                         corporate_template = corporate_default_format
+                    settings_changed = True
 
                 # 旧データ汚染対策: 法人テンプレが通常テンプレと同一の場合は法人初期テンプレへ補正
                 if mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
                     corporate_template = corporate_default_format
+                    settings_changed = True
 
                 self.settings['format_template_simple'] = simple_template
                 self.settings['format_template_corporate'] = corporate_template
                 self.settings['format_template'] = corporate_template if mode == 'corporate' else simple_template
+
+                if settings_changed:
+                    with open(self.settings_file, 'w', encoding='utf-8') as f:
+                        json.dump(self.settings, f, ensure_ascii=False, indent=2)
             else:
                 # デフォルト設定をファイルに保存
                 self.save_settings()
