@@ -24,6 +24,7 @@ from utils.format_utils import (format_phone_number, format_phone_number_without
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
 from utils.string_utils import convert_to_half_width_except_space
+from version import VERSION
 
 
 class ServiceAreaSearchWorker(QThread):
@@ -142,6 +143,40 @@ class MapfanUrlWorker(QThread):
 
 class MainWindowFunctions:
     """メインウィンドウの機能を提供するミックスインクラス"""
+
+    def _cursor_pos_for_digit_index(self, text, digit_index):
+        """指定した数字インデックスに対応するカーソル位置を返す"""
+        if digit_index <= 0:
+            return 0
+
+        counted_digits = 0
+        for index, char in enumerate(text):
+            if char.isdigit():
+                counted_digits += 1
+                if counted_digits >= digit_index:
+                    return index + 1
+
+        return len(text)
+
+    def _apply_text_preserving_cursor(self, line_edit, new_text, preserve_by_digits=False):
+        """テキスト更新時にカーソル位置を維持する"""
+        if not line_edit:
+            return
+
+        current_text = line_edit.text()
+        if new_text == current_text:
+            return
+
+        current_cursor = line_edit.cursorPosition()
+
+        if preserve_by_digits:
+            digit_index = len(re.sub(r'\D', '', current_text[:current_cursor]))
+            new_cursor = self._cursor_pos_for_digit_index(new_text, digit_index)
+        else:
+            new_cursor = min(current_cursor, len(new_text))
+
+        line_edit.setText(new_text)
+        line_edit.setCursorPosition(new_cursor)
 
     def get_mapfan_url_for_current_address(self):
         """現在の住所入力からMapFan詳細URLを取得する"""
@@ -302,7 +337,7 @@ ND：{nd}
 
 備考：名義人の{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
             corporate_default_template = """{management_id}
 
@@ -339,7 +374,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
             default_templates = {
                 'simple': simple_default_template,
@@ -351,29 +386,46 @@ ND：{nd}
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
+                    settings_changed = False
                     settings_mode = settings.get('mode', getattr(self, 'current_mode', 'simple'))
                     if settings_mode not in default_templates:
                         settings_mode = 'simple'
 
+                    template_defaults_version_key = 'template_defaults_version'
+                    applied_template_version = str(settings.get(template_defaults_version_key, '')).strip()
+                    should_refresh_templates = applied_template_version != VERSION
+
                     legacy_template = settings.get('format_template', '')
                     simple_template = settings.get('format_template_simple')
                     corporate_template = settings.get('format_template_corporate')
+
+                    if should_refresh_templates:
+                        simple_template = simple_default_template
+                        corporate_template = corporate_default_template
+                        settings[template_defaults_version_key] = VERSION
+                        settings_changed = True
+                        logging.info(
+                            f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                        )
 
                     if not simple_template:
                         if settings_mode == 'simple' and legacy_template:
                             simple_template = legacy_template
                         else:
                             simple_template = simple_default_template
+                        settings_changed = True
 
                     if not corporate_template:
                         if settings_mode == 'corporate' and legacy_template:
                             corporate_template = legacy_template
                         else:
                             corporate_template = corporate_default_template
+                        settings_changed = True
 
                     # 旧データ汚染対策: 法人テンプレが通常テンプレと同一で前確希望プレースホルダーが無い場合は法人初期へ補正
                     if settings_mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
                         corporate_template = corporate_default_template
+                        settings_changed = True
 
                     settings['format_template_simple'] = simple_template
                     settings['format_template_corporate'] = corporate_template
@@ -383,6 +435,10 @@ ND：{nd}
 
                     # 互換用: 既存参照向けに現在モードのテンプレをformat_templateへ同期
                     settings['format_template'] = selected_template
+
+                    if settings_changed:
+                        with open(self.settings_file, 'w', encoding='utf-8') as wf:
+                            json.dump(settings, wf, ensure_ascii=False, indent=2)
 
                     # format_templateを直接self.format_templateに設定
                     self.format_template = selected_template
@@ -423,8 +479,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_phone_number(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def format_phone_number_without_hyphen(self):
         """電話番号の自動フォーマット処理（ハイフンなし）"""
@@ -432,8 +487,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_phone_number_without_hyphen(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def format_postal_code(self):
         """郵便番号の自動フォーマット処理"""
@@ -441,8 +495,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             formatted_text = format_postal_code(current_text)
-            if formatted_text != current_text:
-                sender.setText(formatted_text)
+            self._apply_text_preserving_cursor(sender, formatted_text, preserve_by_digits=True)
     
     def convert_to_half_width(self):
         """全角文字を半角に変換する処理"""
@@ -450,8 +503,7 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             converted_text = convert_to_half_width(current_text)
-            if converted_text != current_text:
-                sender.setText(converted_text)
+            self._apply_text_preserving_cursor(sender, converted_text)
     
     def update_year_combo(self, text):
         """元号に応じて年の選択肢を更新"""

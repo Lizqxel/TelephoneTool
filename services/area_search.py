@@ -474,36 +474,98 @@ def find_best_address_match(input_address, candidates):
     
     return None, best_similarity
 
-def handle_building_selection(driver, progress_callback=None, show_popup=True):
+def handle_building_selection(driver, progress_callback=None, show_popup=True, wait_seconds=3):
     """
-    建物選択モーダルの検出と集合住宅判定
-    モーダルが表示されない場合は正常に処理を続行
-    集合住宅と判定した場合はスクリーンショットを保存し、判定結果を返す
+    建物選択モーダルの検出と建物未指定ボタン選択
+    モーダルが表示された場合は優先順位に従って自動選択し、処理を続行する
     Args:
         driver: Selenium WebDriverインスタンス
         progress_callback: 進捗コールバック関数（任意）
         show_popup: ポップアップ表示フラグ
     Returns:
-        dict or None: 集合住宅判定時は判定結果辞書、それ以外はNone
+        dict or None: 基本はNone（処理継続）。選択不能時のみ集合住宅判定結果を返す
     """
     try:
         # 建物選択モーダルが表示されているか確認（短い待機時間で）
-        modal = WebDriverWait(driver, 3).until(
-            EC.visibility_of_element_located((By.ID, "buildingNameSelectModal"))
-        )
-        
-        if not modal.is_displayed():
-            logging.info("建物選択モーダルは表示されていません - 処理を続行します")
-            return None
-        
-        logging.info("建物選択モーダルが表示されました（集合住宅判定）")
+        if wait_seconds <= 0:
+            modal = None
+            for candidate in driver.find_elements(By.ID, "buildingNameSelectModal"):
+                try:
+                    if candidate.is_displayed():
+                        modal = candidate
+                        break
+                except Exception:
+                    continue
+            if modal is None:
+                logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+                return None
+        else:
+            modal = WebDriverWait(driver, wait_seconds).until(
+                EC.visibility_of_element_located((By.ID, "buildingNameSelectModal"))
+            )
+
+            if not modal.is_displayed():
+                logging.info("建物選択モーダルは表示されていません - 処理を続行します")
+                return None
+
+        logging.info("建物選択モーダルが表示されました（建物未指定で継続を試行）")
         if progress_callback:
-            progress_callback("集合住宅と判定しました。スクリーンショットを保存します。")
-        # スクリーンショットを保存
+            progress_callback("建物選択モーダルを処理中...")
+
+        def _find_clickable_by_text(candidates):
+            for text in candidates:
+                xpath = (
+                    "//*[@id='buildingNameSelectModal']"
+                    "//*[self::a or self::button]"
+                    f"[contains(normalize-space(.), '{text}')]"
+                )
+                try:
+                    element = WebDriverWait(driver, 1).until(
+                        EC.element_to_be_clickable((By.XPATH, xpath))
+                    )
+                    return element, text
+                except Exception:
+                    continue
+            return None, None
+
+        primary_labels = ["建物を選択しない", "建物名を選択しない", "建物名を入力しない"]
+        secondary_labels = ["該当する建物名がない", "該当する建物がない", "建物名が見つからない"]
+
+        target_button, selected_label = _find_clickable_by_text(primary_labels)
+        if target_button is None:
+            target_button, selected_label = _find_clickable_by_text(secondary_labels)
+
+        if target_button is not None:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
+            except Exception:
+                pass
+
+            try:
+                target_button.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", target_button)
+
+            logging.info(f"建物選択モーダルで「{selected_label}」を選択しました")
+            if progress_callback:
+                progress_callback(f"建物選択モーダル: 「{selected_label}」を選択")
+
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.ID, "buildingNameSelectModal"))
+                )
+            except TimeoutException:
+                logging.warning("建物選択モーダルが閉じるまでの待機でタイムアウトしましたが処理を続行します")
+
+            return None
+
+        logging.warning("建物選択モーダルに優先ボタンが見つからなかったため集合住宅判定にフォールバックします")
+        if progress_callback:
+            progress_callback("建物選択候補が見つからないため集合住宅判定にフォールバックします")
+
         screenshot_path = f"apartment_detected.png"
         take_screenshot_if_enabled(driver, screenshot_path)
         logging.info(f"集合住宅判定時のスクリーンショットを保存しました: {screenshot_path}")
-        # 判定結果を返す
         return {
             "status": "apartment",
             "message": "集合住宅（アパート・マンション等）",
@@ -520,7 +582,7 @@ def handle_building_selection(driver, progress_callback=None, show_popup=True):
         return None
     except Exception as e:
         logging.error(f"建物選択モーダルの処理中にエラー: {str(e)}")
-        driver.save_screenshot("debug_building_modal_error.png")
+        take_screenshot_if_enabled(driver, "debug_building_modal_error.png")
         raise
 
 def create_driver(headless=False):
@@ -550,6 +612,10 @@ def create_driver(headless=False):
         options.add_argument('--disable-infobars')
         options.add_argument('--disable-notifications')
         options.add_argument('--disable-popup-blocking')
+        options.add_argument('--log-level=3')
+        options.add_argument('--silent')
+        options.add_argument('--disable-features=OptimizationGuideModelDownloading,OptimizationHints,OptimizationTargetPrediction,OptimizationGuideOnDeviceModel')
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
         
         # メモリ使用量の最適化
         options.add_argument('--disable-application-cache')
@@ -995,59 +1061,86 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 raise NoSuchElementException("有効な住所候補が見つかりませんでした")
             
             logging.info(f"有効な候補数: {len(valid_candidates)}")
+
+            # 絞り込みを実施する最小候補件数
+            FILTER_MIN_CANDIDATES = 50
             
             # 住所候補が多い場合は、検索フィールドで絞り込み
-            try:
+            if len(valid_candidates) >= FILTER_MIN_CANDIDATES:
+                try:
                 # キャンセルチェック
-                check_cancellation()
+                    check_cancellation()
                 
-                search_field = WebDriverWait(driver, 3).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='絞り込みワードを入力']"))
-                )
-                logging.info("住所検索フィールドが見つかりました")
+                    search_field = WebDriverWait(driver, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='絞り込みワードを入力']"))
+                    )
+                    logging.info("住所検索フィールドが見つかりました")
                 
                 # キャンセルチェック
-                check_cancellation()
+                    check_cancellation()
                 
                 # 検索用の住所フォーマットを作成
-                search_address = base_address.replace("県", "県 ").replace("市", "市 ").replace("町", "町 ").replace("区", "区 ").strip()
-                logging.info(f"検索用にフォーマットされた住所: {search_address}")
+                    search_address = base_address.replace("県", "県 ").replace("市", "市 ").replace("町", "町 ").replace("区", "区 ").strip()
+                    logging.info(f"検索用にフォーマットされた住所: {search_address}")
                 
                 # キャンセルチェック
-                check_cancellation()
+                    check_cancellation()
                 
                 # 検索フィールドをクリアして入力
-                search_field.clear()
-                search_field.send_keys(search_address)
-                logging.info(f"検索フィールドに '{search_address}' を入力しました")
+                    search_field.clear()
+                    search_field.send_keys(search_address)
+                    logging.info(f"検索フィールドに '{search_address}' を入力しました")
                 
                 # 入力後の表示更新を待機（短縮）
-                WebDriverWait(driver, 3).until(
-                    EC.presence_of_all_elements_located((By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]"))
-                )
+                    WebDriverWait(driver, 3).until(
+                        EC.presence_of_all_elements_located((By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]"))
+                    )
                 
                 # キャンセルチェック
-                check_cancellation()
+                    check_cancellation()
                 
                 # 絞り込み後の候補を取得
-                filtered_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
-                if filtered_candidates:
-                    valid_candidates = filtered_candidates
-                    logging.info(f"絞り込み後の候補数: {len(valid_candidates)}")
+                    filtered_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
+                    if filtered_candidates:
+                        valid_candidates = filtered_candidates
+                        logging.info(f"絞り込み後の候補数: {len(valid_candidates)}")
                     
                     # キャンセルチェック
-                    check_cancellation()
+                        check_cancellation()
                     
                     # 絞り込み後の候補をログ出力（最初の5件のみ）
-                    for i, candidate in enumerate(valid_candidates[:5]):
-                        # キャンセルチェック（ループ内でも確認）
-                        check_cancellation()
-                        logging.info(f"絞り込み後の候補 {i+1}: '{candidate.text.strip()}'")
-                else:
-                    logging.warning("絞り込み後の候補が見つかりませんでした")
-                    logging.info("元の候補リストを使用します")
-            except Exception as e:
-                logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
+                        for i, candidate in enumerate(valid_candidates[:5]):
+                            # キャンセルチェック（ループ内でも確認）
+                            check_cancellation()
+                            logging.info(f"絞り込み後の候補 {i+1}: '{candidate.text.strip()}'")
+                    else:
+                        logging.warning("絞り込み後の候補が見つかりませんでした")
+                        logging.info("検索フィールドをクリアして候補を再取得します")
+
+                    # 0件時は入力前の候補リストに戻す（古い要素参照を避ける）
+                        search_field.clear()
+                        WebDriverWait(driver, 3).until(
+                            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#addressSelectModal ul li a"))
+                        )
+                        restored_candidates = driver.find_elements(By.CSS_SELECTOR, "#addressSelectModal ul li a")
+                        valid_candidates = [c for c in restored_candidates if c.text.strip()]
+                        logging.info(f"復元後の候補数: {len(valid_candidates)}")
+
+                # フィルタ操作後は要素参照が更新されるため、現時点の候補を再取得する
+                    if valid_candidates:
+                        refreshed_candidates = driver.find_elements(By.XPATH, "//*[@id='addressSelectModal']//div[contains(@class, 'clickable')]")
+                        if refreshed_candidates:
+                            valid_candidates = [c for c in refreshed_candidates if c.text.strip()]
+                        else:
+                            refreshed_candidates = driver.find_elements(By.CSS_SELECTOR, "#addressSelectModal ul li a")
+                            valid_candidates = [c for c in refreshed_candidates if c.text.strip()]
+                        logging.info(f"候補参照を更新しました: {len(valid_candidates)} 件")
+                except Exception as e:
+                    logging.warning(f"住所検索フィールドの操作に失敗: {str(e)}")
+            else:
+                logging.info(
+                    f"候補数が {FILTER_MIN_CANDIDATES} 件未満のため、絞り込みをスキップします（{len(valid_candidates)} 件）"
+                )
             
             # キャンセルチェック
             check_cancellation()
@@ -1373,6 +1466,8 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     banchi_stage_pending = True
                     logging.info("番地入力は後続ダイアログで継続します（DIALOG_ID01未表示）")
             
+            prefetched_final_search_button = None
+
             # 6. 号入力画面が表示された場合は、号を入力
             try:
                 if progress_callback:
@@ -1410,8 +1505,49 @@ def search_service_area_west(postal_code, address, progress_callback=None):
 
                     return WebDriverWait(driver, timeout).until(_find_visible)
 
-                # 号入力ダイアログが表示されるまで待機（IDは動的）
-                current_number_dialog_id = wait_for_number_dialog(timeout=15)
+                def get_clickable_final_search_button():
+                    try:
+                        button = driver.find_element(By.ID, "id_tak_bt_nx")
+                        if button.is_displayed() and button.is_enabled():
+                            return button
+                    except Exception:
+                        return None
+                    return None
+
+                def wait_for_number_dialog_or_final_button(timeout=15, exclude_ids=None, poll_interval=0.2):
+                    excluded = set(exclude_ids or [])
+                    end_at = time.time() + timeout
+
+                    while time.time() < end_at:
+                        check_cancellation()
+
+                        dialogs = driver.find_elements(By.XPATH, "//dialog[starts-with(@id, 'DIALOG_ID0')]")
+                        for dialog in dialogs:
+                            try:
+                                dialog_id = (dialog.get_attribute("id") or "").strip()
+                                if dialog_id == "DIALOG_ID01" or dialog_id in excluded:
+                                    continue
+                                if dialog.is_displayed():
+                                    return "number_dialog", dialog_id
+                            except Exception:
+                                continue
+
+                        final_button = get_clickable_final_search_button()
+                        if final_button is not None:
+                            return "final_button", final_button
+
+                        time.sleep(poll_interval)
+
+                    raise TimeoutException("号入力ダイアログまたは検索結果確認ボタンの検出がタイムアウトしました")
+
+                # 号入力ダイアログまたは検索結果確認ボタンが表示されるまで待機
+                next_step_type, next_step_payload = wait_for_number_dialog_or_final_button(timeout=15)
+                if next_step_type == "final_button":
+                    prefetched_final_search_button = next_step_payload
+                    logging.info("号入力画面はスキップされました（検索結果確認ボタンの先行表示を検出）")
+                    raise TimeoutException("号入力をスキップして検索結果確認へ進行")
+
+                current_number_dialog_id = next_step_payload
                 logging.info(f"号入力ダイアログが表示されました: {current_number_dialog_id}")
                 
                 # 号を入力
@@ -1670,7 +1806,8 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 logging.info("号入力画面はスキップされました")
             
             # 建物選択モーダルの処理
-            result = handle_building_selection(driver, progress_callback, show_popup)
+            building_modal_wait = 0.5 if prefetched_final_search_button is not None else 3
+            result = handle_building_selection(driver, progress_callback, show_popup, wait_seconds=building_modal_wait)
             if result is not None:
                 logging.info(f"search_service_area_west: apartment返却: {result}")
                 return result
@@ -1685,10 +1822,21 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 # 検索結果確認ボタンをクリック
                 logging.info("検索結果確認ボタンの検出を開始します")
                 
-                # 指定されたIDを持つボタンを待機して検出
-                final_search_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
-                )
+                if prefetched_final_search_button is not None:
+                    logging.info("事前検出済みの検索結果確認ボタンを利用します")
+                    final_search_button = prefetched_final_search_button
+                    try:
+                        if not final_search_button.is_displayed() or not final_search_button.is_enabled():
+                            raise TimeoutException("事前検出済みボタンがクリック可能ではありません")
+                    except Exception:
+                        final_search_button = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                        )
+                else:
+                    # 指定されたIDを持つボタンを待機して検出
+                    final_search_button = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                    )
                 
                 # キャンセルチェック（ボタン検出後）
                 check_cancellation()

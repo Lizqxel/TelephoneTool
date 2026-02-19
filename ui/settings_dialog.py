@@ -75,7 +75,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
         self.default_format_corporate = """{management_id}
 
@@ -112,7 +112,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円"""
+案内料金：3650円"""
 
         default_mode = getattr(parent, 'current_mode', 'simple') if parent else 'simple'
         self.default_format = self.default_format_corporate if default_mode == 'corporate' else self.default_format_simple

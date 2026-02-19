@@ -347,6 +347,10 @@ def create_driver(headless=False):
         options.add_argument('--disable-infobars')
         options.add_argument('--disable-notifications')
         options.add_argument('--disable-popup-blocking')
+        options.add_argument('--log-level=3')
+        options.add_argument('--silent')
+        options.add_argument('--disable-features=OptimizationGuideModelDownloading,OptimizationHints,OptimizationTargetPrediction,OptimizationGuideOnDeviceModel')
+        options.add_experimental_option('excludeSwitches', ['enable-logging'])
         
         # メモリ使用量の最適化
         options.add_argument('--disable-application-cache')

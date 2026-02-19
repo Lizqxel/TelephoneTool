@@ -13,6 +13,7 @@ import re
 import time
 import requests
 import threading
+import warnings
 from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
@@ -146,14 +147,16 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
     class _TextChangeCommand(QUndoCommand):
         """テキスト変更用のUndoコマンド"""
-        def __init__(self, widget, old_text, new_text, set_flag_callback, parent=None):
+        def __init__(self, widget, old_text, new_text, set_flag_callback, old_cursor_pos=None, new_cursor_pos=None, parent=None):
             super().__init__(parent)
             self.widget = widget
             self.old_text = old_text
             self.new_text = new_text
             self.set_flag_callback = set_flag_callback
+            self.old_cursor_pos = old_cursor_pos
+            self.new_cursor_pos = new_cursor_pos
 
-        def _apply_text(self, text):
+        def _apply_text(self, text, cursor_pos=None):
             if self.widget is None:
                 return
             try:
@@ -165,9 +168,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     pass
                 from PySide6.QtWidgets import QLineEdit, QTextEdit
                 if isinstance(self.widget, QLineEdit):
-                    self.widget.setText(text)
+                    if self.widget.text() != text:
+                        self.widget.setText(text)
+                    if cursor_pos is not None:
+                        self.widget.setCursorPosition(max(0, min(cursor_pos, len(self.widget.text()))))
                 elif isinstance(self.widget, QTextEdit):
-                    self.widget.setPlainText(text)
+                    if self.widget.toPlainText() != text:
+                        self.widget.setPlainText(text)
                 try:
                     self.widget.setFocus()
                 except Exception:
@@ -178,14 +185,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         def undo(self):
             self.set_flag_callback(True)
             try:
-                self._apply_text(self.old_text)
+                self._apply_text(self.old_text, self.old_cursor_pos)
             finally:
                 self.set_flag_callback(False)
 
         def redo(self):
             self.set_flag_callback(True)
             try:
-                self._apply_text(self.new_text)
+                self._apply_text(self.new_text, self.new_cursor_pos)
             finally:
                 self.set_flag_callback(False)
     
@@ -267,6 +274,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.cancel_worker = None
         self.cancel_thread = None
         self.cancel_timer = None
+
+        # 検索スレッド関連（QObject.thread() メソッド名と衝突しないよう明示初期化）
+        self.thread = None
+        self.worker = None
         
         # ログ設定
         self.setup_logging()
@@ -509,7 +520,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
+案内料金：3650円
 """
 
             corporate_default_format = """{management_id}
@@ -547,7 +558,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
+案内料金：3650円
 """
 
             # 初期設定ファイル生成かどうかをチェック
@@ -1563,7 +1574,23 @@ ND：{nd}
         old_text = self._last_text_map.get(widget, "")
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                new_cursor_pos = widget.cursorPosition()
+                old_cursor_pos = min(new_cursor_pos, len(old_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 
@@ -1574,7 +1601,23 @@ ND：{nd}
         old_text = self._last_text_map.get(widget, "")
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                new_cursor_pos = widget.cursorPosition()
+                old_cursor_pos = min(new_cursor_pos, len(old_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 
@@ -1590,7 +1633,23 @@ ND：{nd}
         old_text = self._get_widget_text(widget)
         if new_text == old_text:
             return
-        cmd = MainWindow._TextChangeCommand(widget, old_text, new_text, self._set_undo_flag)
+        old_cursor_pos = None
+        new_cursor_pos = None
+        try:
+            from PySide6.QtWidgets import QLineEdit
+            if isinstance(widget, QLineEdit):
+                old_cursor_pos = widget.cursorPosition()
+                new_cursor_pos = min(old_cursor_pos, len(new_text))
+        except Exception:
+            pass
+        cmd = MainWindow._TextChangeCommand(
+            widget,
+            old_text,
+            new_text,
+            self._set_undo_flag,
+            old_cursor_pos=old_cursor_pos,
+            new_cursor_pos=new_cursor_pos,
+        )
         self.undo_stack.push(cmd)
         self._last_text_map[widget] = new_text
 
@@ -1666,6 +1725,9 @@ ND：{nd}
         self.time_preference_input = QLineEdit()
         self.time_preference_input.setPlaceholderText("例：午前中")
         self.time_preference_input.textChanged.connect(self.update_available_time_from_mobile_parts)
+        self.mobile_part1_input.returnPressed.connect(self.mobile_part2_input.setFocus)
+        self.mobile_part2_input.returnPressed.connect(self.mobile_part3_input.setFocus)
+        self.mobile_part3_input.returnPressed.connect(self.time_preference_input.setFocus)
         time_preference_layout.addWidget(self.time_preference_input)
         
         input_layout.addWidget(self.time_preference_widget)
@@ -2262,6 +2324,20 @@ ND：{nd}
         if hasattr(self, 'furigana_mode_combo'):
             self.furigana_mode_combo.setEnabled(True)
 
+    def _safe_disconnect(self, signal, slot):
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"Failed to disconnect .*",
+                    category=RuntimeWarning
+                )
+                signal.disconnect(slot)
+        except (TypeError, RuntimeError):
+            pass
+        except Exception:
+            pass
+
     def setup_corporate_name_sync(self):
         if self.current_mode != 'corporate':
             return
@@ -2275,14 +2351,8 @@ ND：{nd}
         if not (hasattr(self, 'operator_input') and hasattr(self, 'contractor_input')):
             return
 
-        try:
-            self.operator_input.textEdited.disconnect(self._on_operator_name_edited)
-        except Exception:
-            pass
-        try:
-            self.contractor_input.textEdited.disconnect(self._on_contractor_name_edited)
-        except Exception:
-            pass
+        self._safe_disconnect(self.operator_input.textEdited, self._on_operator_name_edited)
+        self._safe_disconnect(self.contractor_input.textEdited, self._on_contractor_name_edited)
 
         if should_sync:
             self.operator_input.textEdited.connect(self._on_operator_name_edited)
@@ -4914,7 +4984,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
+案内料金：3650円
 """
 
             corporate_default_format = """{management_id}
@@ -4952,7 +5022,7 @@ ND：{nd}
 
 備考：{relationship}
 お客様が今使っている回線：アナログ
-案内料金：2500円
+案内料金：3650円
 """
 
             # 初期設定を設定
@@ -4981,33 +5051,55 @@ ND：{nd}
                     # 既存の設定を更新
                     self.settings.update(loaded_settings)
 
+                settings_changed = False
+
                 mode = self.settings.get('mode', 'simple')
                 if mode not in ('simple', 'corporate'):
                     mode = 'simple'
 
+                template_defaults_version_key = 'template_defaults_version'
+                applied_template_version = str(self.settings.get(template_defaults_version_key, '')).strip()
+                should_refresh_templates = applied_template_version != VERSION
+
                 legacy_template = self.settings.get('format_template', '')
                 simple_template = self.settings.get('format_template_simple')
                 corporate_template = self.settings.get('format_template_corporate')
+
+                if should_refresh_templates:
+                    simple_template = simple_default_format
+                    corporate_template = corporate_default_format
+                    self.settings[template_defaults_version_key] = VERSION
+                    settings_changed = True
+                    logging.info(
+                        f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                    )
 
                 if not simple_template:
                     if mode == 'simple' and legacy_template:
                         simple_template = legacy_template
                     else:
                         simple_template = simple_default_format
+                    settings_changed = True
 
                 if not corporate_template:
                     if mode == 'corporate' and legacy_template:
                         corporate_template = legacy_template
                     else:
                         corporate_template = corporate_default_format
+                    settings_changed = True
 
                 # 旧データ汚染対策: 法人テンプレが通常テンプレと同一の場合は法人初期テンプレへ補正
                 if mode == 'corporate' and corporate_template == simple_template and '{call_preference}' not in corporate_template:
                     corporate_template = corporate_default_format
+                    settings_changed = True
 
                 self.settings['format_template_simple'] = simple_template
                 self.settings['format_template_corporate'] = corporate_template
                 self.settings['format_template'] = corporate_template if mode == 'corporate' else simple_template
+
+                if settings_changed:
+                    with open(self.settings_file, 'w', encoding='utf-8') as f:
+                        json.dump(self.settings, f, ensure_ascii=False, indent=2)
             else:
                 # デフォルト設定をファイルに保存
                 self.save_settings()
