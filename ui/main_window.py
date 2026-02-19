@@ -13,6 +13,7 @@ import re
 import time
 import requests
 import threading
+import warnings
 from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
@@ -267,6 +268,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.cancel_worker = None
         self.cancel_thread = None
         self.cancel_timer = None
+
+        # 検索スレッド関連（QObject.thread() メソッド名と衝突しないよう明示初期化）
+        self.thread = None
+        self.worker = None
         
         # ログ設定
         self.setup_logging()
@@ -1666,6 +1671,9 @@ ND：{nd}
         self.time_preference_input = QLineEdit()
         self.time_preference_input.setPlaceholderText("例：午前中")
         self.time_preference_input.textChanged.connect(self.update_available_time_from_mobile_parts)
+        self.mobile_part1_input.returnPressed.connect(self.mobile_part2_input.setFocus)
+        self.mobile_part2_input.returnPressed.connect(self.mobile_part3_input.setFocus)
+        self.mobile_part3_input.returnPressed.connect(self.time_preference_input.setFocus)
         time_preference_layout.addWidget(self.time_preference_input)
         
         input_layout.addWidget(self.time_preference_widget)
@@ -2262,6 +2270,20 @@ ND：{nd}
         if hasattr(self, 'furigana_mode_combo'):
             self.furigana_mode_combo.setEnabled(True)
 
+    def _safe_disconnect(self, signal, slot):
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"Failed to disconnect .*",
+                    category=RuntimeWarning
+                )
+                signal.disconnect(slot)
+        except (TypeError, RuntimeError):
+            pass
+        except Exception:
+            pass
+
     def setup_corporate_name_sync(self):
         if self.current_mode != 'corporate':
             return
@@ -2275,14 +2297,8 @@ ND：{nd}
         if not (hasattr(self, 'operator_input') and hasattr(self, 'contractor_input')):
             return
 
-        try:
-            self.operator_input.textEdited.disconnect(self._on_operator_name_edited)
-        except Exception:
-            pass
-        try:
-            self.contractor_input.textEdited.disconnect(self._on_contractor_name_edited)
-        except Exception:
-            pass
+        self._safe_disconnect(self.operator_input.textEdited, self._on_operator_name_edited)
+        self._safe_disconnect(self.contractor_input.textEdited, self._on_contractor_name_edited)
 
         if should_sync:
             self.operator_input.textEdited.connect(self._on_operator_name_edited)
