@@ -6,11 +6,14 @@ MapFan検索サービス
 """
 
 import logging
+import re
 import time
 import threading
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
@@ -112,6 +115,41 @@ class MapfanService:
         if self._is_cancelled():
             raise TimeoutException("MapFan処理がキャンセルされました")
 
+    def _build_direct_spot_url(self, address: str) -> Optional[str]:
+        normalized_address = (address or "").strip()
+        if not normalized_address:
+            return None
+
+        encoded_address = quote(normalized_address, safe="")
+        return f"https://mapfan.com/map/words/{encoded_address}/spots?s=std,pc,ja"
+
+    def _resolve_spot_url_without_selenium(self, address: str) -> Optional[str]:
+        words_url = self._build_direct_spot_url(address)
+        if not words_url:
+            return None
+
+        try:
+            request = urllib.request.Request(
+                words_url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/145.0.0.0 Safari/537.36"
+                    )
+                },
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                html = response.read().decode("utf-8", errors="ignore")
+
+            match = re.search(r"/map/spots/A,[^\"'\s<>]+", html)
+            if match:
+                return f"https://mapfan.com{match.group(0)}"
+        except Exception as e:
+            logging.debug(f"MapFan直接URLの詳細解決に失敗（words URLを使用）: {str(e)}")
+
+        return words_url
+
     def get_detail_url_from_address(
         self,
         address: str,
@@ -135,6 +173,13 @@ class MapfanService:
             return None
 
         settings = load_browser_settings()
+        use_direct_url = bool(settings.get("mapfan_direct_url", True))
+        if use_direct_url:
+            direct_url = self._resolve_spot_url_without_selenium(normalized_address)
+            if direct_url:
+                logging.info("MapFan詳細URLを直接生成しました（Selenium未使用）")
+                return direct_url
+
         headless = settings.get("headless", True)
         if force_headless is not None:
             headless = bool(force_headless)

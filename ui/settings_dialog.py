@@ -132,6 +132,7 @@ ND：{nd}
         self.default_browser_settings = {
             "headless": False,
             "mapfan_headless": True,
+            "mapfan_direct_url": True,
             "disable_images": True,
             "enable_screenshots": False,
             "show_popup": True,
@@ -402,6 +403,11 @@ ND：{nd}
         self.mapfan_headless_checkbox.setChecked(self.current_browser_settings.get("mapfan_headless", True))
         self.mapfan_headless_checkbox.setToolTip("有効にするとMapFanの自動操作画面を表示せずに実行します")
         browser_layout.addWidget(self.mapfan_headless_checkbox)
+
+        self.mapfan_direct_url_checkbox = QCheckBox("MapFan URLを直接生成（高速・推奨）")
+        self.mapfan_direct_url_checkbox.setChecked(self.current_browser_settings.get("mapfan_direct_url", True))
+        self.mapfan_direct_url_checkbox.setToolTip("有効にするとSeleniumを使わず、住所からMapFan URLを直接生成します")
+        browser_layout.addWidget(self.mapfan_direct_url_checkbox)
         
         # 画像読み込み無効化設定
         self.disable_images_checkbox = QCheckBox("画像読み込みを無効化（高速化）")
@@ -589,6 +595,7 @@ ND：{nd}
         """ブラウザ設定をデフォルトに戻す"""
         self.headless_checkbox.setChecked(self.default_browser_settings["headless"])
         self.mapfan_headless_checkbox.setChecked(self.default_browser_settings["mapfan_headless"])
+        self.mapfan_direct_url_checkbox.setChecked(self.default_browser_settings["mapfan_direct_url"])
         self.disable_images_checkbox.setChecked(self.default_browser_settings["disable_images"])
         # enable_screenshots をデフォルトに戻す
         self.screenshots_checkbox.setChecked(self.default_browser_settings.get("enable_screenshots", True))
@@ -707,6 +714,7 @@ ND：{nd}
                     # ブラウザ設定の読み込み
                     self.headless_checkbox.setChecked(browser_settings.get("headless", False))
                     self.mapfan_headless_checkbox.setChecked(browser_settings.get("mapfan_headless", True))
+                    self.mapfan_direct_url_checkbox.setChecked(browser_settings.get("mapfan_direct_url", True))
                     self.disable_images_checkbox.setChecked(browser_settings.get("disable_images", True))
                     self.screenshots_checkbox.setChecked(browser_settings.get("enable_screenshots", True))
                     self.popup_checkbox.setChecked(browser_settings.get("show_popup", True))
@@ -785,6 +793,7 @@ ND：{nd}
             browser_settings = {
                 "headless": self.headless_checkbox.isChecked(),
                 "mapfan_headless": self.mapfan_headless_checkbox.isChecked(),
+                "mapfan_direct_url": self.mapfan_direct_url_checkbox.isChecked(),
                 "disable_images": self.disable_images_checkbox.isChecked(),
                 "enable_screenshots": self.screenshots_checkbox.isChecked(),
                 "show_popup": self.popup_checkbox.isChecked(),
