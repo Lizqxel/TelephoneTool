@@ -269,6 +269,13 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # モード変更フラグ（設定ダイアログ用）
         self.mode_changed = False
         self.new_mode = None
+        self._mode_ui_state_by_mode = {
+            'simple': {},
+            'corporate': {},
+            'easy': {}
+        }
+        self._shared_ui_state = {}
+        self._is_restoring_mode_state = False
         
         # キャンセル処理関連の初期化
         self.cancel_worker = None
@@ -472,10 +479,148 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             show_again = dialog.should_show_again()
             self.save_mode_settings(selected_mode, show_again)
             if selected_mode != self.current_mode:
+                previous_mode = self.current_mode
                 self.current_mode = selected_mode
-                self.reconstruct_ui()
+                self.reconstruct_ui(previous_mode=previous_mode)
             else:
                 self.current_mode = selected_mode
+
+    def _collect_mode_ui_state(self):
+        """現在表示中のUI入力値を辞書化する"""
+        state = {}
+        for attr_name, widget in self.__dict__.items():
+            try:
+                if isinstance(widget, QLineEdit):
+                    state[attr_name] = {
+                        'type': 'line_edit',
+                        'value': widget.text()
+                    }
+                elif isinstance(widget, QTextEdit):
+                    state[attr_name] = {
+                        'type': 'text_edit',
+                        'value': widget.toPlainText()
+                    }
+                elif isinstance(widget, QComboBox):
+                    state[attr_name] = {
+                        'type': 'combo_box',
+                        'value': widget.currentText(),
+                        'index': widget.currentIndex()
+                    }
+            except RuntimeError:
+                continue
+        return state
+
+    def _save_current_mode_ui_state(self, mode=None):
+        """指定モードのUI入力値を保存する"""
+        mode_key = mode or self.current_mode
+        if mode_key not in self._mode_ui_state_by_mode:
+            return
+        current_state = self._collect_mode_ui_state()
+        self._mode_ui_state_by_mode[mode_key] = current_state
+        self._shared_ui_state.update(current_state)
+        logging.info(f"UI状態を保存(共有): mode={mode_key}, saved_items={len(current_state)}, shared_items={len(self._shared_ui_state)}")
+
+    def _restore_mode_ui_state(self, mode=None):
+        """指定モードのUI入力値を復元する"""
+        mode_key = mode or self.current_mode
+        if mode_key not in self._mode_ui_state_by_mode:
+            return
+
+        if not self._shared_ui_state:
+            return
+
+        state = dict(self._shared_ui_state)
+        logging.info(f"UI状態を復元(共有): mode={mode_key}, restore_items={len(state)}")
+
+        widgets_to_restore = []
+        for attr_name, item in state.items():
+            if not hasattr(self, attr_name):
+                continue
+            widget = getattr(self, attr_name)
+            try:
+                if hasattr(widget, 'isVisible'):
+                    _ = widget.isVisible()
+            except RuntimeError:
+                continue
+            widgets_to_restore.append((attr_name, widget, item))
+
+        restore_priority = {
+            'operator_input': 10,
+            'contractor_input': 11,
+            'mobile_pattern_combo': 20,
+            'mobile_part1_input': 30,
+            'mobile_part2_input': 31,
+            'mobile_part3_input': 32,
+            'time_preference_input': 33,
+            'available_time_input': 90
+        }
+
+        widgets_to_restore.sort(key=lambda x: restore_priority.get(x[0], 50))
+
+        self._is_restoring_mode_state = True
+        for _, widget, _ in widgets_to_restore:
+            try:
+                widget.blockSignals(True)
+            except Exception:
+                pass
+
+        try:
+            for attr_name, widget, item in widgets_to_restore:
+                item_type = item.get('type')
+                item_value = item.get('value')
+
+                try:
+                    if item_type == 'line_edit' and isinstance(widget, QLineEdit):
+                        widget.setText(item_value or '')
+                    elif item_type == 'text_edit' and isinstance(widget, QTextEdit):
+                        widget.setPlainText(item_value or '')
+                    elif item_type == 'combo_box' and isinstance(widget, QComboBox):
+                        combo_text = item_value or ''
+                        found_index = widget.findText(combo_text)
+                        if found_index >= 0:
+                            widget.setCurrentIndex(found_index)
+                        elif widget.isEditable():
+                            widget.setEditText(combo_text)
+                        else:
+                            combo_index = item.get('index', -1)
+                            if isinstance(combo_index, int) and 0 <= combo_index < widget.count():
+                                widget.setCurrentIndex(combo_index)
+                except Exception:
+                    continue
+        finally:
+            for _, widget, _ in widgets_to_restore:
+                try:
+                    widget.blockSignals(False)
+                except Exception:
+                    pass
+            self._is_restoring_mode_state = False
+
+        if hasattr(self, 'mobile_pattern_combo'):
+            try:
+                self._set_mobile_pattern_ui_state(self.mobile_pattern_combo.currentText(), clear_inputs=False)
+            except Exception:
+                pass
+
+        if hasattr(self, 'net_usage_combo'):
+            try:
+                self.on_net_usage_changed(self.net_usage_combo.currentText())
+            except Exception:
+                pass
+
+        if hasattr(self, 'other_number_combo'):
+            try:
+                self.on_other_number_changed(self.other_number_combo.currentText())
+            except Exception:
+                pass
+
+    def clear_mode_ui_state_cache(self):
+        """モード切替用に保持したUI状態を全削除する"""
+        self._mode_ui_state_by_mode = {
+            'simple': {},
+            'corporate': {},
+            'easy': {}
+        }
+        self._shared_ui_state = {}
     
     def save_mode_settings(self, mode, show_again):
         """
@@ -3724,12 +3869,14 @@ ND：{nd}
             logging.error(f"テンプレート取得中にエラー: {e}")
             return None
 
-    def reconstruct_ui(self):
+    def reconstruct_ui(self, previous_mode=None):
         """
         モード切り替え時にUIを再構築する
         """
         try:
             logging.info("UIの再構築を開始します")
+
+            self._save_current_mode_ui_state(previous_mode)
 
             self.undo_stack.clear()
             self._last_text_map = {}
@@ -3739,6 +3886,8 @@ ND：{nd}
                 self.init_simple_mode()
             else:
                 self.init_easy_mode()
+
+            self._restore_mode_ui_state(self.current_mode)
 
             self.enable_undo_redo_for_inputs()
             
@@ -3847,6 +3996,27 @@ ND：{nd}
         except Exception as e:
             logging.error(f"年齢チェック中にエラー: {e}")
 
+    def _set_mobile_pattern_ui_state(self, text, clear_inputs=True):
+        """携帯パターンに応じた表示状態を反映する（必要に応じて入力クリア）"""
+        if text == "①携帯ありで番号がわかる":
+            self.mobile_number_widget.show()
+            self.time_preference_widget.show()
+            if clear_inputs:
+                self.mobile_part1_input.clear()
+                self.mobile_part2_input.clear()
+                self.mobile_part3_input.clear()
+                self.time_preference_input.clear()
+                self.mobile_part1_input.setFocus()
+        else:
+            self.mobile_number_widget.hide()
+            self.time_preference_widget.show()
+            if clear_inputs:
+                self.time_preference_input.clear()
+                if text == "②携帯なし":
+                    self.available_time_input.setText("携帯なし")
+                elif text == "③携帯ありで番号がわからない":
+                    self.available_time_input.setText("携帯不明")
+
     def on_mobile_pattern_changed(self, text):
         """
         携帯番号パターンが変更された時の処理
@@ -3854,28 +4024,7 @@ ND：{nd}
         Args:
             text (str): 選択されたテキスト
         """
-        if text == "①携帯ありで番号がわかる":
-            # 携帯番号入力欄と時間帯入力欄を表示
-            self.mobile_number_widget.show()
-            self.time_preference_widget.show()
-            # 入力欄をクリア
-            self.mobile_part1_input.clear()
-            self.mobile_part2_input.clear()
-            self.mobile_part3_input.clear()
-            self.time_preference_input.clear()
-            # フォーカスを最初の入力欄に設定
-            self.mobile_part1_input.setFocus()
-        else:
-            # 携帯番号入力欄を非表示、時間帯入力欄は表示
-            self.mobile_number_widget.hide()
-            self.time_preference_widget.show()
-            # 時間帯入力欄をクリア
-            self.time_preference_input.clear()
-            # パターンに応じてavailable_time_inputを更新
-            if text == "②携帯なし":
-                self.available_time_input.setText("携帯なし")
-            elif text == "③携帯ありで番号がわからない":
-                self.available_time_input.setText("携帯不明")
+        self._set_mobile_pattern_ui_state(text, clear_inputs=not self._is_restoring_mode_state)
         
 
     def format_mobile_number_part(self):

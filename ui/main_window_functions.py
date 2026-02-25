@@ -1005,6 +1005,10 @@ ND：{nd}
         
         # プレビューエリアをクリア
         self.preview_text.clear()
+
+        # モード切替用の保持状態もクリア
+        if hasattr(self, 'clear_mode_ui_state_cache'):
+            self.clear_mode_ui_state_cache()
     
     def setup_google_sheets(self):
         """Google Sheetsの設定"""

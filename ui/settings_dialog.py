@@ -899,7 +899,7 @@ ND：{nd}
                 
                 # 親ウィンドウのUIを再構築
                 if hasattr(self.parent(), 'reconstruct_ui'):
-                    self.parent().reconstruct_ui()
+                    self.parent().reconstruct_ui(previous_mode=previous_mode)
             
             return True
         except Exception as e:
