@@ -41,9 +41,7 @@ class SettingsDialog(QDialog):
         
         logging.info(f"設定ファイルのパス: {self.settings_file}")
         
-        self.default_format_simple = """{management_id}
-
-対応者（お客様の名前）：{operator}
+        self.default_format_simple = """対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time}
 ★電話取次：アナログ→光電話

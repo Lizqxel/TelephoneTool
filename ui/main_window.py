@@ -631,9 +631,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             show_again: 次回から表示するかどうか
         """
         try:
-            simple_default_format = """{management_id}
-
-対応者（お客様の名前）：{operator}
+            simple_default_format = """対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time} 
 ★電話取次：アナログ→光電話
@@ -5099,9 +5097,7 @@ class CancellationError(Exception):
     def load_settings(self):
         """設定ファイルを読み込む"""
         try:
-            simple_default_format = """{management_id}
-
-対応者（お客様の名前）：{operator}
+            simple_default_format = """対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time} 
 ★電話取次：アナログ→光電話
