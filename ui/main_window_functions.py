@@ -303,9 +303,7 @@ class MainWindowFunctions:
                 'font_size': 10  # デフォルトのフォントサイズ
             }
             
-            simple_default_template = """{management_id}
-
-対応者（お客様の名前）：{operator}
+            simple_default_template = """対応者（お客様の名前）：{operator}
 工事希望日
 ★出やすい時間帯：{available_time}
 ★電話取次：アナログ→光電話
@@ -1005,6 +1003,10 @@ ND：{nd}
         
         # プレビューエリアをクリア
         self.preview_text.clear()
+
+        # モード切替用の保持状態もクリア
+        if hasattr(self, 'clear_mode_ui_state_cache'):
+            self.clear_mode_ui_state_cache()
     
     def setup_google_sheets(self):
         """Google Sheetsの設定"""
