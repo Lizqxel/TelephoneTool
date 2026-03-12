@@ -595,6 +595,17 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     pass
             self._is_restoring_mode_state = False
 
+        era_state = state.get('era_combo')
+        year_state = state.get('year_combo')
+        if era_state and year_state and hasattr(self, 'era_combo') and hasattr(self, 'year_combo'):
+            era_text = (era_state.get('value') or '').strip()
+            year_text = (year_state.get('value') or '').strip()
+            self.update_year_combo(era_text)
+            if year_text:
+                year_index = self.year_combo.findText(year_text)
+                if year_index >= 0:
+                    self.year_combo.setCurrentIndex(year_index)
+
         if hasattr(self, 'mobile_pattern_combo'):
             try:
                 self._set_mobile_pattern_ui_state(self.mobile_pattern_combo.currentText(), clear_inputs=False)
@@ -5073,6 +5084,8 @@ class CancellationError(Exception):
                 preview_text = preview_text.replace(placeholder, str(value or ''))
                 logging.debug(f"プレースホルダー {placeholder} を {value} に置換")
             
+            preview_text = self._apply_guide_fee_override(preview_text, data.get('fee', ''))
+
             logging.info("プレビューテキストの生成が完了")
             
             # プレビューテキストを設定

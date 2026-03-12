@@ -554,6 +554,22 @@ ND：{nd}
                 logging.warning("生年月日の変換に失敗しました")
         return ""
 
+    def _apply_guide_fee_override(self, formatted_text: str, fee_text: str = "") -> str:
+        if not fee_text:
+            fee_text = self.fee_input.text().strip() if hasattr(self, 'fee_input') else ""
+        if not fee_text and hasattr(self, 'fee_combo'):
+            fee_text = self.fee_combo.currentText().strip()
+        normalized_fee = fee_text.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+        fee_numbers = [int(n) for n in re.findall(r"\d+", normalized_fee)]
+        if fee_numbers:
+            fee_min = min(fee_numbers)
+            fee_max = max(fee_numbers)
+            if fee_min == 2500 and fee_max == 3000:
+                return re.sub(r"^\s*案内料金：.*$", "案内料金：2500円", formatted_text, flags=re.MULTILINE)
+            if fee_min == 3500 and fee_max == 4000:
+                return re.sub(r"^\s*案内料金：.*$", "案内料金：3650円", formatted_text, flags=re.MULTILINE)
+        return formatted_text
+
     def _require_birth_date_for_comment(self, allow_empty: bool = False):
         birth_date = self._build_birth_date()
         if not birth_date and not allow_empty:
@@ -897,6 +913,7 @@ ND：{nd}
         try:
             template = self.format_template
             formatted_text = template.format(**format_data)
+            formatted_text = self._apply_guide_fee_override(formatted_text, format_data.get('fee', ''))
 
             # 旧テンプレ互換：management_idプレースホルダー未使用時は従来通り先頭に挿入
             if self.current_mode == 'corporate' and management_id and '{management_id}' not in template:
