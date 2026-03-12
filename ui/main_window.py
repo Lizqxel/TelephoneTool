@@ -4888,8 +4888,9 @@ class CancellationError(Exception):
                 return None
             if not self._validate_list_furigana_no_english():
                 return None
-            birth_date = self._require_birth_date_for_comment()
-            if not birth_date:
+            allow_empty_birth = getattr(self, 'current_mode', None) == 'corporate'
+            birth_date = self._require_birth_date_for_comment(allow_empty=allow_empty_birth)
+            if birth_date is None:
                 return None
             
             # データの初期化

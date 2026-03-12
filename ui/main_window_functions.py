@@ -554,9 +554,9 @@ ND：{nd}
                 logging.warning("生年月日の変換に失敗しました")
         return ""
 
-    def _require_birth_date_for_comment(self):
+    def _require_birth_date_for_comment(self, allow_empty: bool = False):
         birth_date = self._build_birth_date()
-        if not birth_date:
+        if not birth_date and not allow_empty:
             QMessageBox.warning(self, "入力エラー", "生年月日を入力してください。")
             return None
         return birth_date
@@ -596,8 +596,9 @@ ND：{nd}
                 return None
         if not self._validate_list_furigana_no_english():
             return None
-        birth_date = self._require_birth_date_for_comment()
-        if not birth_date:
+        allow_empty_birth = self.current_mode == 'corporate'
+        birth_date = self._require_birth_date_for_comment(allow_empty=allow_empty_birth)
+        if birth_date is None:
             return None
 
         # 必須項目の検証
