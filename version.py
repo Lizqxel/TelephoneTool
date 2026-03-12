@@ -5,7 +5,7 @@
 """
 
 # アプリケーションのバージョン
-VERSION = "3.8.2"
+VERSION = "3.8.3"
 
 # アプリケーション名
 APP_NAME = "TelephoneTool"
