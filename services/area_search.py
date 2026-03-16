@@ -993,6 +993,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     script_timeout = browser_settings.get("script_timeout", 60)
     
     logging.info(f"ブラウザ設定 - ヘッドレス: {headless_mode}, ポップアップ表示: {show_popup}, 自動終了: {auto_close}")
+
+    # 自動終了が有効な場合、次の提供判定開始時に前回ブラウザを閉じる
+    if auto_close and global_driver is not None:
+        logging.info("自動終了設定: 前回の提供判定ブラウザを終了します")
+        close_global_driver()
     
     driver = None
     try:

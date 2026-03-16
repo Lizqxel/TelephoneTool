@@ -3793,15 +3793,9 @@ ND：{nd}
                 
             # 詳細情報のポップアップ表示
             details = result.get("details", {})
-            auto_close = self.settings.get("browser_settings", {}).get("auto_close", False)
-            should_close = auto_close and result.get("status") == "available"
             if result.get("show_popup", False) and details:
-                if should_close:
-                    self._schedule_area_search_browser_close(5)
                 details_text = "\n".join([f"{k}: {v}" for k, v in details.items()])
                 QMessageBox.information(self, "提供判定結果", details_text)
-            elif should_close:
-                self._schedule_area_search_browser_close(5)
                 
             # スクリーンショットの保存（自動表示はしない）
             if "screenshot" in result and os.path.exists(result["screenshot"]):
@@ -3824,33 +3818,6 @@ ND：{nd}
                         logging.info("エラー時にCTI監視システムの処理フラグもリセットしました")
                 except:
                     pass
-
-    def _close_area_search_browser(self):
-        """提供判定のブラウザを終了する。"""
-        try:
-            from services.area_search import close_global_driver as close_west
-            close_west()
-        except Exception:
-            pass
-        try:
-            from services.area_search_east import close_global_driver as close_east
-            close_east()
-        except Exception:
-            pass
-
-    def _schedule_area_search_browser_close(self, delay_sec=5):
-        """提供判定ブラウザの終了をバックグラウンドで予約する。"""
-        try:
-            timer = getattr(self, "_area_search_close_timer", None)
-            if timer:
-                timer.cancel()
-        except Exception:
-            pass
-
-        timer = threading.Timer(delay_sec, self._close_area_search_browser)
-        timer.daemon = True
-        self._area_search_close_timer = timer
-        timer.start()
 
     def cleanup_thread(self):
         """スレッドとワーカーをクリーンアップ"""
