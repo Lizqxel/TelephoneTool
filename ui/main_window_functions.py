@@ -1556,14 +1556,11 @@ ND：{nd}
             layout.addWidget(button_box)
             
             dialog.setLayout(layout)
-            
-            # イベント処理を確保するために非モーダルで表示
-            # 表示前にUIイベントを処理して、UIの応答性を確保
-            QApplication.processEvents()
-            dialog.exec()
-            
-            # ダイアログ終了後もイベント処理
-            QApplication.processEvents()
+
+            # 非モーダル表示にしてUIブロックを避ける
+            self._screenshot_dialog = dialog
+            dialog.finished.connect(lambda _: setattr(self, "_screenshot_dialog", None))
+            dialog.show()
             
         except Exception as e:
             logging.error(f"スクリーンショット表示エラー: {str(e)}")
