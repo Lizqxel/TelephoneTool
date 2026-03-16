@@ -3106,7 +3106,11 @@ ND：{nd}
             layout.addWidget(scroll_area)
             
             dialog.setLayout(layout)
-            dialog.exec()
+
+            # 非モーダル表示にしてUIブロックを避ける
+            self._screenshot_dialog = dialog
+            dialog.finished.connect(lambda _: setattr(self, "_screenshot_dialog", None))
+            dialog.show()
             
         except Exception as e:
             logging.error(f"スクリーンショット表示エラー: {str(e)}")
