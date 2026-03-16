@@ -100,7 +100,7 @@ def _default_settings() -> Dict[str, Any]:
         "browser_settings": {
             "headless": False,
             "disable_images": True,
-            "show_popup": True,
+            "show_popup": False,
             "auto_close": False,
             "page_load_timeout": 30,
             "script_timeout": 30,

@@ -39,6 +39,20 @@ from services.area_search import take_full_page_screenshot, check_cancellation, 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
 
+
+def close_global_driver():
+    """提供判定のブラウザを終了する。"""
+    global global_driver
+    if global_driver is None:
+        return
+    try:
+        global_driver.quit()
+        logging.info("提供判定のブラウザを終了しました")
+    except Exception as e:
+        logging.warning(f"ブラウザの終了中にエラー: {str(e)}")
+    finally:
+        global_driver = None
+
 # キャンセルフラグ
 _global_cancel_flag = False
 
@@ -642,13 +656,9 @@ def search_service_area(postal_code, address, progress_callback=None):
         return {"status": "error", "message": f"検索処理中にエラーが発生しました: {str(e)}"}
         
     finally:
-        # ブラウザを終了
-        if driver and auto_close:
-            try:
-                driver.quit()
-                logging.info("ブラウザを終了しました")
-            except Exception as e:
-                logging.warning(f"ブラウザの終了中にエラー: {str(e)}") 
+        # ブラウザはUI側のタイミングで終了する
+        if driver:
+            global_driver = driver
 
 def find_input_element(driver, attempt_count=0):
     """
@@ -944,7 +954,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                     if "提供エリアです" in result_text or "の提供エリアです" in result_text:
                         screenshot_path = f"debug_available_confirmation_{timestamp}.png"
                         driver.save_screenshot(screenshot_path)
-                        return {
+                        result = {
                             "status": "available",
                             "message": "提供可能",
                             "details": {
@@ -955,6 +965,7 @@ def handle_address_number_input(driver, address_parts, progress_callback=None):
                             "screenshot": screenshot_path,
                             "show_popup": show_popup
                         }
+                        return result
                     elif "提供エリア外です" in result_text or "エリア外" in result_text:
                         screenshot_path = f"debug_not_provided_confirmation_{timestamp}.png"
                         driver.save_screenshot(screenshot_path)

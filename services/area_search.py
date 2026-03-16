@@ -38,6 +38,20 @@ from utils.address_utils import split_address, normalize_address
 global_driver = None
 _global_cancel_flag = False
 
+
+def close_global_driver():
+    """提供判定のブラウザを終了する。"""
+    global global_driver
+    if global_driver is None:
+        return
+    try:
+        global_driver.quit()
+        logging.info("提供判定のブラウザを終了しました")
+    except Exception as e:
+        logging.warning(f"ブラウザの終了中にエラー: {str(e)}")
+    finally:
+        global_driver = None
+
 class CancellationError(Exception):
     """検索キャンセル時に発生する例外"""
     pass
