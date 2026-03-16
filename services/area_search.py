@@ -21,6 +21,7 @@ import time
 import re
 import os
 import json
+import base64
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -28,7 +29,6 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
-from PIL import Image  # PILライブラリを追加
 
 from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
@@ -671,6 +671,11 @@ def take_screenshot_if_enabled(driver, save_path):
         return None
 
 
+def build_timestamped_screenshot_name(prefix):
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    return f"{prefix}_{timestamp}.png"
+
+
 def _take_full_page_screenshot_impl(driver, save_path):
     """
     ページ全体のスクリーンショットを取得する（スクロール部分も含む）
@@ -682,104 +687,160 @@ def _take_full_page_screenshot_impl(driver, save_path):
     Returns:
         str: 保存されたスクリーンショットの絶対パス
     """
+    def _wait_for_visual_stability(max_wait_sec=2.5, interval_sec=0.2, stable_required=2):
+        deadline = time.time() + max_wait_sec
+        stable_count = 0
+        previous_metrics = None
+
+        while time.time() < deadline:
+            check_cancellation()
+            try:
+                metrics = driver.execute_script(
+                    """
+                    const root = document.documentElement || {};
+                    const body = document.body || {};
+                    const pendingImages = Array.from(document.images || []).filter(img => !img.complete).length;
+                    return {
+                        readyState: document.readyState,
+                        innerWidth: window.innerWidth || 0,
+                        innerHeight: window.innerHeight || 0,
+                        scrollWidth: Math.max(root.scrollWidth || 0, body.scrollWidth || 0),
+                        scrollHeight: Math.max(root.scrollHeight || 0, body.scrollHeight || 0),
+                        pendingImages: pendingImages
+                    };
+                    """
+                )
+            except Exception:
+                break
+
+            if metrics.get("readyState") == "complete" and metrics.get("pendingImages", 0) == 0:
+                if previous_metrics and metrics == previous_metrics:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+
+                if stable_count >= stable_required:
+                    break
+
+            previous_metrics = metrics
+            time.sleep(interval_sec)
+
     # キャンセルチェック（スクリーンショット開始前）
     check_cancellation()
-    
+
+    save_path = os.path.abspath(save_path)
+    save_dir = os.path.dirname(save_path)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
     # 元のウィンドウサイズと位置、スクロール位置を保存
-    original_size = driver.get_window_size()
-    original_position = driver.get_window_position()
-    original_scroll = driver.execute_script("return window.pageYOffset;")
+    original_size = None
+    original_position = None
+    original_scroll = 0
 
     try:
-        # キャンセルチェック（サイズ取得前）
+        original_size = driver.get_window_size()
+        original_position = driver.get_window_position()
+        original_scroll = driver.execute_script("return window.pageYOffset;")
+    except Exception:
+        logging.warning("スクリーンショット前のウィンドウ状態取得に失敗しました")
+
+    try:
         check_cancellation()
-        
-        # ページ全体のサイズを取得
-        total_width = driver.execute_script("return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);")
-        total_height = driver.execute_script("return Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);")
-        
-        # ビューポートの高さを取得
-        viewport_width = driver.execute_script("return window.innerWidth;")
-        viewport_height = driver.execute_script("return window.innerHeight;")
-        
-        # スクリーンショットを保存するリスト
-        screenshots = []
-        
-        # スクロールの開始位置
-        current_position = 0
-        
-        # ウィンドウサイズを設定（幅はビューポートに合わせる）
-        driver.set_window_size(viewport_width, viewport_height)
-        
-        while current_position < total_height:
-            # キャンセルチェック（スクロール前）
+
+        # 画面揺れ（アニメーション/トランジション）を抑止して描画を安定化
+        try:
+            driver.execute_script(
+                """
+                const styleId = '__tt_screenshot_style__';
+                if (!document.getElementById(styleId)) {
+                    const style = document.createElement('style');
+                    style.id = styleId;
+                    style.textContent = '* { animation: none !important; transition: none !important; } html, body { scroll-behavior: auto !important; }';
+                    document.head.appendChild(style);
+                }
+                """
+            )
+        except Exception:
+            pass
+
+        _wait_for_visual_stability()
+
+        # 1) まずCDPのフルページ撮影を試行（継ぎ目がなく高品質）
+        try:
             check_cancellation()
-            
-            # 指定位置までスクロール
-            driver.execute_script(f"window.scrollTo(0, {current_position});")
-            time.sleep(0.5)  # スクロール後の描画を待機
-            
-            # キャンセルチェック（スクリーンショット撮影前）
-            check_cancellation()
-            
-            # 一時的なスクリーンショットファイル名
-            temp_screenshot = f"temp_screenshot_{current_position}.png"
-            
-            # スクリーンショットを撮影
-            driver.save_screenshot(temp_screenshot)
-            screenshots.append(temp_screenshot)
-            
-            # 次のスクロール位置（ビューポートの高さ分）
-            current_position += viewport_height
-        
-        # キャンセルチェック（画像合成前）
-        check_cancellation()
-        
-        # スクリーンショットを合成
-        images = [Image.open(s) for s in screenshots]
-        
-        # 合成後の画像サイズを計算
-        max_width = max(img.width for img in images)
-        total_height = min(sum(img.height for img in images), total_height)  # ページの実際の高さを超えないように
-        
-        # 新しい画像を作成
-        combined_image = Image.new('RGB', (max_width, total_height))
-        
-        # 画像を縦に結合
-        y_offset = 0
-        for img in images:
-            # キャンセルチェック（画像結合前）
-            check_cancellation()
-            
-            # 最後の画像の場合、はみ出る部分をトリミング
-            if y_offset + img.height > total_height:
-                crop_height = total_height - y_offset
-                img = img.crop((0, 0, img.width, crop_height))
-            
-            combined_image.paste(img, (0, y_offset))
-            y_offset += img.height
-            
-            # 一時ファイルを削除
-            img.close()
-        
-        # 最終画像を保存
-        combined_image.save(save_path)
-        combined_image.close()
-        
-        # 一時ファイルを削除
-        for screenshot in screenshots:
-            try:
-                os.remove(screenshot)
-            except Exception as e:
-                logging.warning(f"一時ファイルの削除に失敗: {str(e)}")
-        
-        return os.path.abspath(save_path)
-        
+            metrics = driver.execute_cdp_cmd("Page.getLayoutMetrics", {})
+            content_size = metrics.get("contentSize", {})
+            content_width = max(int(content_size.get("width", 1)), 1)
+            content_height = max(int(content_size.get("height", 1)), 1)
+
+            screenshot_data = driver.execute_cdp_cmd(
+                "Page.captureScreenshot",
+                {
+                    "format": "png",
+                    "fromSurface": True,
+                    "captureBeyondViewport": True,
+                    "clip": {
+                        "x": 0,
+                        "y": 0,
+                        "width": content_width,
+                        "height": content_height,
+                        "scale": 1
+                    }
+                }
+            )
+
+            with open(save_path, "wb") as f:
+                f.write(base64.b64decode(screenshot_data["data"]))
+
+            if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+                return save_path
+        except Exception as cdp_error:
+            logging.warning(f"CDPフルページ撮影に失敗したためフォールバックします: {cdp_error}")
+
+        # 2) フォールバック: ページ全体サイズへ拡張して1枚撮影
+        total_width = int(driver.execute_script(
+            "return Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth);"
+        ))
+        total_height = int(driver.execute_script(
+            "return Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, window.innerHeight);"
+        ))
+
+        # 極端に大きいページでの失敗を避けるため上限を設定
+        fallback_width = max(1, min(total_width, 8000))
+        fallback_height = max(1, min(total_height, 12000))
+
+        driver.set_window_size(fallback_width, fallback_height)
+        driver.execute_script("window.scrollTo(0, 0);")
+        _wait_for_visual_stability(max_wait_sec=1.5, interval_sec=0.15, stable_required=1)
+        driver.save_screenshot(save_path)
+
+        if not (os.path.exists(save_path) and os.path.getsize(save_path) > 0):
+            raise RuntimeError("フォールバック撮影で画像ファイルを保存できませんでした")
+
+        return save_path
+
     finally:
+        # スクリーンショット用の一時styleを除去
+        try:
+            driver.execute_script(
+                """
+                const style = document.getElementById('__tt_screenshot_style__');
+                if (style) style.remove();
+                """
+            )
+        except Exception:
+            pass
+
         # ウィンドウサイズと位置、スクロール位置を元に戻す
-        driver.set_window_size(original_size['width'], original_size['height'])
-        driver.set_window_position(original_position['x'], original_position['y'])
-        driver.execute_script(f"window.scrollTo(0, {original_scroll});")
+        try:
+            if original_size:
+                driver.set_window_size(original_size['width'], original_size['height'])
+            if original_position:
+                driver.set_window_position(original_position['x'], original_position['y'])
+            driver.execute_script(f"window.scrollTo(0, {original_scroll});")
+        except Exception:
+            pass
 
 
 # 既存の呼び出しを壊さないために、元の名前を設定に従うラッパとして残す
@@ -867,12 +928,20 @@ def search_service_area_west(postal_code, address, progress_callback=None):
     building_number = None
     selected_banchi_text = None
     banchi_stage_pending = False
+    final_search_clicked_early = False
+    prefetched_final_search_button = None
+    number_dialog_wait_timeout = 15
+    banchi_dialog_displayed = False
+    gou_dialog_displayed = False
     number_prefix = address_parts.get('number_prefix')
     number_suffix = address_parts.get('number_suffix')
     if address_parts['number']:
         parts = address_parts['number'].split('-')
         street_number = parts[0]
         building_number = parts[1] if len(parts) > 1 else None
+
+    # 号入力ダイアログ未表示ルートでも参照されるため先に確定しておく
+    input_building_number = building_number or number_suffix
 
     logging.info(f"番地分割トークン - 接頭: {number_prefix}, 番地: {street_number}, 号: {building_number}, 接尾: {number_suffix}")
     
@@ -1135,11 +1204,85 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 # キャンセルチェック
                 check_cancellation()
                 
+                def is_banchi_modal_loading_started():
+                    try:
+                        dialog_elements = driver.find_elements(By.ID, "DIALOG_ID01")
+                        if dialog_elements:
+                            return True
+                    except Exception:
+                        pass
+
+                    loading_selectors = [
+                        ".loading",
+                        ".spinner",
+                        ".modal-backdrop",
+                        "[id*='loading']",
+                        "[class*='loading']",
+                    ]
+                    for selector in loading_selectors:
+                        try:
+                            for elem in driver.find_elements(By.CSS_SELECTOR, selector):
+                                if elem.is_displayed():
+                                    return True
+                        except Exception:
+                            continue
+
+                    return False
+
+                def get_clickable_final_search_button_quick():
+                    try:
+                        buttons = driver.find_elements(By.ID, "id_tak_bt_nx")
+                        for button in buttons:
+                            try:
+                                if button.is_displayed() and button.is_enabled():
+                                    return button
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                    return None
+
+                def wait_for_banchi_dialog_or_final_button(timeout=15):
+                    deadline = time.time() + timeout
+                    max_deadline = time.time() + 90
+
+                    while time.time() < deadline:
+                        check_cancellation()
+
+                        try:
+                            dialog = driver.find_element(By.ID, "DIALOG_ID01")
+                            if dialog.is_displayed():
+                                return ("banchi", dialog)
+                        except Exception:
+                            pass
+
+                        final_button = get_clickable_final_search_button_quick()
+                        if final_button is not None:
+                            return ("final", final_button)
+
+                        if is_banchi_modal_loading_started():
+                            next_deadline = min(max_deadline, time.time() + 20)
+                            if next_deadline > deadline:
+                                deadline = next_deadline
+                            time.sleep(0.4)
+                            continue
+
+                        time.sleep(0.2)
+
+                    raise TimeoutException("番地入力モーダル/検索結果確認ボタンの待機がタイムアウトしました")
+
                 # 番地入力ダイアログが表示されるまで待機
-                banchi_dialog = WebDriverWait(driver, 15).until(
-                    EC.visibility_of_element_located((By.ID, "DIALOG_ID01"))
-                )
+                banchi_dialog = None
+                banchi_wait_result = wait_for_banchi_dialog_or_final_button(timeout=15)
+                if banchi_wait_result[0] == "final":
+                    prefetched_final_search_button = banchi_wait_result[1]
+                    logging.info("番地入力より先に検索結果確認ボタンを検出したため、番地入力をスキップします")
+                    raise TimeoutException("番地入力より先に検索結果確認ボタンを検出")
+
+                banchi_dialog = banchi_wait_result[1]
+
                 logging.info("番地入力ダイアログが表示されました")
+                banchi_dialog_displayed = True
                 
                 # 番地がない場合は「番地なし」を選択
                 if not street_number:
@@ -1382,12 +1525,27 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 
             except TimeoutException:
                 logging.info("番地入力画面はスキップされました")
+                early_clicked = False
+                try:
+                    early_final_button = WebDriverWait(driver, 1).until(
+                        EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView(true);", early_final_button)
+                    time.sleep(0.1)
+                    early_final_button.click()
+                    final_search_clicked_early = True
+                    number_dialog_wait_timeout = 1
+                    logging.info("番地入力モーダル未表示のため、検索結果確認ボタンを先行クリックしました")
+                    early_clicked = True
+                except TimeoutException:
+                    pass
+                except Exception as early_click_error:
+                    logging.warning(f"検索結果確認ボタンの先行クリックに失敗: {str(early_click_error)}")
+
                 # サイト側で番地入力がDIALOG_ID02以降に統合されるケースを考慮
-                if street_number or building_number or number_suffix:
+                if (not early_clicked) and (street_number or building_number or number_suffix):
                     banchi_stage_pending = True
                     logging.info("番地入力は後続ダイアログで継続します（DIALOG_ID01未表示）")
-            
-            prefetched_final_search_button = None
 
             # 6. 号入力画面が表示された場合は、号を入力
             try:
@@ -1408,6 +1566,18 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                             continue
                     return ids
 
+                def get_visible_dialog_ids_for_recovery():
+                    ids = []
+                    dialogs = driver.find_elements(By.XPATH, "//dialog[starts-with(@id, 'DIALOG_ID0')]")
+                    for dialog in dialogs:
+                        try:
+                            dialog_id = (dialog.get_attribute("id") or "").strip()
+                            if dialog_id and dialog.is_displayed():
+                                ids.append(dialog_id)
+                        except Exception:
+                            continue
+                    return sorted(set(ids))
+
                 def wait_for_number_dialog(timeout=15, exclude_ids=None):
                     excluded = set(exclude_ids or [])
 
@@ -1426,21 +1596,21 @@ def search_service_area_west(postal_code, address, progress_callback=None):
 
                     return WebDriverWait(driver, timeout).until(_find_visible)
 
-                def get_clickable_final_search_button():
+                def get_clickable_final_search_button(timeout=0.5):
                     try:
-                        button = driver.find_element(By.ID, "id_tak_bt_nx")
-                        if button.is_displayed() and button.is_enabled():
-                            return button
+                        return WebDriverWait(driver, timeout).until(
+                            EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                        )
                     except Exception:
                         return None
-                    return None
 
-                def wait_for_number_dialog_or_final_button(timeout=15, exclude_ids=None, poll_interval=0.2):
+                def wait_for_number_dialog_or_final_button(timeout=15, exclude_ids=None):
                     excluded = set(exclude_ids or [])
-                    end_at = time.time() + timeout
 
-                    while time.time() < end_at:
-                        check_cancellation()
+                    def _find_visible(_):
+                        button = get_clickable_final_search_button(timeout=0.1)
+                        if button is not None:
+                            return ("final", button)
 
                         dialogs = driver.find_elements(By.XPATH, "//dialog[starts-with(@id, 'DIALOG_ID0')]")
                         for dialog in dialogs:
@@ -1449,27 +1619,64 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 if dialog_id == "DIALOG_ID01" or dialog_id in excluded:
                                     continue
                                 if dialog.is_displayed():
-                                    return "number_dialog", dialog_id
+                                    return ("dialog", dialog_id)
                             except Exception:
                                 continue
+                        return False
 
-                        final_button = get_clickable_final_search_button()
-                        if final_button is not None:
-                            return "final_button", final_button
+                    return WebDriverWait(driver, timeout).until(_find_visible)
 
-                        time.sleep(poll_interval)
+                def is_number_modal_loading_started():
+                    try:
+                        dialogs = driver.find_elements(By.XPATH, "//dialog[starts-with(@id, 'DIALOG_ID0')]")
+                        for dialog in dialogs:
+                            try:
+                                dialog_id = (dialog.get_attribute("id") or "").strip()
+                                if dialog_id and dialog_id != "DIALOG_ID01":
+                                    return True
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
 
-                    raise TimeoutException("号入力ダイアログまたは検索結果確認ボタンの検出がタイムアウトしました")
+                    loading_selectors = [
+                        ".loading",
+                        ".spinner",
+                        ".modal-backdrop",
+                        "[id*='loading']",
+                        "[class*='loading']",
+                        "[aria-busy='true']",
+                    ]
+                    for selector in loading_selectors:
+                        try:
+                            for elem in driver.find_elements(By.CSS_SELECTOR, selector):
+                                try:
+                                    if elem.is_displayed():
+                                        return True
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+
+                    return False
 
                 # 号入力ダイアログまたは検索結果確認ボタンが表示されるまで待機
-                next_step_type, next_step_payload = wait_for_number_dialog_or_final_button(timeout=15)
-                if next_step_type == "final_button":
-                    prefetched_final_search_button = next_step_payload
+                try:
+                    number_wait_result = wait_for_number_dialog_or_final_button(timeout=number_dialog_wait_timeout)
+                except TimeoutException:
+                    if is_number_modal_loading_started():
+                        logging.info("号入力モーダルの読み込み開始を検出。表示完了まで追加で待機します")
+                        number_wait_result = wait_for_number_dialog_or_final_button(timeout=30)
+                    else:
+                        raise
+                if number_wait_result and number_wait_result[0] == "final":
+                    prefetched_final_search_button = number_wait_result[1]
                     logging.info("号入力画面はスキップされました（検索結果確認ボタンの先行表示を検出）")
                     raise TimeoutException("号入力をスキップして検索結果確認へ進行")
 
-                current_number_dialog_id = next_step_payload
+                current_number_dialog_id = number_wait_result[1]
                 logging.info(f"号入力ダイアログが表示されました: {current_number_dialog_id}")
+                gou_dialog_displayed = True
                 
                 # 号を入力
                 input_building_number = building_number
@@ -1656,6 +1863,22 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         logging.error(f"ボタンのクリックに失敗: {str(e)}")
                         raise
 
+                def handle_additional_unspecified_number_dialogs(handled_dialog_ids, max_steps=6):
+                    if input_building_number:
+                        return
+
+                    visited_ids = set(handled_dialog_ids or set())
+                    for step in range(1, max_steps + 1):
+                        try:
+                            next_dialog_id = wait_for_number_dialog(timeout=2, exclude_ids=visited_ids)
+                        except TimeoutException:
+                            break
+
+                        visited_ids.add(next_dialog_id)
+                        phase_name = f"追加番号{step}"
+                        logging.info(f"追加の番号ダイアログを検出: {next_dialog_id}（{phase_name}）")
+                        select_from_gou_dialog(None, phase_name, next_dialog_id, prefer_banchi_nashi=True)
+
                 # 号選択（接頭語あり住所の3段階入力をサポート）
                 try:
                     if symbolic_prefix_mode:
@@ -1683,11 +1906,13 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                     next_number_dialog_id = wait_for_number_dialog(timeout=8)
                                     logging.info(f"接頭語後の番地選択後の最終ステップへ進みます: {next_number_dialog_id}")
                                     select_from_gou_dialog(None, "号なし確定", next_number_dialog_id, prefer_banchi_nashi=True)
+                                    handle_additional_unspecified_number_dialogs({current_number_dialog_id, next_number_dialog_id})
                                 except TimeoutException:
                                     logging.info("接頭語後の番地選択で入力完了（号ステップなし）")
                         else:
                             # 接頭語のみ（例: 御供田町ホ）の場合
                             select_from_gou_dialog(None, "号なし確定", current_number_dialog_id, prefer_banchi_nashi=True)
+                            handle_additional_unspecified_number_dialogs({current_number_dialog_id})
                     elif banchi_fallback_mode:
                         logging.info("DIALOG_ID01未表示のため、後続ダイアログで番地処理を代替実行します")
                         select_from_gou_dialog(
@@ -1704,8 +1929,11 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                                 select_from_gou_dialog(input_building_number, "号", next_number_dialog_id)
                             except TimeoutException:
                                 logging.warning("番地(代替)選択後に号ダイアログが表示されませんでした")
+                        else:
+                            handle_additional_unspecified_number_dialogs({current_number_dialog_id})
                     else:
                         select_from_gou_dialog(input_building_number, "号", current_number_dialog_id)
+                        handle_additional_unspecified_number_dialogs({current_number_dialog_id})
                         
                 except Exception as e:
                     logging.error(f"号選択処理中にエラー: {str(e)}")
@@ -1715,16 +1943,30 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 
                 # 号入力後の読み込みを待つ
                 try:
-                    WebDriverWait(driver, 10).until(
-                        lambda _: len(get_visible_number_dialog_ids()) == 0
-                    )
-                    logging.info("号入力ダイアログが閉じられました（全ダイアログ非表示）")
+                    def _dialogs_closed_or_final_ready(_):
+                        if len(get_visible_number_dialog_ids()) == 0:
+                            return "dialogs_closed"
+                        if get_clickable_final_search_button(timeout=0.05) is not None:
+                            return "final_ready"
+                        return False
+
+                    wait_state = WebDriverWait(driver, 10).until(_dialogs_closed_or_final_ready)
+                    if wait_state == "final_ready":
+                        logging.info("号入力ダイアログの閉鎖待機中に検索結果確認ボタンが利用可能になったため先に進みます")
+                    else:
+                        logging.info("号入力ダイアログが閉じられました（全ダイアログ非表示）")
                 except TimeoutException:
                     logging.warning("号入力ダイアログが閉じられるのを待機中にタイムアウト")
                     # ダイアログが閉じられない場合でも処理を続行
                 
             except TimeoutException:
                 logging.info("号入力画面はスキップされました")
+                logging.info(
+                    f"号入力スキップ時フラグ: final_search_clicked_early={final_search_clicked_early}, "
+                    f"banchi_dialog_displayed={banchi_dialog_displayed}, gou_dialog_displayed={gou_dialog_displayed}, "
+                    f"banchi_stage_pending={banchi_stage_pending}, street_number={street_number}, "
+                    f"building_number={building_number}, number_suffix={number_suffix}"
+                )
             
             # 建物選択モーダルの処理
             building_modal_wait = 0.5 if prefetched_final_search_button is not None else 3
@@ -1740,49 +1982,245 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                 # キャンセルチェック（検索結果確認前）
                 check_cancellation()
                 
-                # 検索結果確認ボタンをクリック
-                logging.info("検索結果確認ボタンの検出を開始します")
-                
-                if prefetched_final_search_button is not None:
-                    logging.info("事前検出済みの検索結果確認ボタンを利用します")
+                if not final_search_clicked_early:
+                    # 検索結果確認ボタンをクリック（見つからない場合は画面状態を見て処理を再開）
+                    logging.info("検索結果確認ボタンの検出を開始します")
+
+                    def is_result_image_visible():
+                        result_keywords = [
+                            "img_available_03",
+                            "img_investigation_03",
+                            "img_not_provided",
+                            "available",
+                            "investigation",
+                            "not_provided",
+                        ]
+                        alt_keywords = ["提供可能", "提供不可", "未提供", "住所を特定できないため、担当者がお調べします"]
+                        for image in driver.find_elements(By.TAG_NAME, "img"):
+                            try:
+                                if not image.is_displayed():
+                                    continue
+                                src = (image.get_attribute("src") or "").lower()
+                                alt = (image.get_attribute("alt") or "")
+                                if any(keyword in src for keyword in result_keywords) or any(keyword in alt for keyword in alt_keywords):
+                                    return True
+                            except Exception:
+                                continue
+                        return False
+
+                    def click_final_search_button(button):
+                        check_cancellation()
+                        driver.execute_script("arguments[0].scrollIntoView(true);", button)
+                        check_cancellation()
+                        time.sleep(0.2)
+                        check_cancellation()
+                        try:
+                            button.click()
+                            logging.info("検索結果確認ボタンをクリックしました")
+                            return True
+                        except Exception as click_error:
+                            logging.warning(f"検索結果確認ボタンの通常クリックに失敗: {str(click_error)}")
+                            try:
+                                driver.execute_script("arguments[0].click();", button)
+                                logging.info("検索結果確認ボタンをJavaScriptでクリックしました")
+                                return True
+                            except Exception as js_click_error:
+                                logging.warning(f"検索結果確認ボタンのJavaScriptクリックに失敗: {str(js_click_error)}")
+                                return False
+
+                    def recover_number_dialog(dialog_id, recovery_target, recovery_phase):
+                        all_buttons = driver.find_elements(By.XPATH, f"//dialog[@id='{dialog_id}']//a")
+                        if not all_buttons:
+                            raise TimeoutException(f"再開対象ダイアログ {dialog_id} に候補ボタンがありません")
+
+                        exact_button = None
+                        nashi_button = None
+                        gaitou_button = None
+
+                        target_normalized = str(recovery_target).strip() if recovery_target else None
+                        for button in all_buttons:
+                            try:
+                                text = (button.text or "").strip()
+                            except Exception:
+                                continue
+
+                            if recovery_target and target_normalized and text == target_normalized:
+                                exact_button = button
+
+                            if text in ("番地なし", "（番地なし）", "号なし", "（号なし）", "") and nashi_button is None:
+                                nashi_button = button
+                            if text == "該当する住所がない" and gaitou_button is None:
+                                gaitou_button = button
+
+                        target_button = exact_button or nashi_button or gaitou_button
+
+                        if target_button is None:
+                            raise TimeoutException(f"再開対象ダイアログ {dialog_id} で選択可能な候補がありません")
+
+                        driver.execute_script("arguments[0].scrollIntoView(true);", target_button)
+                        time.sleep(0.2)
+                        try:
+                            target_button.click()
+                        except Exception:
+                            driver.execute_script("arguments[0].click();", target_button)
+                        time.sleep(0.5)
+
+                    def is_ui_loading_for_recovery():
+                        loading_selectors = [
+                            ".loading",
+                            ".spinner",
+                            ".modal-backdrop",
+                            "[id*='loading']",
+                            "[class*='loading']",
+                            "[aria-busy='true']",
+                        ]
+                        for selector in loading_selectors:
+                            try:
+                                for elem in driver.find_elements(By.CSS_SELECTOR, selector):
+                                    try:
+                                        if elem.is_displayed():
+                                            return True
+                                    except Exception:
+                                        continue
+                            except Exception:
+                                continue
+
+                        try:
+                            dialogs = driver.find_elements(By.XPATH, "//dialog[starts-with(@id, 'DIALOG_ID0')]")
+                            for dialog in dialogs:
+                                try:
+                                    if not dialog.is_displayed():
+                                        continue
+                                    anchors = dialog.find_elements(By.TAG_NAME, "a")
+                                    if len(anchors) == 0:
+                                        return True
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+
+                        return False
+
                     final_search_button = prefetched_final_search_button
-                    try:
-                        if not final_search_button.is_displayed() or not final_search_button.is_enabled():
-                            raise TimeoutException("事前検出済みボタンがクリック可能ではありません")
-                    except Exception:
-                        final_search_button = WebDriverWait(driver, 3).until(
-                            EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
-                        )
+                    prefetched_button_invalid = False
+                    if final_search_button is not None:
+                        try:
+                            if not final_search_button.is_enabled():
+                                final_search_button = None
+                                prefetched_button_invalid = True
+                        except Exception:
+                            final_search_button = None
+                            prefetched_button_invalid = True
+
+                    if final_search_button is None:
+                        try:
+                            if prefetched_button_invalid:
+                                final_search_button = WebDriverWait(driver, 1).until(
+                                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                                )
+                            else:
+                                final_search_button = WebDriverWait(driver, 8).until(
+                                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                                )
+                        except TimeoutException:
+                            final_search_button = None
+                            logging.info("検索結果確認ボタンが見つかりません。画面状態を確認して処理を再開します")
+                    else:
+                        try:
+                            if not final_search_button.is_displayed():
+                                final_search_button = WebDriverWait(driver, 1).until(
+                                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                                )
+                        except Exception:
+                            try:
+                                final_search_button = WebDriverWait(driver, 1).until(
+                                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                                )
+                            except TimeoutException:
+                                final_search_button = None
+                                logging.info("事前取得した検索結果確認ボタンが無効化されていました。画面状態を確認して再開します")
+
+                    button_clicked = False
+                    if final_search_button is not None:
+                        check_cancellation()
+
+                        try:
+                            button_html = final_search_button.get_attribute('outerHTML')
+                            logging.info(f"検索結果確認ボタンが見つかりました: {button_html}")
+                        except Exception as html_error:
+                            logging.warning(f"検索結果確認ボタンのHTML取得に失敗: {str(html_error)}")
+
+                        button_clicked = click_final_search_button(final_search_button)
+
+                    if not button_clicked:
+                        recovered = False
+                        recovery_deadline = time.time() + 20
+                        max_recovery_deadline = time.time() + 90
+                        recovered_banchi = False
+                        recovered_building = False
+                        while time.time() < recovery_deadline and not recovered:
+                            check_cancellation()
+
+                            try:
+                                retry_button = WebDriverWait(driver, 0.6).until(
+                                    EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
+                                )
+                                if click_final_search_button(retry_button):
+                                    recovered = True
+                                    button_clicked = True
+                                    logging.info("検索結果確認ボタンの再検出に成功しました")
+                                    break
+                            except TimeoutException:
+                                pass
+
+                            visible_dialog_ids = get_visible_dialog_ids_for_recovery()
+                            if visible_dialog_ids:
+                                logging.info(f"番号モーダルが残っているため再開します: {visible_dialog_ids}")
+                                for dialog_id in visible_dialog_ids:
+                                    if dialog_id == "DIALOG_ID01":
+                                        recovery_target = street_number
+                                        recovery_phase = "再開番地"
+                                        recovered_banchi = True
+                                    elif (not recovered_building) and input_building_number:
+                                        recovery_target = input_building_number
+                                        recovery_phase = "再開号"
+                                        recovered_building = True
+                                    else:
+                                        recovery_target = None
+                                        recovery_phase = f"再開番号({dialog_id})"
+
+                                    recover_number_dialog(dialog_id, recovery_target, recovery_phase)
+                                continue
+
+                            recovered_result = handle_building_selection(
+                                driver,
+                                progress_callback,
+                                show_popup,
+                                wait_seconds=0.6
+                            )
+                            if recovered_result is not None:
+                                logging.info(f"search_service_area_west: recovery_apartment返却: {recovered_result}")
+                                return recovered_result
+
+                            if is_result_image_visible():
+                                recovered = True
+                                logging.info("検索結果画面の表示を検出したため、結果判定へ進みます")
+                                break
+
+                            if is_ui_loading_for_recovery():
+                                next_deadline = min(max_recovery_deadline, time.time() + 20)
+                                if next_deadline > recovery_deadline:
+                                    recovery_deadline = next_deadline
+                                logging.info("回復処理: 画面読み込み中のため待機を継続します")
+                                time.sleep(0.6)
+                                continue
+
+                            time.sleep(0.3)
+
+                        if not recovered:
+                            raise TimeoutException("検索結果確認ボタンを検出できず、画面状態から処理を再開できませんでした")
                 else:
-                    # 指定されたIDを持つボタンを待機して検出
-                    final_search_button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.ID, "id_tak_bt_nx"))
-                    )
-                
-                # キャンセルチェック（ボタン検出後）
-                check_cancellation()
-                
-                # ボタンが見つかった場合の情報をログ出力
-                button_html = final_search_button.get_attribute('outerHTML')
-                logging.info(f"検索結果確認ボタンが見つかりました: {button_html}")
-                
-                # キャンセルチェック（スクロール前）
-                check_cancellation()
-                
-                # スクロールしてボタンを表示
-                driver.execute_script("arguments[0].scrollIntoView(true);", final_search_button)
-                
-                # キャンセルチェック（待機前）
-                check_cancellation()
-                
-                time.sleep(0.2)
-                
-                # キャンセルチェック（クリック前）
-                check_cancellation()
-                
-                # ボタンをクリック
-                final_search_button.click()
-                logging.info("検索結果確認ボタンをクリックしました")
+                    logging.info("検索結果確認ボタンは先行クリック済みのため再クリックをスキップします")
                 
                 # キャンセルチェック（画面遷移待機前）
                 check_cancellation()
@@ -1891,7 +2329,9 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         check_cancellation()
                         
                         # 画像確認時のスクリーンショットを保存
-                        screenshot_path = f"debug_{found_pattern['status']}_confirmation.png"
+                        screenshot_path = build_timestamped_screenshot_name(
+                            f"debug_{found_pattern['status']}_confirmation"
+                        )
                         take_full_page_screenshot(driver, screenshot_path)
                         result_message = f"{found_pattern['message']}状態が確認されました"
                         logging.info(f"{result_message} - スクリーンショットを保存しました")
@@ -1909,7 +2349,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         check_cancellation()
                         
                         # 提供不可時のスクリーンショットを保存
-                        screenshot_path = "debug_unavailable_confirmation.png"
+                        screenshot_path = build_timestamped_screenshot_name("debug_unavailable_confirmation")
                         take_full_page_screenshot(driver, screenshot_path)
                         logging.info("判定失敗と判定されました（画像非表示） - スクリーンショットを保存しました")
                         result = {
@@ -1930,7 +2370,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                         
                 except TimeoutException:
                     # タイムアウト時のスクリーンショットを保存
-                    screenshot_path = "debug_timeout_confirmation.png"
+                    screenshot_path = build_timestamped_screenshot_name("debug_timeout_confirmation")
                     take_full_page_screenshot(driver, screenshot_path)
                     logging.info("提供可能画像が見つかりませんでした - スクリーンショットを保存しました")
                     if progress_callback:
@@ -1948,7 +2388,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
                     }
                 except Exception as e:
                     # エラー時のスクリーンショットを保存
-                    screenshot_path = "debug_error_confirmation.png"
+                    screenshot_path = build_timestamped_screenshot_name("debug_error_confirmation")
                     take_full_page_screenshot(driver, screenshot_path)
                     logging.error(f"提供判定の確認中にエラー: {str(e)}")
                     if progress_callback:
@@ -1967,7 +2407,7 @@ def search_service_area_west(postal_code, address, progress_callback=None):
             
             except Exception as e:
                 logging.error(f"結果の判定中にエラー: {str(e)}")
-                screenshot_path = "debug_result_error.png"
+                screenshot_path = build_timestamped_screenshot_name("debug_result_error")
                 take_full_page_screenshot(driver, screenshot_path)
                 if progress_callback:
                     progress_callback("エラーが発生しました")
