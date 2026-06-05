@@ -52,7 +52,7 @@ from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
 from ui.easy_mode_dialogs import convert_to_half_width
 from ui.settings_dialog import SettingsDialog
 from ui.mode_selection_dialog import ModeSelectionDialog
-from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space
+from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space, convert_to_full_width
 from utils.furigana_utils import convert_to_furigana
 from ui.update_dialog import UpdateDialog
 from services.area_search import search_service_area
@@ -1098,10 +1098,13 @@ ND：{nd}
                 return
             
             # 顧客名の処理（苗字と名前の間のスペースを全角に）
-            customer_name = cti_data.customer_name
-            if customer_name:
-                customer_name = customer_name.replace(' ', '　')  # 半角スペースを全角に
-                customer_name = convert_to_half_width_except_space(customer_name)
+            customer_name_raw = cti_data.customer_name
+            list_name = ""
+            contractor_name = ""
+            if customer_name_raw:
+                name_with_full_space = customer_name_raw.replace(' ', '　')  # 半角スペースを全角に
+                list_name = convert_to_full_width(name_with_full_space)
+                contractor_name = convert_to_half_width_except_space(name_with_full_space)
             
             # 住所の処理（ハイフンを半角に）
             address = cti_data.address
@@ -1110,7 +1113,7 @@ ND：{nd}
                 address = address.replace('ー', '-')  # 長音記号を半角ハイフンに
                 address = address.replace('−', '-')  # 別種の全角ハイフンを半角に
                 address = address.replace(' ', '　')  # 半角スペースを全角に
-                address = convert_to_half_width_except_space(address)
+                address = convert_to_full_width(address)
             
             # データの初期化と設定
             self.address_data = {
@@ -1120,12 +1123,12 @@ ND：{nd}
             
             # 顧客名のフリガナを取得して設定
             customer_furigana = ""
-            if customer_name:
+            if list_name:
                 # フリガナ変換APIを使用
-                customer_furigana = convert_to_furigana(customer_name)
+                customer_furigana = convert_to_furigana(list_name)
             
             self.list_data = {
-                'list_name': customer_name if customer_name else "",
+                'list_name': list_name,
                 'list_furigana': customer_furigana,  # 自動生成したフリガナを設定
                 'list_phone': convert_to_half_width(cti_data.phone) if cti_data.phone else "",
                 'list_postal_code': convert_to_half_width(cti_data.postal_code) if cti_data.postal_code else "",
@@ -1135,7 +1138,7 @@ ND：{nd}
             self.orderer_data = {
                 'operator': '',  # 対応者名は空で初期化
                 'available_time': '',  # 出やすい時間帯は空で初期化
-                'contractor': customer_name if customer_name else "",  # 変換済みの顧客名を使用
+                'contractor': contractor_name,  # 変換済みの顧客名を使用
                 'furigana': customer_furigana,  # 自動生成したフリガナを設定
                 'birth_date': '',  # 誕生日は未入力で開始
                 'order_person': '',  # 受注者名は空で初期化
@@ -2411,8 +2414,8 @@ ND：{nd}
             self.postal_code_input.textChanged.connect(self.convert_to_half_width)
             self.list_postal_code_input.textChanged.connect(self.format_postal_code)
             self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
-            self.address_input.textChanged.connect(self.convert_to_half_width)
-            self.list_address_input.textChanged.connect(self.convert_to_half_width)
+            self.address_input.textChanged.connect(self.convert_to_full_width)
+            self.list_address_input.textChanged.connect(self.convert_to_full_width)
             self.era_combo.currentTextChanged.connect(self.update_year_combo)
             
             # 名前とフリガナのバリデーション用のシグナル
@@ -2623,11 +2626,12 @@ ND：{nd}
             # 顧客名
             if data.customer_name:
                 # 半角スペースを全角スペースに変換
-                converted_customer_name = data.customer_name.replace(' ', '　')
-                converted_customer_name = convert_to_half_width_except_space(converted_customer_name)
-                self._push_text_change(self.list_name_input, converted_customer_name)
+                name_with_full_space = data.customer_name.replace(' ', '　')
+                list_name_text = convert_to_full_width(name_with_full_space)
+                contractor_name_text = convert_to_half_width_except_space(name_with_full_space)
+                self._push_text_change(self.list_name_input, list_name_text)
                 if self.current_mode != 'corporate':
-                    self._push_text_change(self.contractor_input, converted_customer_name)
+                    self._push_text_change(self.contractor_input, contractor_name_text)
             
             # 住所
             if data.address:
@@ -2636,7 +2640,7 @@ ND：{nd}
                 converted_address = converted_address.replace('ー', '-')  # 長音記号を半角ハイフンに
                 converted_address = converted_address.replace('−', '-')  # 別種の全角ハイフンを半角に
                 converted_address = converted_address.replace(' ', '　')  # 半角スペースを全角に
-                converted_address = convert_to_half_width_except_space(converted_address)
+                converted_address = convert_to_full_width(converted_address)
                 self._push_text_change(self.address_input, converted_address)
                 self._push_text_change(self.list_address_input, converted_address)
             
@@ -2765,22 +2769,22 @@ ND：{nd}
     def validate_list_name(self, text):
         """
         リスト名の入力を検証します。
-        半角英数字とハイフンのみを許可し、それ以外の文字が含まれている場合は警告を表示します。
+        全角文字のみを許可し、半角文字が含まれている場合は警告を表示します。
         
         Args:
             text (str): 入力されたテキスト
         """
-        import re
+        import unicodedata
         
         # 空文字列の場合は検証をスキップ
         if not text:
             return
         
-        # 半角英数字とハイフンのみを許可する正規表現パターン
-        pattern = r'^[A-Za-z0-9\-_]+$'
-        
-        if not re.match(pattern, text):
-            self.statusBar().showMessage("リスト名は半角英数字とハイフンのみ使用できます", 5000)
+        # 半角文字が含まれているかチェック
+        has_half_width = any(unicodedata.east_asian_width(char) in ['Na', 'H'] for char in text)
+
+        if has_half_width:
+            self.statusBar().showMessage("リスト名は全角文字で入力してください", 5000)
             # 背景色変更を削除
         else:
             # 背景色変更を削除

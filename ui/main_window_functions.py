@@ -23,7 +23,7 @@ from services.mapfan_service import MapfanService
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 from utils.furigana_utils import convert_to_furigana
-from utils.string_utils import convert_to_half_width_except_space
+from utils.string_utils import convert_to_half_width_except_space, convert_to_full_width
 from version import VERSION
 
 
@@ -501,6 +501,14 @@ ND：{nd}
         if sender:
             current_text = sender.text()
             converted_text = convert_to_half_width(current_text)
+            self._apply_text_preserving_cursor(sender, converted_text)
+
+    def convert_to_full_width(self):
+        """半角文字を全角に変換する処理"""
+        sender = self.sender()
+        if sender:
+            current_text = sender.text()
+            converted_text = convert_to_full_width(current_text)
             self._apply_text_preserving_cursor(sender, converted_text)
     
     def update_year_combo(self, text):

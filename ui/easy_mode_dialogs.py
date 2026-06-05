@@ -13,6 +13,7 @@ from PySide6.QtGui import QFont, QIntValidator, QPalette, QColor
 import datetime
 import logging
 from services.area_search import search_service_area, normalize_address
+from utils.string_utils import convert_to_full_width
 import threading
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Slot
@@ -680,17 +681,19 @@ class ListInfoDialog(QDialog):
             dict: リスト情報
         """
         try:
-            # リスト住所の全角ハイフンを半角に変換
+            # リスト名とリスト住所は全角に変換
+            list_name = convert_to_full_width(self.list_name_input.text())
             list_address = self.list_address_input.text()
             list_address = list_address.replace('－', '-')  # 全角ハイフンを半角に
             list_address = list_address.replace('ー', '-')  # 長音記号を半角ハイフンに
             list_address = list_address.replace('−', '-')  # 別種の全角ハイフンを半角に
             list_address = list_address.replace('―', '-')  # ダッシュを半角ハイフンに
             list_address = list_address.replace('‐', '-')  # 別種のハイフンを半角ハイフンに
+            list_address = convert_to_full_width(list_address)
             
             # データを辞書形式で返す
             data = {
-                'list_name': self.list_name_input.text(),
+                'list_name': list_name,
                 'list_furigana': self.list_furigana_input.text(),
                 'list_phone': self.list_phone_input.text(),
                 'list_postal_code': self.list_postal_code_input.text(),
@@ -714,7 +717,7 @@ class ListInfoDialog(QDialog):
         try:
             # リスト名
             if data.get('list_name'):
-                converted_name = convert_to_half_width(data['list_name'])
+                converted_name = convert_to_full_width(data['list_name'])
                 self.list_name_input.setText(converted_name)
             
             # リストフリガナ
@@ -734,7 +737,7 @@ class ListInfoDialog(QDialog):
             
             # リスト住所
             if data.get('list_address'):
-                converted_address = convert_to_half_width(data['list_address'])
+                converted_address = convert_to_full_width(data['list_address'])
                 self.list_address_input.setText(converted_address)
             
             logging.info("リストデータを正常に設定しました")

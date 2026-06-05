@@ -6,6 +6,7 @@
 """
 
 import re
+import unicodedata
 
 
 def normalize_string(text):
@@ -194,3 +195,30 @@ def convert_to_half_width_except_space(text):
     # スペースは変換しない（全角スペースはそのまま）
     
     return text 
+
+
+def convert_to_full_width(text):
+    """
+    半角文字を全角文字に変換する関数
+
+    Args:
+        text (str): 変換する文字列
+
+    Returns:
+        str: 全角に変換された文字列
+    """
+    if not text:
+        return ""
+
+    normalized = unicodedata.normalize('NFKC', text)
+    result_chars = []
+    for char in normalized:
+        code_point = ord(char)
+        if char == ' ':
+            result_chars.append('　')
+        elif 0x21 <= code_point <= 0x7E:
+            result_chars.append(chr(code_point + 0xFEE0))
+        else:
+            result_chars.append(char)
+
+    return "".join(result_chars)
