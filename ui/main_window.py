@@ -27,6 +27,9 @@ from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
+from services.jcom_simulation_models import JcomSearchCriteria
+from ui.jcom_simulation_panel import JcomSimulationPanel
+from ui.jcom_simulation_worker import JcomSimulationWorker
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
 import time
@@ -285,6 +288,12 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         # 検索スレッド関連（QObject.thread() メソッド名と衝突しないよう明示初期化）
         self.thread = None
         self.worker = None
+
+        # J:COM検索は既存提供判定とは完全に独立したワーカー/世代で管理する。
+        self.current_product = "self_collabo"
+        self.jcom_generation = 0
+        self.jcom_worker = None
+        self.jcom_active_request_id = None
         
         # ログ設定
         self.setup_logging()
@@ -314,6 +323,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         
         # 設定を読み込む
         self.load_settings()
+
+        saved_product = self.settings.get('selected_product', 'self_collabo')
+        self.current_product = (
+            saved_product if saved_product in ('self_collabo', 'jcom') else 'self_collabo'
+        )
         
         # アクティブな検索スレッドを保持するリスト
         self.active_search_threads = []
@@ -1632,6 +1646,31 @@ ND：{nd}
         for btn in buttons:
             top_bar_layout.addWidget(btn)
 
+        # 通常モードの商材選択は従来レイアウトを圧迫しない小型プルダウンにする。
+        if self.current_mode == 'simple':
+            product_label = QLabel("商材")
+            product_label.setStyleSheet("color: white; font-size: 9pt;")
+            self.product_combo = CustomComboBox()
+            self.product_combo.addItem("自社コラボ", "self_collabo")
+            self.product_combo.addItem("J:COM", "jcom")
+            self.product_combo.setFixedWidth(105)
+            self.product_combo.setFixedHeight(22)
+            self.product_combo.setStyleSheet("""
+                QComboBox {
+                    background: white;
+                    color: #263238;
+                    border: 1px solid #CFD8DC;
+                    border-radius: 3px;
+                    padding: 1px 5px;
+                    font-size: 9pt;
+                }
+            """)
+            selected_index = self.product_combo.findData(self.current_product)
+            self.product_combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+            self.product_combo.currentIndexChanged.connect(self._on_product_combo_changed)
+            top_bar_layout.addWidget(product_label)
+            top_bar_layout.addWidget(self.product_combo)
+
         mode_text, mode_color = self._get_mode_badge_spec()
         self.mode_badge_label = QPushButton(f"モード: {mode_text}")
         self.mode_badge_label.setStyleSheet(f"""
@@ -1655,6 +1694,53 @@ ND：{nd}
         top_bar_layout.addWidget(self.mode_badge_label)
         
         parent_layout.addWidget(top_bar)
+
+    def _on_product_combo_changed(self, index):
+        product = self.product_combo.itemData(index) or "self_collabo"
+        self.set_product(product)
+
+    def _update_product_selector(self):
+        if hasattr(self, 'product_combo'):
+            index = self.product_combo.findData(self.current_product)
+            if index >= 0 and self.product_combo.currentIndex() != index:
+                self.product_combo.setCurrentIndex(index)
+        if hasattr(self, 'jcom_panel'):
+            self.jcom_panel.setVisible(self.current_product == "jcom")
+
+    def set_product(self, product):
+        if product not in ("self_collabo", "jcom"):
+            return
+        if product == self.current_product:
+            self._update_product_selector()
+            return
+        if self.current_product == "jcom":
+            self.cancel_jcom_search()
+        self.current_product = product
+        self._persist_selected_product(product)
+        self.jcom_generation += 1
+        if hasattr(self, 'jcom_panel'):
+            self.jcom_panel.invalidate_result("商材が変更されました。再検索してください。")
+        self._update_product_selector()
+
+    def _persist_selected_product(self, product):
+        """選択中の商材を既存設定を消さずにsettings.jsonへ保存する。"""
+        if product not in ('self_collabo', 'jcom'):
+            return False
+        try:
+            settings = {}
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r', encoding='utf-8') as rf:
+                    settings = json.load(rf) or {}
+            settings['selected_product'] = product
+            tmp_path = self.settings_file + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as wf:
+                json.dump(settings, wf, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, self.settings_file)
+            self.settings = settings
+            return True
+        except Exception as exc:
+            logging.error("商材選択の保存に失敗しました: %s", exc)
+            return False
 
     def enable_undo_redo_for_inputs(self):
         """全入力ウィジェットのUndo/Redoを有効化し、フォーカスを追跡する"""
@@ -2173,6 +2259,15 @@ ND：{nd}
             }
         """)
         address_layout.addWidget(self.area_search_btn)
+
+        # 既存の提供判定の直下に置き、J:COM選択時だけ表示する。
+        if self.current_mode == 'simple':
+            self.jcom_panel = JcomSimulationPanel()
+            self.jcom_panel.setVisible(self.current_product == "jcom")
+            self.jcom_panel.search_requested.connect(self.start_jcom_search)
+            self.jcom_panel.cancel_requested.connect(self.cancel_jcom_search)
+            self.jcom_panel.residence_changed.connect(self._on_jcom_input_changed)
+            address_layout.addWidget(self.jcom_panel)
         
         # 提供エリア検索結果表示用のラベル
         area_result_container = QWidget()
@@ -2428,6 +2523,14 @@ ND：{nd}
             self.contractor_input.textChanged.connect(self.auto_generate_furigana)
             self.list_name_input.textChanged.connect(self.auto_generate_list_furigana)
             self.address_input.textChanged.connect(self.auto_generate_address_furigana)
+
+            if hasattr(self, 'jcom_panel'):
+                self.postal_code_input.textChanged.connect(self._on_jcom_input_changed)
+                self.address_input.textChanged.connect(self._on_jcom_input_changed)
+                self.era_combo.currentTextChanged.connect(self._on_jcom_input_changed)
+                self.year_combo.currentTextChanged.connect(self._on_jcom_input_changed)
+                self.month_combo.currentTextChanged.connect(self._on_jcom_input_changed)
+                self.day_combo.currentTextChanged.connect(self._on_jcom_input_changed)
             
             # 入力時に背景色をリセットするシグナル
             self.operator_input.textChanged.connect(self.reset_background_color)
@@ -2814,10 +2917,112 @@ ND：{nd}
         if sender:
             sender.setStyleSheet("")
 
+    def _on_jcom_input_changed(self, *args):
+        """検索条件変更時に古い結果/処理を現行顧客から切り離す。"""
+        if getattr(self, '_is_restoring_mode_state', False):
+            return
+        self.jcom_generation += 1
+        worker = getattr(self, 'jcom_worker', None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+        if hasattr(self, 'jcom_panel'):
+            self.jcom_panel.invalidate_result()
+
+    def start_jcom_search(self):
+        """GUI入力を一度だけスナップショット化してJ:COM検索を開始する。"""
+        if self.current_product != 'jcom' or not hasattr(self, 'jcom_panel'):
+            return
+        if self.jcom_worker is not None and self.jcom_worker.isRunning():
+            QMessageBox.information(self, "J:COM", "料金検索は既に実行中です。")
+            return
+
+        refresh_from_cti = self.settings.get(
+            'refresh_address_from_cti_before_area_search', True
+        )
+        if refresh_from_cti:
+            if not self.refresh_address_from_cti():
+                QMessageBox.warning(
+                    self, "CTI取得エラー",
+                    "CTIの住所取得に失敗したため、料金検索を開始できません。"
+                )
+                return
+        else:
+            logging.info("設定により、J:COM検索前のCTI住所再取得をスキップします")
+
+        # CTI再取得と自動整形が完了した後に同一世代の不変条件を作る。
+        self.jcom_generation += 1
+        try:
+            criteria = JcomSearchCriteria.create(
+                generation=self.jcom_generation,
+                postal_code=self.postal_code_input.text().strip(),
+                address=self.address_input.text().strip(),
+                birth_date_text=self._build_birth_date(),
+                residence_type=self.jcom_panel.residence_type(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "入力エラー", str(exc))
+            return
+
+        self.jcom_active_request_id = criteria.request_id
+        self.jcom_panel.invalidate_result("検索を開始します…")
+        self.jcom_panel.set_age_condition(
+            f"入力済み生年月日から判定: {criteria.age}歳／{criteria.age_bracket.value}"
+        )
+        self.jcom_panel.set_running(True)
+
+        worker = JcomSimulationWorker(criteria, self)
+        self.jcom_worker = worker
+        worker.progress.connect(self._on_jcom_progress)
+        worker.result_ready.connect(self._on_jcom_result)
+        worker.finished.connect(lambda w=worker: self._on_jcom_worker_finished(w))
+        worker.start()
+
+    def _on_jcom_progress(self, message):
+        if hasattr(self, 'jcom_panel'):
+            self.jcom_panel.set_progress(message)
+
+    def _on_jcom_result(self, result):
+        # 入力・商材・顧客世代が変わった後の遅延結果は表示しない。
+        if (
+            result.request_id != self.jcom_active_request_id
+            or result.generation != self.jcom_generation
+            or self.current_product != 'jcom'
+            or not hasattr(self, 'jcom_panel')
+        ):
+            return
+        self.jcom_panel.show_result(result)
+
+    def _on_jcom_worker_finished(self, worker):
+        if self.jcom_worker is worker:
+            self.jcom_worker = None
+        worker.deleteLater()
+
+    def cancel_jcom_search(self):
+        worker = getattr(self, 'jcom_worker', None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            if hasattr(self, 'jcom_panel'):
+                self.jcom_panel.set_progress("キャンセルしています…")
+        elif hasattr(self, 'jcom_panel'):
+            self.jcom_panel.set_running(False)
+
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
         try:
             logging.info("アプリケーション終了処理を開始します")
+
+            jcom_worker = getattr(self, 'jcom_worker', None)
+            if jcom_worker is not None and jcom_worker.isRunning():
+                jcom_worker.cancel()
+                if not jcom_worker.wait(3000):
+                    # QThreadを破棄せず、専用ドライバーの協調終了を待つ。
+                    event.ignore()
+                    if not getattr(self, '_jcom_close_pending', False):
+                        self._jcom_close_pending = True
+                        jcom_worker.finished.connect(
+                            lambda: QTimer.singleShot(0, self.close)
+                        )
+                    return
             
             # 検索スレッドとワーカーをクリーンアップ
             self.cleanup_thread()
@@ -3892,6 +4097,9 @@ ND：{nd}
         """
         try:
             logging.info("UIの再構築を開始します")
+
+            self.jcom_generation += 1
+            self.cancel_jcom_search()
 
             self._save_current_mode_ui_state(previous_mode)
 
@@ -5233,12 +5441,12 @@ ND：{nd}
                 corporate_template = self.settings.get('format_template_corporate')
 
                 if should_refresh_templates:
-                    simple_template = simple_default_format
-                    corporate_template = corporate_default_format
                     self.settings[template_defaults_version_key] = VERSION
                     settings_changed = True
                     logging.info(
-                        f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                        f"テンプレート設定のバージョンを更新しました"
+                        f"（ユーザー編集値は保持）: "
+                        f"{applied_template_version or '未設定'} -> {VERSION}"
                     )
 
                 if not simple_template:
