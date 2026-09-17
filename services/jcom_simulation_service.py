@@ -631,7 +631,10 @@ class JcomSimulationService:
     def _is_building_choice(criteria, selected_address, candidates):
         if criteria.residence_type is not ResidenceType.APARTMENT:
             return False
-        if not selected_address.split("|")[-1].endswith("番地"):
+        last_selected = normalize_address_for_match(
+            selected_address.split("|")[-1]
+        )
+        if not re.fullmatch(r"\d+(?:番地|番|号)?", last_selected):
             return False
         ordinary = [
             item for item in candidates
@@ -642,6 +645,41 @@ class JcomSimulationService:
             not re.fullmatch(r"\d+(?:番地|番|号|号室)?", normalize_address_for_match(item.text))
             for item in ordinary
         )
+
+    @staticmethod
+    def _is_room_choice(criteria, candidates, building_selected=False):
+        """建物選択後の数値候補だけを部屋番号選択として扱う。"""
+        if criteria.residence_type is not ResidenceType.APARTMENT:
+            return False
+        ordinary = [
+            item for item in candidates
+            if not item.special_action
+            and item.text not in ("戻る", "閉じる", "再設定")
+        ]
+        if not ordinary:
+            return False
+        normalized = [normalize_address_for_match(item.text) for item in ordinary]
+        numeric_rooms = all(
+            re.fullmatch(r"\d+(?:号|号室)?", text) for text in normalized
+        )
+        explicit_rooms = all(
+            re.fullmatch(r"\d+号室", text) for text in normalized
+        )
+        return numeric_rooms and (building_selected or explicit_rooms)
+
+    @staticmethod
+    def _manual_choice_candidates(candidates):
+        """実候補を先に、表示中住所で次へを最後に並べる。"""
+        ordinary = [
+            item for item in candidates
+            if not item.special_action
+            and item.text not in ("戻る", "閉じる", "再設定")
+        ]
+        next_actions = [
+            item for item in candidates
+            if item.special_action == NEXT_WITH_CURRENT
+        ]
+        return ordinary + next_actions
 
     def _not_join_visible(self) -> bool:
         inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#notJoin")
@@ -678,6 +716,7 @@ class JcomSimulationService:
         selected = ""
         matched_selected = ""
         partial = False
+        building_selected = False
         previous_signatures = set()
         for stage_number in range(20):
             self._check_cancelled()
@@ -736,10 +775,19 @@ class JcomSimulationService:
                 raise RuntimeError("同じ住所候補が繰り返されたため停止しました。")
             previous_signatures.add(state_signature)
 
-            building_choice = self._is_building_choice(criteria, selected, candidates)
-            if building_choice:
+            selection_kind = ""
+            if self._is_building_choice(criteria, selected, candidates):
+                selection_kind = "building"
+            elif self._is_room_choice(criteria, candidates, building_selected):
+                selection_kind = "room"
+            if selection_kind:
                 candidate_id = None
-                decision = None
+                decision = choose_address_candidate(
+                    criteria.address_original,
+                    matched_selected,
+                    candidates,
+                    criteria.address_components,
+                )
             else:
                 decision = choose_address_candidate(
                     criteria.address_original,
@@ -757,20 +805,18 @@ class JcomSimulationService:
                 )
                 if duplicate_id is not None:
                     candidate_id = duplicate_id
-            if building_choice:
+            if selection_kind:
                 if self.candidate_resolver is None:
-                    raise RuntimeError("集合住宅の建物名を選択してください。")
+                    target = "建物名" if selection_kind == "building" else "部屋番号"
+                    raise RuntimeError(f"集合住宅の{target}を選択してください。")
                 request = AddressCandidateRequest(
                     request_id=criteria.request_id,
                     generation=criteria.generation,
                     stage_id=f"address-{stage_number}",
                     selected_address=selected.replace("|", " → "),
                     remaining_address=remaining_address(criteria.address_original, matched_selected),
-                    candidates=[
-                        item for item in candidates
-                        if not item.special_action
-                        and item.text not in ("戻る", "閉じる", "再設定")
-                    ],
+                    candidates=self._manual_choice_candidates(candidates),
+                    selection_kind=selection_kind,
                 )
                 candidate_id = self.candidate_resolver(request)
                 if candidate_id is None:
@@ -792,7 +838,30 @@ class JcomSimulationService:
             else:
                 selected = f"{selected}|{chosen.text}" if selected else chosen.text
                 matched_text = chosen.text
-                if decision is not None and decision.approximate_from:
+                if selection_kind == "building":
+                    building_selected = True
+                if (
+                    selection_kind == "room"
+                    and decision is not None
+                    and decision.candidate_id != chosen.candidate_id
+                ):
+                    expected = decision.approximate_from
+                    if not expected and decision.candidate_id:
+                        expected_candidate = next(
+                            (
+                                item for item in candidates
+                                if item.candidate_id == decision.candidate_id
+                            ),
+                            None,
+                        )
+                        expected = expected_candidate.text if expected_candidate else ""
+                    if expected:
+                        self._address_approximations.append(
+                            AddressApproximation(expected, chosen.text)
+                        )
+                        matched_text = expected
+                        partial = True
+                elif decision is not None and decision.approximate_from:
                     self._address_approximations.append(
                         AddressApproximation(decision.approximate_from, chosen.text)
                     )

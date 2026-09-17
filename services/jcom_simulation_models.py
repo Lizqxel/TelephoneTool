@@ -151,6 +151,7 @@ class AddressCandidateRequest:
     selected_address: str
     remaining_address: str
     candidates: List[AddressCandidate]
+    selection_kind: str = "building"
 
 
 @dataclass

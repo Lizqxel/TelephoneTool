@@ -250,6 +250,9 @@ def test_only_apartment_building_candidates_require_manual_selection():
     assert JcomSimulationService._is_building_choice(
         apartment, "府中市美好町３丁目|３０番地", buildings
     )
+    assert JcomSimulationService._is_building_choice(
+        apartment, "富岡町３丁目|２７番地|１３号", buildings
+    )
     assert not JcomSimulationService._is_building_choice(
         detached, "府中市美好町３丁目|３０番地", buildings
     )
@@ -258,6 +261,38 @@ def test_only_apartment_building_candidates_require_manual_selection():
         "府中市美好町３丁目|３０番地",
         [AddressCandidate("2:0", "３８号")],
     )
+
+
+def test_only_apartment_room_candidates_after_building_require_manual_selection():
+    from dataclasses import replace
+
+    apartment = criteria()
+    detached = replace(apartment, residence_type=ResidenceType.DETACHED)
+    rooms = [
+        AddressCandidate("3:0", "２０５号"),
+        AddressCandidate("3:1", "２０６号"),
+        AddressCandidate("3:2", "該当する部屋がない方はこちら", "missing_address"),
+    ]
+    assert JcomSimulationService._is_room_choice(
+        apartment, rooms, building_selected=True
+    )
+    assert not JcomSimulationService._is_room_choice(
+        apartment, rooms, building_selected=False
+    )
+    assert not JcomSimulationService._is_room_choice(
+        detached, rooms, building_selected=True
+    )
+
+
+def test_manual_candidates_put_site_next_last_and_exclude_missing_link():
+    candidates = [
+        AddressCandidate("3:0", "【表示中の住所】で次へ", "next_with_current"),
+        AddressCandidate("3:1", "２０５号"),
+        AddressCandidate("3:2", "該当する部屋がない方はこちら", "missing_address"),
+        AddressCandidate("3:3", "２０６号"),
+    ]
+    selected = JcomSimulationService._manual_choice_candidates(candidates)
+    assert [item.candidate_id for item in selected] == ["3:1", "3:3", "3:0"]
 
 
 def test_button_text_lookup_uses_one_dom_query_and_clicks_same_element():

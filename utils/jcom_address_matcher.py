@@ -91,6 +91,9 @@ def classify_special_candidate(text: str) -> str:
         "住所・物件がない" in normalized
         or ("住所および物件が見つからない" in normalized)
         or ("該当する住所がない" in normalized)
+        or ("該当する物件がない" in normalized)
+        or ("該当する部屋" in normalized and "ない" in normalized)
+        or ("部屋番号" in normalized and "見つからない" in normalized)
     ):
         return MISSING_ADDRESS
     return ""

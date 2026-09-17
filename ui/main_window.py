@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy, QProgressBar, QListView, QInputDialog)
+                              QSizePolicy, QProgressBar, QListView)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMetaObject, Q_ARG
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor, QUndoStack, QUndoCommand, QKeySequence
 
@@ -28,6 +28,7 @@ from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
 from services.jcom_simulation_models import JcomSearchCriteria
+from utils.jcom_address_matcher import NEXT_WITH_CURRENT
 from ui.jcom_simulation_panel import JcomSimulationPanel
 from ui.jcom_simulation_worker import JcomSimulationWorker
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
@@ -2996,41 +2997,91 @@ ND：{nd}
         ):
             worker.cancel()
             return
+        ordinary_candidates = [
+            item for item in request.candidates
+            if item.special_action != NEXT_WITH_CURRENT
+        ]
+        next_candidate = next(
+            (
+                item for item in request.candidates
+                if item.special_action == NEXT_WITH_CURRENT
+            ),
+            None,
+        )
         options = [
             f"{index + 1}. {candidate.text}"
-            for index, candidate in enumerate(request.candidates)
+            for index, candidate in enumerate(ordinary_candidates)
         ]
-        if not options:
+        if not options and next_candidate is None:
             worker.cancel()
             return
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle("J:COM 建物名の選択")
-        dialog.setLabelText(
+        is_room = request.selection_kind == "room"
+        target_label = "部屋番号" if is_room else "建物名"
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"J:COM {target_label}の選択")
+        layout = QVBoxLayout(dialog)
+        label = QLabel(
             f"選択済み住所: {request.selected_address}\n"
             f"入力住所の残り: {request.remaining_address or 'なし'}\n"
-            "該当する建物名を選んでください。"
+            f"該当する{target_label}を選んでください。",
+            dialog,
         )
-        dialog.setComboBoxItems(options)
-        dialog.setComboBoxEditable(False)
-        dialog.setOkButtonText("この建物を選択")
-        dialog.setCancelButtonText("検索を中止")
+        layout.addWidget(label)
+        combo = QComboBox(dialog)
+        combo.addItems(options)
+        combo.setEnabled(bool(options))
+        layout.addWidget(combo)
+        buttons = QHBoxLayout()
+        select_button = QPushButton(f"この{target_label}を選択", dialog)
+        select_button.setEnabled(bool(options))
+        buttons.addWidget(select_button)
+        next_button = None
+        if next_candidate is not None:
+            next_button = QPushButton(
+                "該当なし（表示中の住所で次へ）", dialog
+            )
+            buttons.addWidget(next_button)
+        cancel_button = QPushButton("検索を中止", dialog)
+        buttons.addWidget(cancel_button)
+        layout.addLayout(buttons)
+        dialog._jcom_candidate_label = label
+        dialog._jcom_candidate_combo = combo
+        dialog._jcom_select_button = select_button
+        dialog._jcom_next_button = next_button
+        dialog._jcom_cancel_button = cancel_button
+        selected_candidate_id = {"value": None}
+
+        def choose_candidate(candidate_id):
+            selected_candidate_id["value"] = candidate_id
+            dialog.accept()
+
+        def choose_combo_candidate():
+            index = combo.currentIndex()
+            if 0 <= index < len(ordinary_candidates):
+                choose_candidate(ordinary_candidates[index].candidate_id)
+
+        select_button.clicked.connect(choose_combo_candidate)
+        if next_button is not None:
+            next_button.clicked.connect(
+                lambda: choose_candidate(next_candidate.candidate_id)
+            )
+        cancel_button.clicked.connect(dialog.reject)
         self._jcom_candidate_dialog = dialog
 
         def resolve_dialog(code):
             if getattr(self, '_jcom_candidate_dialog', None) is dialog:
                 self._jcom_candidate_dialog = None
-            if code == QDialog.Accepted and worker.isRunning():
-                try:
-                    index = options.index(dialog.textValue())
-                except ValueError:
-                    worker.cancel()
-                else:
-                    worker.submit_candidate(
-                        request.request_id,
-                        request.generation,
-                        request.stage_id,
-                        request.candidates[index].candidate_id,
-                    )
+            if (
+                code == QDialog.Accepted
+                and worker.isRunning()
+                and selected_candidate_id["value"] is not None
+            ):
+                worker.submit_candidate(
+                    request.request_id,
+                    request.generation,
+                    request.stage_id,
+                    selected_candidate_id["value"],
+                )
             else:
                 worker.cancel()
             dialog.deleteLater()

@@ -191,6 +191,8 @@ def test_missing_property_link_is_not_candidate():
     current_site_text = "住所および物件が見つからないお客さまへ"
     assert classify_special_candidate(current_site_text) == MISSING_ADDRESS
     assert classify_special_candidate("該当する住所がない方はこちら") == MISSING_ADDRESS
+    assert classify_special_candidate("該当する部屋がない方はこちら") == MISSING_ADDRESS
+    assert classify_special_candidate("部屋番号が見つからない方はこちら") == MISSING_ADDRESS
 
 
 def test_designated_city_ward_is_not_left_in_town_component():
