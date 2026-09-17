@@ -216,3 +216,24 @@ def test_confirmed_address_accepts_site_added_zero_and_building_name():
 def test_chome_less_and_hyphen_address():
     decision = choose_address_candidate("東京都新宿区西新宿2-8-1", "東京都新宿区西新宿", candidates("2", "20"))
     assert decision.candidate_id == "0"
+
+
+def test_town_and_sublocality_are_selected_as_separate_site_stages():
+    address = "愛知県田原市大久保町仲ノ坪３５"
+    hints = split_address_components(address)
+    assert hints == ("大久保町", "仲ノ坪", "35")
+
+    decision = choose_address_candidate(
+        address, "", candidates("大草町", "大久保町", "野田町"), hints
+    )
+    assert decision.candidate_id == "1"
+    decision = choose_address_candidate(
+        address, "大久保町", candidates("仲ノ坪", "黒河"), hints
+    )
+    assert decision.candidate_id == "0"
+    decision = choose_address_candidate(
+        address, "大久保町|仲ノ坪", candidates("３４番地", "３６番地"), hints
+    )
+    assert decision.candidate_id == "0"
+    assert decision.approximate_from == "35"
+    assert decision.approximate_to == "３４番地"

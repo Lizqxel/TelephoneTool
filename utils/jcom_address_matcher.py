@@ -41,7 +41,14 @@ def split_address_components(address: str) -> Tuple[str, ...]:
         if town_match:
             town = town_match.group(1)
             if town:
-                components.append(town)
+                # J:COMは「大久保町仲ノ坪」のような町名＋小字を
+                # 「大久保町」→「仲ノ坪」の2段階で表示する。
+                # 市区町村は既に除去済みなので、後続文字がある町境界だけ分ける。
+                sublocality_match = re.match(r"^(.+?町)(.+)$", town)
+                if sublocality_match:
+                    components.extend(sublocality_match.groups())
+                else:
+                    components.append(town)
             value = value[town_match.end():]
 
     while value:
