@@ -398,12 +398,12 @@ ND：{nd}
                     corporate_template = settings.get('format_template_corporate')
 
                     if should_refresh_templates:
-                        simple_template = simple_default_template
-                        corporate_template = corporate_default_template
                         settings[template_defaults_version_key] = VERSION
                         settings_changed = True
                         logging.info(
-                            f"アップデート検知によりテンプレート既定値を更新しました: {applied_template_version or '未設定'} -> {VERSION}"
+                            f"テンプレート設定のバージョンを更新しました"
+                            f"（ユーザー編集値は保持）: "
+                            f"{applied_template_version or '未設定'} -> {VERSION}"
                         )
 
                     if not simple_template:
@@ -442,6 +442,11 @@ ND：{nd}
                     self.format_template = selected_template
                     # settingsオブジェクトを更新
                     self.settings = settings
+                    saved_product = settings.get(
+                        'selected_product', getattr(self, 'current_product', 'self_collabo')
+                    )
+                    if saved_product in ('self_collabo', 'jcom'):
+                        self.current_product = saved_product
             else:
                 # デフォルトのフォーマットテンプレートを設定
                 self.format_template = default_template
@@ -1928,4 +1933,4 @@ ND：{nd}
                 color: #2980B9;
             }
         """)
-        QApplication.processEvents() 
+        QApplication.processEvents()

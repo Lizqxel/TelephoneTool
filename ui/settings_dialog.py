@@ -31,8 +31,12 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("設定")
         self.setFixedSize(700, 600)  # ダイアログサイズを固定
         
-        # 設定ファイルのパスを絶対パスで設定
-        if getattr(sys, 'frozen', False):
+        # メインウィンドウが確定した設定ファイルを必ず共有する。
+        # exe時にダイアログと生成処理が別のsettings.jsonを参照するのを防ぐ。
+        parent_settings_file = getattr(parent, 'settings_file', None)
+        if parent_settings_file:
+            self.settings_file = os.path.abspath(parent_settings_file)
+        elif getattr(sys, 'frozen', False):
             # exeファイルとして実行されている場合
             self.settings_file = os.path.join(os.path.dirname(sys.executable), 'settings.json')
         else:
