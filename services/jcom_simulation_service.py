@@ -28,12 +28,14 @@ from webdriver_manager.core.os_manager import ChromeType
 from services.web_driver import _resolve_chromedriver_executable
 
 from services.jcom_simulation_models import (
+    AddressApproximation,
     AddressCandidate,
     AddressCandidateRequest,
     DiscountLine,
     JcomSearchCriteria,
     JcomSimulationResult,
     JST,
+    ResidenceType,
     SimulationStatus,
 )
 from utils.jcom_address_matcher import (
@@ -64,6 +66,10 @@ class JcomAddressNotFound(Exception):
 
 
 class JcomCourseUnavailable(Exception):
+    pass
+
+
+class JcomSiteError(Exception):
     pass
 
 
@@ -233,7 +239,6 @@ class JcomSimulationService:
         self._profile_dir = None
         self._selected_course_name = "光(N) 1Gコース"
         self._selected_line_type = "J:COM NET 光(N)"
-        self._course_fallback_used = False
 
     @staticmethod
     def _default_screenshot_dir() -> Path:
@@ -388,6 +393,10 @@ class JcomSimulationService:
         last_error = None
         while time.monotonic() < end:
             self._check_cancelled()
+            current_url = self.driver.current_url
+            if "/Err" in current_url:
+                match = re.search(r"[?&]errorId=([^&]+)", current_url)
+                raise JcomSiteError(match.group(1) if match else "不明")
             try:
                 value = condition(self.driver)
                 if value:
@@ -459,36 +468,107 @@ class JcomSimulationService:
         )
         self._click_button_with_text(("エリアを設定する", "エリアを検索"))
 
-    def _candidate_elements(self):
+    def _candidate_elements(self, selected_address: str = ""):
         # 表示中のモーダル/住所選択領域だけを対象にする。
         roots = self._visible(self.driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .modal, .address-modal"))
         root = roots[-1] if roots else self.driver
-        elements = self._visible(
-            root.find_elements(
-                By.CSS_SELECTOR,
-                "a.link-bullet-black, button.link-bullet-black, .link-bullet-black, "
-                ".accordion-header.collapse-trigger, a:not([href])",
-            )
+        # 大きな町域では番地見出しが数百件ある。要素ごとの.text照会を
+        # 繰り返さず、現在のモーダルを一度のDOM読取でスナップショットする。
+        entries = self.driver.execute_script(
+            r"""
+            const scope = arguments[0] || document;
+            const selected = arguments[1] || '';
+            // 横スライドで隠れた前段列もgetClientRects()は残るため、
+            // 選択済み住所があれば現在の列だけを候補として読む。
+            const columns = scope.querySelector('.address-narrow-down');
+            let active = scope;
+            if (columns) {
+                const selector = selected
+                    ? '.js-narrow-down-2nd' : '.js-narrow-down-first';
+                active = columns.querySelector(selector) || scope;
+            }
+            const visible = (el) => !!el.getClientRects().length &&
+                getComputedStyle(el).visibility !== 'hidden';
+            const collect = (selector) => Array.from(active.querySelectorAll(selector))
+                .filter(visible);
+            let nodes = [];
+            if (selected.split('|').at(-1).endsWith('番地')) {
+                nodes = collect('.collapse-container.is-open '
+                    + '.sub-address-link-list .link-bullet-black');
+            }
+            if (!nodes.length) {
+                nodes = collect('a.link-bullet-black, button.link-bullet-black, '
+                    + '.link-bullet-black, .accordion-header.collapse-trigger, a:not([href])');
+            }
+            for (const el of Array.from(scope.querySelectorAll('button, a')).filter(visible)) {
+                    const text = (el.innerText || '').replace(/\\s+/g, ' ').trim();
+                    if ((text.includes('表示中の住所') && text.includes('次へ')) ||
+                        text.includes('住所・物件がない') ||
+                        text.includes('住所および物件が見つからない') ||
+                        text.includes('該当する住所がない')) {
+                        if (!nodes.includes(el)) nodes.push(el);
+                    }
+            }
+            return nodes.map((el) => ({
+                element: el,
+                text: (el.innerText || '').replace(/\\s+/g, ' ').trim(),
+                className: el.className || '',
+                noHref: !el.hasAttribute('href'),
+            })).filter((item) => item.text);
+            """,
+            None if root is self.driver else root,
+            selected_address,
         )
-        # 特別操作が別クラスの実装に変わっても検出するが、通常の閉じる等は混ぜない。
-        special_elements = self._visible(root.find_elements(By.CSS_SELECTOR, "button, a"))
-        for element in special_elements:
-            if classify_special_candidate(element.text or "") and element not in elements:
-                elements.append(element)
         result = []
-        for element in elements:
-            text = re.sub(r"\s+", " ", element.text or "").strip()
-            if not text:
-                continue
+        for entry in entries:
+            element = entry["element"]
+            text = entry["text"]
             special = classify_special_candidate(text)
             if (
                 special
-                or "link-bullet-black" in (element.get_attribute("class") or "")
-                or "accordion-header" in (element.get_attribute("class") or "")
-                or element.get_attribute("href") is None
+                or "link-bullet-black" in entry["className"]
+                or "accordion-header" in entry["className"]
+                or entry["noHref"]
             ):
+                element._jcom_candidate_text = text
                 result.append(element)
         return root, result
+
+    @staticmethod
+    def _candidate_text(element):
+        return getattr(element, "_jcom_candidate_text", None) or element.text
+
+    @staticmethod
+    def _identical_duplicate_candidate_id(candidates, element_by_id):
+        """表示とDOMが同一の町域重複だけを自動で1件にまとめる。"""
+        ordinary = [
+            item for item in candidates
+            if not item.special_action
+            and item.text not in ("戻る", "閉じる", "再設定")
+        ]
+        if len(ordinary) != 2 or ordinary[0].text != ordinary[1].text:
+            return None
+        first = element_by_id[ordinary[0].candidate_id]
+        second = element_by_id[ordinary[1].candidate_id]
+        if first.get_attribute("outerHTML") == second.get_attribute("outerHTML"):
+            return ordinary[0].candidate_id
+        return None
+
+    @staticmethod
+    def _is_building_choice(criteria, selected_address, candidates):
+        if criteria.residence_type is not ResidenceType.APARTMENT:
+            return False
+        if not selected_address.split("|")[-1].endswith("番地"):
+            return False
+        ordinary = [
+            item for item in candidates
+            if not item.special_action
+            and item.text not in ("戻る", "閉じる", "再設定")
+        ]
+        return bool(ordinary) and all(
+            not re.fullmatch(r"\d+(?:番地|番|号|号室)?", normalize_address_for_match(item.text))
+            for item in ordinary
+        )
 
     def _not_join_visible(self) -> bool:
         inputs = self.driver.find_elements(By.CSS_SELECTOR, "input#notJoin")
@@ -523,6 +603,7 @@ class JcomSimulationService:
     def _select_address(self, criteria: JcomSearchCriteria) -> Tuple[str, bool]:
         self.progress("住所候補を確認しています")
         selected = ""
+        matched_selected = ""
         partial = False
         previous_signatures = set()
         for stage_number in range(20):
@@ -533,10 +614,10 @@ class JcomSimulationService:
                 body = self.driver.find_element(By.TAG_NAME, "body").text
                 if "提供エリア外" in body or "サービス提供エリア外" in body:
                     raise JcomOutOfArea()
-                root, elements = self._candidate_elements()
+                root, elements = self._candidate_elements(selected)
                 actionable = []
                 for element in elements:
-                    text = re.sub(r"\s+", "", element.text or "")
+                    text = re.sub(r"\s+", "", self._candidate_text(element) or "")
                     special = classify_special_candidate(text)
                     if special == MISSING_ADDRESS or text in ("戻る", "閉じる"):
                         continue
@@ -559,14 +640,20 @@ class JcomSimulationService:
             except TimeoutException:
                 # モーダルが閉じ、利用状況へ進める状態なら住所確定。
                 if self._not_join_visible():
-                    return self._read_confirmed_address(criteria.address_original), partial
+                    confirmed = self._read_confirmed_address(criteria.address_original)
+                    confirmed_full = confirmed_address_matches(
+                        criteria.address_original,
+                        confirmed,
+                        criteria.address_components,
+                    )
+                    return confirmed, partial or not confirmed_full
                 raise
 
             candidates = []
             element_by_id = {}
             for index, element in enumerate(elements):
                 candidate_id = f"{stage_number}:{index}"
-                text = re.sub(r"\s+", " ", element.text or "").strip()
+                text = re.sub(r"\s+", " ", self._candidate_text(element) or "").strip()
                 candidate = AddressCandidate(candidate_id, text, classify_special_candidate(text))
                 candidates.append(candidate)
                 element_by_id[candidate_id] = element
@@ -576,41 +663,72 @@ class JcomSimulationService:
                 raise RuntimeError("同じ住所候補が繰り返されたため停止しました。")
             previous_signatures.add(state_signature)
 
-            decision = choose_address_candidate(
-                criteria.address_original,
-                selected,
-                candidates,
-                criteria.address_components,
-            )
-            candidate_id = decision.candidate_id
-            if decision.requires_user:
+            building_choice = self._is_building_choice(criteria, selected, candidates)
+            if building_choice:
+                candidate_id = None
+                decision = None
+            else:
+                decision = choose_address_candidate(
+                    criteria.address_original,
+                    matched_selected,
+                    candidates,
+                    criteria.address_components,
+                )
+                candidate_id = decision.candidate_id
+            if decision is not None and decision.requires_user:
+                # 郵便番号検索が同一DOMの町域候補を二重に返す場合がある。
+                # 表示・属性・要素構造が完全に同じ2件に限り、重複表示として
+                # 先頭を採用する。異なる候補は従来どおり利用者に確認する。
+                duplicate_id = self._identical_duplicate_candidate_id(
+                    candidates, element_by_id
+                )
+                if duplicate_id is not None:
+                    candidate_id = duplicate_id
+            if building_choice:
                 if self.candidate_resolver is None:
-                    if decision.no_match:
-                        raise JcomAddressNotFound()
-                    raise RuntimeError(
-                        "住所候補を一意に特定できませんでした。入力住所を確認してください。"
-                    )
+                    raise RuntimeError("集合住宅の建物名を選択してください。")
                 request = AddressCandidateRequest(
                     request_id=criteria.request_id,
                     generation=criteria.generation,
                     stage_id=f"address-{stage_number}",
                     selected_address=selected.replace("|", " → "),
-                    remaining_address=remaining_address(criteria.address_original, selected),
-                    candidates=candidates,
+                    remaining_address=remaining_address(criteria.address_original, matched_selected),
+                    candidates=[
+                        item for item in candidates
+                        if not item.special_action
+                        and item.text not in ("戻る", "閉じる", "再設定")
+                    ],
                 )
                 candidate_id = self.candidate_resolver(request)
                 if candidate_id is None:
                     raise JcomCancelled()
+            elif candidate_id is None:
+                if decision.no_match:
+                    raise JcomAddressNotFound()
+                raise RuntimeError(
+                    "住所候補を一意に特定できませんでした。入力住所を確認してください。"
+                )
             chosen = next((item for item in candidates if item.candidate_id == candidate_id), None)
             if chosen is None:
                 raise RuntimeError("選択された住所候補は既に無効です。")
             if chosen.special_action == MISSING_ADDRESS:
                 raise RuntimeError("住所・物件なしの問い合わせ導線は自動操作できません。")
             if chosen.special_action == NEXT_WITH_CURRENT:
-                if remaining_address(criteria.address_original, selected):
+                if remaining_address(criteria.address_original, matched_selected):
                     partial = True
             else:
                 selected = f"{selected}|{chosen.text}" if selected else chosen.text
+                matched_text = chosen.text
+                if decision is not None and decision.approximate_from:
+                    self._address_approximations.append(
+                        AddressApproximation(decision.approximate_from, chosen.text)
+                    )
+                    matched_text = decision.approximate_from
+                    partial = True
+                matched_selected = (
+                    f"{matched_selected}|{matched_text}"
+                    if matched_selected else matched_text
+                )
 
             old_signature = signature
             element = element_by_id[candidate_id]
@@ -620,9 +738,12 @@ class JcomSimulationService:
                 if self._not_join_visible():
                     return True
                 try:
-                    _, new_elements = self._candidate_elements()
+                    _, new_elements = self._candidate_elements(selected)
                     new_signature = tuple(
-                        (re.sub(r"\s+", " ", e.text or "").strip(), classify_special_candidate(e.text or ""))
+                        (
+                            re.sub(r"\s+", " ", self._candidate_text(e) or "").strip(),
+                            classify_special_candidate(self._candidate_text(e) or ""),
+                        )
                         for e in new_elements
                     )
                     return new_signature and new_signature != old_signature and "住所取得中" not in self.driver.find_element(By.TAG_NAME, "body").text
@@ -631,7 +752,13 @@ class JcomSimulationService:
 
             self._wait(stage_changed, 20)
             if self._not_join_visible():
-                return self._read_confirmed_address(criteria.address_original), partial
+                confirmed = self._read_confirmed_address(criteria.address_original)
+                confirmed_full = confirmed_address_matches(
+                    criteria.address_original,
+                    confirmed,
+                    criteria.address_components,
+                )
+                return confirmed, partial or not confirmed_full
         raise RuntimeError("住所選択の段階数が上限を超えました。")
 
     def _open_simulation(self):
@@ -702,42 +829,61 @@ class JcomSimulationService:
 
     def _select_course_and_result(self):
         self.progress("光(N) 1Gコースを選択しています")
-        inputs = self._wait(
-            lambda d: [
-                element for element in d.find_elements(
-                    By.CSS_SELECTOR, "input[name='course-net'][value='1G']"
-                ) if element.is_enabled()
-            ],
+        unavailable_state = {"since": None, "signature": None}
+
+        def exact_course_input(driver):
+            all_course_inputs = driver.find_elements(
+                By.CSS_SELECTOR, "input[name='course-net']"
+            )
+            listed_courses = []
+            for input_element in all_course_inputs:
+                if input_element.get_attribute("value") != "1G":
+                    continue
+                input_id = input_element.get_attribute("id")
+                label_text = ""
+                if input_id:
+                    labels = driver.find_elements(By.CSS_SELECTOR, f"label[for='{input_id}']")
+                    label_text = " ".join(label.text for label in labels)
+                try:
+                    label_text += " " + input_element.find_element(
+                        By.XPATH, "ancestor::*[self::label or self::div][1]"
+                    ).text
+                except NoSuchElementException:
+                    pass
+                normalized = re.sub(r"\s+", "", label_text).lower()
+                listed_courses.append((normalized, input_element.is_enabled()))
+                if (
+                    input_element.is_enabled()
+                    and "光(n)1gコース" in normalized
+                    and "auひかり" not in normalized
+                ):
+                    return input_element
+            # Simulation05の枠やauひかり等だけが先に表示される場合もある。
+            # コース一覧の状態が8秒間変わらないことを確認してから判定不能にする。
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            if (
+                "/Simulation/Simulation05" in driver.current_url
+                and "コースをお選びください" in body_text
+            ):
+                signature = tuple(listed_courses)
+                now = time.monotonic()
+                if signature != unavailable_state["signature"]:
+                    unavailable_state["signature"] = signature
+                    unavailable_state["since"] = now
+                elif now - unavailable_state["since"] >= 8.0:
+                    raise JcomCourseUnavailable(
+                        "判定不能：光(N) 1Gコースを確認できませんでした。"
+                        "auひかり1Gへの代替はしません。"
+                    )
+            else:
+                unavailable_state["since"] = None
+                unavailable_state["signature"] = None
+            return None
+
+        target = self._wait(
+            exact_course_input,
             30,
         )
-        target = None
-        fallback_target = None
-        for input_element in inputs:
-            input_id = input_element.get_attribute("id")
-            label_text = ""
-            if input_id:
-                labels = self.driver.find_elements(By.CSS_SELECTOR, f"label[for='{input_id}']")
-                label_text = " ".join(label.text for label in labels)
-            try:
-                label_text += " " + input_element.find_element(By.XPATH, "ancestor::*[self::label or self::div][1]").text
-            except NoSuchElementException:
-                pass
-            normalized = re.sub(r"\s+", "", label_text).lower()
-            if "光(n)" in normalized and "1g" in normalized:
-                target = input_element
-                break
-            if "光1gコースonauひかり" in normalized:
-                fallback_target = input_element
-        if target is None and fallback_target is not None:
-            target = fallback_target
-            self._selected_course_name = "光 1Gコース on auひかり"
-            self._selected_line_type = "光 on auひかり"
-            self._course_fallback_used = True
-            self.progress("光(N) 1G対象外のため、光 1Gコース on auひかりを選択しています")
-        if target is None:
-            raise JcomCourseUnavailable(
-                "光(N) 1Gコースまたは光 1Gコース on auひかりが見つかりません。"
-            )
         if not target.is_selected():
             self.driver.execute_script("arguments[0].click()", target)
         target_id = target.get_attribute("id")
@@ -754,6 +900,10 @@ class JcomSimulationService:
 
         stability = {"text": None, "since": 0.0}
         result_selector = ".simulation-result-wrap, #simulation-result"
+
+        def selected_course_is_visible(element):
+            text = element.text
+            return "J:COM NET 光(N)" in text and "1Gコース" in text
 
         def stable_result(_):
             elements = self._visible(self.driver.find_elements(By.CSS_SELECTOR, result_selector))
@@ -791,12 +941,6 @@ class JcomSimulationService:
             parent_text_before = result_element.text
             if "基本料金" not in parent_text_before or "内訳" not in parent_text_before:
                 self.driver.execute_script("arguments[0].click()", trigger)
-            def selected_course_is_visible(element):
-                text = element.text
-                if self._course_fallback_used:
-                    return self._selected_course_name in text
-                return "J:COM NET 光(N)" in text and "1Gコース" in text
-
             result_element = self._wait(
                 lambda d: next(
                     (
@@ -812,12 +956,16 @@ class JcomSimulationService:
                 ),
                 15,
             )
+        elif not selected_course_is_visible(result_element):
+            raise JcomCourseUnavailable(
+                "判定不能：料金結果が光(N) 1Gコースであることを確認できませんでした。"
+            )
         return result_element
 
     def run(self, criteria: JcomSearchCriteria) -> JcomSimulationResult:
         self._selected_course_name = "光(N) 1Gコース"
         self._selected_line_type = "J:COM NET 光(N)"
-        self._course_fallback_used = False
+        self._address_approximations = []
         result = JcomSimulationResult(
             request_id=criteria.request_id,
             generation=criteria.generation,
@@ -832,6 +980,7 @@ class JcomSimulationService:
             selected_service=criteria.service,
             line_type="",
             course=criteria.course,
+            address_approximations=self._address_approximations,
         )
         try:
             self.driver = self._create_driver()
@@ -868,11 +1017,6 @@ class JcomSimulationService:
             result.course = self._selected_course_name
             result.line_type = self._selected_line_type
             result.selected_service = "ネットのみ"
-            if self._course_fallback_used:
-                fallback_note = "光(N) 1G対象外のため、auひかりの光 1Gコースを選択"
-                result.notes_text = "\n".join(
-                    part for part in (fallback_note, result.notes_text) if part
-                )
             result.status = SimulationStatus.PARTIAL if result.partial_address else SimulationStatus.SUCCESS
             self.progress("料金結果を取得しました")
         except JcomCancelled:
@@ -891,6 +1035,17 @@ class JcomSimulationService:
         except JcomCourseUnavailable as exc:
             result.status = SimulationStatus.COURSE_UNAVAILABLE
             result.error_message = str(exc)
+            if result.partial_address:
+                result.error_message += (
+                    " サイト確定住所は入力住所と異なるため、"
+                    "この判定は入力住所そのものの提供可否を示しません。"
+                )
+        except JcomSiteError as exc:
+            result.status = SimulationStatus.COMMUNICATION_ERROR
+            result.error_message = (
+                "J:COMサイト側で受付エラーが発生しました"
+                f"（エラーコード: {exc}）。時間を空けて再検索してください。"
+            )
         except (TimeoutException, WebDriverException) as exc:
             result.status = SimulationStatus.COMMUNICATION_ERROR
             result.error_message = "J:COM画面の応答を確認できませんでした。"

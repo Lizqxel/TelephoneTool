@@ -161,6 +161,12 @@ class DiscountLine:
     raw_text: str = ""
 
 
+@dataclass(frozen=True)
+class AddressApproximation:
+    requested: str
+    selected: str
+
+
 @dataclass
 class JcomSimulationResult:
     request_id: str
@@ -188,6 +194,7 @@ class JcomSimulationResult:
     screenshot_path: Optional[str] = None
     status: SimulationStatus = SimulationStatus.ERROR
     partial_address: bool = False
+    address_approximations: List[AddressApproximation] = field(default_factory=list)
     error_message: str = ""
 
     @property
@@ -203,7 +210,12 @@ class JcomSimulationResult:
             if self.age_selection_used and self.applied_age_bracket
             else "この経路では年齢選択なし"
         )
-        lines = [
+        lines = []
+        if self.status is SimulationStatus.COURSE_UNAVAILABLE:
+            lines.append("判定: 判定不能（光(N) 1Gコース未確認）")
+        if self.address_approximations:
+            lines.append("【注意】指定の番地・号がなく、近い候補の住所で検索しました。入力住所の料金ではありません。")
+        lines.extend((
             f"対象サービス: {self.selected_service or '未取得'}",
             f"回線種別: {self.line_type or '未取得'}",
             f"コース: {self.course or '未取得'}",
@@ -214,9 +226,20 @@ class JcomSimulationResult:
             f"住宅区分: {self.residence_type.label}",
             f"入力済み生年月日から判定: {self.age}歳／{self.calculated_age_bracket.value}",
             f"サイト適用条件: {applied}",
-        ]
-        if self.partial_address:
+        ))
+        if self.address_approximations:
+            lines.append("近い住所として選択した候補:")
+            lines.extend(
+                f"・指定 {item.requested} → 選択 {item.selected}"
+                for item in self.address_approximations
+            )
+        elif self.partial_address:
             lines.append("住所確認: 住所の一部未確認")
+        if self.partial_address or self.address_approximations or self.status is SimulationStatus.COURSE_UNAVAILABLE:
+            lines.extend((
+                f"入力住所: {self.input_address}",
+                f"サイト確定住所: {self.confirmed_address or '未取得'}",
+            ))
         if self.discounts:
             lines.append("\n割引明細")
             lines.extend(f"・{item.raw_text or item.name}" for item in self.discounts)

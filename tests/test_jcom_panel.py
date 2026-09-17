@@ -59,6 +59,31 @@ def test_panel_displays_zero_yen_and_missing_image_separately():
     panel.close()
 
 
+def test_partial_result_warns_that_price_uses_site_confirmed_address():
+    application = app()
+    panel = JcomSimulationPanel()
+    result = JcomSimulationResult(
+        request_id="request-partial",
+        generation=1,
+        acquired_at=datetime.now(JST),
+        input_address="入力住所",
+        confirmed_address="町域のみ",
+        residence_type=ResidenceType.DETACHED,
+        age=30,
+        calculated_age_bracket=AgeBracket.OVER_27,
+        applied_age_bracket=None,
+        age_selection_used=False,
+        selected_service="ネットのみ",
+        line_type="J:COM NET 光(N)",
+        course="光(N) 1Gコース",
+        partial_address=True,
+        status=SimulationStatus.PARTIAL,
+    )
+    panel.show_result(result)
+    assert "住所の一部未確認" in panel.progress_label.text()
+    panel.close()
+
+
 def test_site_image_preview_fits_full_image_and_has_zoom_controls(tmp_path):
     application = app()
     image_path = tmp_path / "full-result.png"
@@ -80,8 +105,8 @@ def test_site_image_preview_fits_full_image_and_has_zoom_controls(tmp_path):
         applied_age_bracket=None,
         age_selection_used=False,
         selected_service="ネットのみ",
-        line_type="光 on auひかり",
-        course="光 1Gコース on auひかり",
+        line_type="J:COM NET 光(N)",
+        course="光(N) 1Gコース",
         screenshot_path=str(image_path),
         status=SimulationStatus.SUCCESS,
     )

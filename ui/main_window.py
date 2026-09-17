@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
                               QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy, QProgressBar, QListView)
+                              QSizePolicy, QProgressBar, QListView, QInputDialog)
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMetaObject, Q_ARG
 from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor, QUndoStack, QUndoCommand, QKeySequence
 
@@ -2925,6 +2925,9 @@ ND：{nd}
         worker = getattr(self, 'jcom_worker', None)
         if worker is not None and worker.isRunning():
             worker.cancel()
+        dialog = getattr(self, '_jcom_candidate_dialog', None)
+        if dialog is not None:
+            dialog.reject()
         if hasattr(self, 'jcom_panel'):
             self.jcom_panel.invalidate_result()
 
@@ -2973,6 +2976,9 @@ ND：{nd}
         worker = JcomSimulationWorker(criteria, self)
         self.jcom_worker = worker
         worker.progress.connect(self._on_jcom_progress)
+        worker.candidate_requested.connect(
+            lambda request, w=worker: self._on_jcom_candidate_requested(w, request)
+        )
         worker.result_ready.connect(self._on_jcom_result)
         worker.finished.connect(lambda w=worker: self._on_jcom_worker_finished(w))
         worker.start()
@@ -2980,6 +2986,57 @@ ND：{nd}
     def _on_jcom_progress(self, message):
         if hasattr(self, 'jcom_panel'):
             self.jcom_panel.set_progress(message)
+
+    def _on_jcom_candidate_requested(self, worker, request):
+        if (
+            worker is not self.jcom_worker
+            or request.request_id != self.jcom_active_request_id
+            or request.generation != self.jcom_generation
+            or self.current_product != 'jcom'
+        ):
+            worker.cancel()
+            return
+        options = [
+            f"{index + 1}. {candidate.text}"
+            for index, candidate in enumerate(request.candidates)
+        ]
+        if not options:
+            worker.cancel()
+            return
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("J:COM 建物名の選択")
+        dialog.setLabelText(
+            f"選択済み住所: {request.selected_address}\n"
+            f"入力住所の残り: {request.remaining_address or 'なし'}\n"
+            "該当する建物名を選んでください。"
+        )
+        dialog.setComboBoxItems(options)
+        dialog.setComboBoxEditable(False)
+        dialog.setOkButtonText("この建物を選択")
+        dialog.setCancelButtonText("検索を中止")
+        self._jcom_candidate_dialog = dialog
+
+        def resolve_dialog(code):
+            if getattr(self, '_jcom_candidate_dialog', None) is dialog:
+                self._jcom_candidate_dialog = None
+            if code == QDialog.Accepted and worker.isRunning():
+                try:
+                    index = options.index(dialog.textValue())
+                except ValueError:
+                    worker.cancel()
+                else:
+                    worker.submit_candidate(
+                        request.request_id,
+                        request.generation,
+                        request.stage_id,
+                        request.candidates[index].candidate_id,
+                    )
+            else:
+                worker.cancel()
+            dialog.deleteLater()
+
+        dialog.finished.connect(resolve_dialog)
+        dialog.open()
 
     def _on_jcom_result(self, result):
         # 入力・商材・顧客世代が変わった後の遅延結果は表示しない。
@@ -2993,6 +3050,9 @@ ND：{nd}
         self.jcom_panel.show_result(result)
 
     def _on_jcom_worker_finished(self, worker):
+        dialog = getattr(self, '_jcom_candidate_dialog', None)
+        if dialog is not None:
+            dialog.reject()
         if self.jcom_worker is worker:
             self.jcom_worker = None
         worker.deleteLater()
@@ -3001,6 +3061,9 @@ ND：{nd}
         worker = getattr(self, 'jcom_worker', None)
         if worker is not None and worker.isRunning():
             worker.cancel()
+            dialog = getattr(self, '_jcom_candidate_dialog', None)
+            if dialog is not None:
+                dialog.reject()
             if hasattr(self, 'jcom_panel'):
                 self.jcom_panel.set_progress("キャンセルしています…")
         elif hasattr(self, 'jcom_panel'):
@@ -3014,6 +3077,9 @@ ND：{nd}
             jcom_worker = getattr(self, 'jcom_worker', None)
             if jcom_worker is not None and jcom_worker.isRunning():
                 jcom_worker.cancel()
+                dialog = getattr(self, '_jcom_candidate_dialog', None)
+                if dialog is not None:
+                    dialog.reject()
                 if not jcom_worker.wait(3000):
                     # QThreadを破棄せず、専用ドライバーの協調終了を待つ。
                     event.ignore()

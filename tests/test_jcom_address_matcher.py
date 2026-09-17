@@ -6,6 +6,7 @@ from utils.jcom_address_matcher import (
     classify_special_candidate,
     confirmed_address_matches,
     normalize_address_for_match,
+    remaining_address,
     split_address_components,
 )
 
@@ -45,6 +46,22 @@ def test_component_hints_select_the_current_stage_without_prompt():
         ADDRESS, "３丁目", candidates("２７", "１２７", "２０６号"), hints
     )
     assert decision.candidate_id == "0"
+
+
+def test_town_and_chome_candidates_prefer_the_most_specific_match():
+    address = "神奈川県相模原市南区麻溝台７丁目２１－９"
+    hints = split_address_components(address)
+    decision = choose_address_candidate(
+        address,
+        "",
+        candidates(
+            "相模原市南区麻溝台",
+            "相模原市南区麻溝台１丁目",
+            "相模原市南区麻溝台７丁目",
+        ),
+        hints,
+    )
+    assert decision.candidate_id == "2"
 
 
 def test_current_site_area_count_and_accordion_labels_match_components():
@@ -104,6 +121,68 @@ def test_next_with_current_is_never_auto_selected():
     assert classify_special_candidate(special) == NEXT_WITH_CURRENT
     decision = choose_address_candidate(ADDRESS, "３丁目", candidates(special))
     assert decision.requires_user
+
+
+def test_next_with_current_is_selected_after_all_input_components_are_consumed():
+    address = "東京都稲城市大丸２２１３"
+    decision = choose_address_candidate(
+        address,
+        "２２１３",
+        candidates("【表示中の住所】で次へ", "５", "８", "１３"),
+        split_address_components(address),
+    )
+    assert decision.candidate_id == "0"
+    assert remaining_address(
+        "東京都府中市美好町３丁目３０－３８",
+        "府中市美好町３丁目|３０番地",
+    ) == "38"
+
+
+def test_missing_lot_chooses_nearest_number_without_skipping_to_house_number():
+    address = "神奈川県川崎市麻生区王禅寺西２丁目３２－６"
+    decision = choose_address_candidate(
+        address,
+        "麻生区王禅寺西２丁目の物件(6件)",
+        candidates("６番地", "７番地"),
+        split_address_components(address),
+    )
+    assert decision.candidate_id == "1"
+    assert decision.approximate_from == "32"
+    assert decision.approximate_to == "７番地"
+
+
+def test_nearest_number_uses_current_stage_only_and_lower_on_equal_distance():
+    address = "東京都府中市美好町３丁目３０－３８"
+    hints = split_address_components(address)
+    decision = choose_address_candidate(
+        address,
+        "府中市美好町３丁目|３０番地",
+        candidates("３６号", "４０号", "サニーハイツ３８", "【表示中の住所】で次へ"),
+        hints,
+    )
+    assert decision.candidate_id == "0"
+    assert decision.approximate_from == "38"
+    assert decision.approximate_to == "３６号"
+    assert not choose_address_candidate(
+        address,
+        "府中市美好町３丁目|３０番地",
+        candidates("サニーハイツ３８", "【表示中の住所】で次へ"),
+        hints,
+    ).candidate_id
+
+
+def test_nearest_room_number_keeps_room_type_and_building_name():
+    address = "北海道函館市富岡町３丁目２７－１３コーポＳＡＨ２０６号"
+    hints = split_address_components(address)
+    decision = choose_address_candidate(
+        address,
+        "３丁目|２７番地|１３号|コーポＳＡＨ",
+        candidates("２０５号", "２０７番地", "２０８号"),
+        hints,
+    )
+    assert decision.candidate_id == "0"
+    assert decision.approximate_from == "206号"
+    assert decision.approximate_to == "２０５号"
 
 
 def test_missing_property_link_is_not_candidate():

@@ -1,10 +1,14 @@
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
 from services.jcom_simulation_models import (
+    AddressApproximation,
     AgeBracket,
+    JcomSimulationResult,
+    JST,
     ResidenceType,
+    SimulationStatus,
     age_bracket_for,
     calculate_full_age,
     normalize_postal_code,
@@ -97,3 +101,55 @@ def test_existing_birth_input_missing_or_invalid_is_rejected():
     invalid = BirthInputStub("平成", "1", "2", "30")
     with pytest.raises(ValueError):
         parse_birth_date(invalid._build_birth_date())
+
+
+def test_missing_collaboration_course_is_shown_as_undetermined_without_price():
+    result = JcomSimulationResult(
+        request_id="course-missing",
+        generation=1,
+        acquired_at=datetime.now(JST),
+        input_address="入力住所",
+        confirmed_address="サイト確定住所",
+        residence_type=ResidenceType.DETACHED,
+        age=30,
+        calculated_age_bracket=AgeBracket.OVER_27,
+        applied_age_bracket=None,
+        age_selection_used=False,
+        selected_service="ネットのみ",
+        line_type="",
+        course="光(N) 1Gコース",
+        status=SimulationStatus.COURSE_UNAVAILABLE,
+        error_message="判定不能：光(N) 1Gコースを確認できませんでした。",
+    )
+    text = result.display_text()
+    assert text.startswith("判定: 判定不能")
+    assert "月額（加入翌月）: 未取得" in text
+    assert "サイト確定住所: サイト確定住所" in text
+
+
+def test_nearest_address_price_is_clearly_not_for_input_address():
+    result = JcomSimulationResult(
+        request_id="nearest",
+        generation=1,
+        acquired_at=datetime.now(JST),
+        input_address="東京都府中市美好町３丁目３０－３８",
+        confirmed_address="東京都府中市美好町３丁目３０番地３６号",
+        residence_type=ResidenceType.DETACHED,
+        age=30,
+        calculated_age_bracket=AgeBracket.OVER_27,
+        applied_age_bracket=None,
+        age_selection_used=False,
+        selected_service="ネットのみ",
+        line_type="J:COM NET 光(N)",
+        course="光(N) 1Gコース",
+        next_month_price_yen=0,
+        partial_address=True,
+        address_approximations=[AddressApproximation("38", "３６号")],
+        status=SimulationStatus.PARTIAL,
+    )
+    text = result.display_text()
+    assert "入力住所の料金ではありません" in text
+    assert "指定 38 → 選択 ３６号" in text
+    assert "月額（加入翌月）: 0円" in text
+    assert "入力住所: 東京都府中市美好町３丁目３０－３８" in text
+    assert "サイト確定住所: 東京都府中市美好町３丁目３０番地３６号" in text

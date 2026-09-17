@@ -167,9 +167,16 @@ class JcomSimulationPanel(QGroupBox):
 
     def show_result(self, result: JcomSimulationResult):
         self.set_running(False)
-        self.progress_label.setText(
-            "取得完了" if result.successful else (result.error_message or result.status.value)
-        )
+        if result.successful:
+            if result.address_approximations:
+                progress = "近い住所で取得：入力住所の料金ではありません"
+            elif result.partial_address:
+                progress = "住所の一部未確認：料金はサイトが確定した住所に対する結果です"
+            else:
+                progress = "取得完了"
+        else:
+            progress = result.error_message or result.status.value
+        self.progress_label.setText(progress)
         text = result.display_text()
         self.result_text.setPlainText(text)
         self.raw_text.setPlainText(result.raw_text or "原文未取得")

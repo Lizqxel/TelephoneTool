@@ -135,6 +135,16 @@ def _matching_hint_span(
 
 
 def remaining_address(full_address: str, selected_address: str) -> str:
+    if selected_address:
+        hints = [normalize_address_for_match(part) for part in split_address_components(full_address)]
+        start = 0
+        for part in selected_address.split("|"):
+            value = _candidate_component_value(part)
+            span = _matching_hint_span(value, hints, start)
+            if span is not None:
+                start = span[1]
+        if start:
+            return "".join(hints[start:])
     full = normalize_address_for_match(full_address)
     selected = normalize_address_for_match(selected_address)
     full_tokens = _tokens(full)
@@ -191,6 +201,8 @@ class MatchDecision:
     candidate_id: Optional[str]
     reason: str
     requires_user: bool
+    approximate_from: str = ""
+    approximate_to: str = ""
 
     @property
     def no_match(self) -> bool:
@@ -203,7 +215,7 @@ def choose_address_candidate(
     candidates: Sequence,
     component_hints: Sequence[str] = (),
 ) -> MatchDecision:
-    """現在段階に完全一致する一意候補だけを自動選択する。"""
+    """現在段階の完全一致を優先し、欠けた数値だけ最も近い候補を選ぶ。"""
     remainder = remaining_address(full_address, selected_address)
     remainder_norm = normalize_address_for_match(remainder)
     remainder_tokens = _tokens(remainder_norm)
@@ -232,22 +244,99 @@ def choose_address_candidate(
                 continue
             normalized = _candidate_component_value(text)
             span = _matching_hint_span(normalized, normalized_hints, start_index)
-            if span is not None:
-                indexed_matches.append((span[0], getattr(candidate, "candidate_id", None)))
+            if span is not None and (span[0] == start_index or not selected_parts):
+                indexed_matches.append(
+                    (span[0], span[1], getattr(candidate, "candidate_id", None))
+                )
                 continue
 
-            # 物件名候補の中に次の番号成分が含まれる経路がある。
-            # 数値トークンの完全一致だけを認め、3と13は区別する。
-            if start_index < len(normalized_hints) and normalized_hints[start_index].isdigit():
+            # 号棟候補だけは建物名の後ろの番号を照合する。任意の建物名中の
+            # 数字を番地・号の完全一致とみなすと、異なる住所を選んでしまう。
+            if (
+                start_index < len(normalized_hints)
+                and normalized_hints[start_index].isdigit()
+                and normalized.endswith("号棟")
+            ):
                 numeric_tokens = re.findall(r"\d+", normalized)
                 if normalized_hints[start_index] in numeric_tokens:
-                    indexed_matches.append((start_index, getattr(candidate, "candidate_id", None)))
+                    indexed_matches.append(
+                        (start_index, start_index + 1, getattr(candidate, "candidate_id", None))
+                    )
         if indexed_matches:
-            earliest = min(index for index, _ in indexed_matches)
-            earliest_ids = [candidate_id for index, candidate_id in indexed_matches if index == earliest]
+            # 同じ町域から「町域のみ」と「町域＋丁目」の両方が提示される。
+            # 最初に一致する成分を優先し、その中では入力を最も多く消費する
+            # 候補を選ぶ。これにより麻溝台と麻溝台7丁目を曖昧扱いしない。
+            earliest = min(start for start, _, _ in indexed_matches)
+            earliest_matches = [
+                item for item in indexed_matches if item[0] == earliest
+            ]
+            longest_end = max(end for _, end, _ in earliest_matches)
+            earliest_ids = [
+                candidate_id
+                for _, end, candidate_id in earliest_matches
+                if end == longest_end
+            ]
             if len(earliest_ids) == 1:
-                return MatchDecision(earliest_ids[0], "提供判定方式で分離した住所成分と一致", False)
+                return MatchDecision(
+                    earliest_ids[0],
+                    "提供判定方式で分離した住所成分に最長一致",
+                    False,
+                )
             return MatchDecision(None, "同じ住所成分の候補が複数あります", True)
+
+    if component_hints and selected_address:
+        # 番地・号など、現在の数値成分だけを近似する。建物名中の数字や
+        # 次段階の数字を拾わず、同距離なら小さい数値を採る。
+        if start_index < len(normalized_hints):
+            expected = normalized_hints[start_index]
+            number_match = re.fullmatch(r"(\d+)(丁目|番地|番|号室|号)?", expected)
+            if number_match:
+                target = int(number_match.group(1))
+                expected_suffix = number_match.group(2) or ""
+                numeric_candidates = []
+                for candidate in candidates:
+                    text = getattr(candidate, "text", "")
+                    if getattr(candidate, "special_action", "") or classify_special_candidate(text):
+                        continue
+                    normalized = _candidate_component_value(text)
+                    match = re.fullmatch(r"(\d+)(丁目|番地|番|号|号室)?", normalized)
+                    if not match:
+                        continue
+                    suffix = match.group(2) or ""
+                    if bool(suffix == "丁目") != bool(expected_suffix == "丁目"):
+                        continue
+                    if expected_suffix in ("号", "号室") and suffix not in ("号", "号室"):
+                        continue
+                    if expected_suffix in ("番", "番地") and suffix not in ("番", "番地"):
+                        continue
+                    number = int(match.group(1))
+                    numeric_candidates.append((
+                        abs(number - target), number,
+                        getattr(candidate, "candidate_id", None), text,
+                    ))
+                if numeric_candidates:
+                    numeric_candidates.sort(key=lambda item: (item[0], item[1]))
+                    best = numeric_candidates[0]
+                    if sum(item[:2] == best[:2] for item in numeric_candidates) == 1:
+                        return MatchDecision(
+                            best[2], "指定の数値候補がないため最も近い値を選択", False,
+                            component_hints[start_index], best[3],
+                        )
+        # 次成分が候補にない場合、後続の号・部屋番号へ飛ばさない。
+        next_actions = [
+            candidate for candidate in candidates
+            if (
+                getattr(candidate, "special_action", "")
+                or classify_special_candidate(getattr(candidate, "text", ""))
+            ) == NEXT_WITH_CURRENT
+        ]
+        if len(next_actions) == 1 and not remaining_address(full_address, selected_address):
+            return MatchDecision(
+                getattr(next_actions[0], "candidate_id", None),
+                "入力住所の成分を選び終えたため表示中の住所で次へ",
+                False,
+            )
+        return MatchDecision(None, "現在段階に一致する候補がありません", True)
 
     for candidate in candidates:
         text = getattr(candidate, "text", "")
