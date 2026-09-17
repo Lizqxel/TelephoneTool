@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import base64
+from io import BytesIO
 import logging
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
+from PIL import Image
 from services.web_driver import _resolve_chromedriver_executable
 
 from services.jcom_simulation_models import (
@@ -260,53 +262,111 @@ class JcomSimulationService:
         except Exception as exc:
             logging.warning("J:COM結果画像の保存期間整理に失敗: %s", type(exc).__name__)
 
-    def _capture_result_screenshot(self, element, path: Path) -> bool:
-        """表示ビューポートを超える料金結果全体を範囲キャプチャする。"""
+    def _capture_result_screenshot(
+        self, element, path: Path, confirmed_address: str = ""
+    ) -> bool:
+        """サイトの確定住所欄と料金領域を、読みやすい1枚にまとめる。"""
+        self._screenshot_address_included = False
         hidden_marker = "data-telephonetool-capture-hidden"
         try:
+            address_element = None
+            if confirmed_address:
+                address_boxes = self.driver.execute_script(
+                    """
+                    return Array.from(document.querySelectorAll('.selected-address-box'))
+                        .filter((el) => el.getClientRects().length &&
+                            getComputedStyle(el).visibility !== 'hidden')
+                        .map((el) => ({element: el, text: el.innerText || ''}));
+                    """
+                )
+                expected = normalize_address_for_match(confirmed_address)
+                address_element = next(
+                    (
+                        item["element"] for item in address_boxes
+                        if expected and expected in normalize_address_for_match(item["text"])
+                    ),
+                    None,
+                )
             metrics = self.driver.execute_script(
                 """
                 const target = arguments[0];
                 const marker = arguments[1];
+                const address = arguments[2];
                 document.querySelectorAll('*').forEach((node) => {
                     const style = window.getComputedStyle(node);
-                    if ((style.position === 'fixed' || style.position === 'sticky') && node !== target) {
+                    if ((style.position === 'fixed' || style.position === 'sticky') &&
+                        !node.contains(target) && !target.contains(node) &&
+                        !(address && (node.contains(address) || address.contains(node)))) {
                         node.setAttribute(marker, node.style.visibility || '');
                         node.style.visibility = 'hidden';
                     }
                 });
-                const rect = target.getBoundingClientRect();
+                const bounds = (el) => {
+                    if (!el) return null;
+                    const rect = el.getBoundingClientRect();
+                    return {
+                        x: Math.max(0, rect.left + window.scrollX),
+                        y: Math.max(0, rect.top + window.scrollY),
+                        width: Math.ceil(Math.max(rect.width, el.scrollWidth)),
+                        height: Math.ceil(Math.max(rect.height, el.scrollHeight))
+                    };
+                };
                 return {
-                    x: Math.max(0, rect.left + window.scrollX),
-                    y: Math.max(0, rect.top + window.scrollY),
-                    width: Math.ceil(Math.max(rect.width, target.scrollWidth)),
-                    height: Math.ceil(Math.max(rect.height, target.scrollHeight))
+                    result: bounds(target),
+                    address: bounds(address)
                 };
                 """,
                 element,
                 hidden_marker,
+                address_element,
             )
-            width = min(4000, max(1, int(metrics["width"])))
-            height = min(12000, max(1, int(metrics["height"])))
-            captured = self.driver.execute_cdp_cmd(
-                "Page.captureScreenshot",
-                {
-                    "format": "png",
-                    "fromSurface": True,
-                    "captureBeyondViewport": True,
-                    "clip": {
-                        "x": float(metrics["x"]),
-                        "y": float(metrics["y"]),
-                        "width": float(width),
-                        "height": float(height),
-                        "scale": 1,
+
+            def capture(bounds):
+                width = min(4000, max(1, int(bounds["width"])))
+                height = min(12000, max(1, int(bounds["height"])))
+                captured = self.driver.execute_cdp_cmd(
+                    "Page.captureScreenshot",
+                    {
+                        "format": "png",
+                        "fromSurface": True,
+                        "captureBeyondViewport": True,
+                        "clip": {
+                            "x": float(bounds["x"]),
+                            "y": float(bounds["y"]),
+                            "width": float(width),
+                            "height": float(height),
+                            "scale": 1,
+                        },
                     },
-                },
-            )
-            image_data = captured.get("data", "")
-            if not image_data:
+                )
+                return base64.b64decode(captured.get("data", ""))
+
+            result_png = capture(metrics["result"])
+            if not result_png:
                 return False
-            path.write_bytes(base64.b64decode(image_data))
+            address_bounds = metrics.get("address")
+            if address_bounds and address_bounds["width"] > 0 and address_bounds["height"] > 0:
+                try:
+                    address_png = capture(address_bounds)
+                    with Image.open(BytesIO(address_png)) as address_image, Image.open(
+                        BytesIO(result_png)
+                    ) as result_image:
+                        width = max(address_image.width, result_image.width)
+                        gap = 16
+                        combined = Image.new(
+                            "RGB", (width, address_image.height + gap + result_image.height), "white"
+                        )
+                        combined.paste(address_image.convert("RGB"), (0, 0))
+                        combined.paste(
+                            result_image.convert("RGB"), (0, address_image.height + gap)
+                        )
+                        combined.save(path, format="PNG")
+                    self._screenshot_address_included = True
+                except Exception as exc:
+                    logging.warning("J:COM住所欄の画像取得に失敗: %s", type(exc).__name__)
+                    path.write_bytes(result_png)
+            else:
+                path.write_bytes(result_png)
             return path.is_file() and path.stat().st_size > 0
         except Exception as exc:
             logging.warning("J:COM結果全体の範囲取得に失敗: %s", type(exc).__name__)
@@ -1014,18 +1074,27 @@ class JcomSimulationService:
             element = self._select_course_and_result()
             result.raw_text = element.text
             result.source_url = self.driver.current_url
+            image_note = ""
             try:
                 self.screenshot_dir.mkdir(parents=True, exist_ok=True)
                 self._prune_screenshots()
                 path = self.screenshot_dir / f"{criteria.request_id}.png"
-                if self._capture_result_screenshot(element, path):
+                if self._capture_result_screenshot(element, path, result.confirmed_address):
                     result.screenshot_path = str(path)
+                    if not self._screenshot_address_included:
+                        image_note = "画像にサイトの住所欄を含められませんでした"
+                else:
+                    image_note = "画像未取得"
             except Exception as exc:
                 logging.warning("J:COM料金領域の画像取得に失敗: %s", type(exc).__name__)
-                result.notes_text = (result.notes_text + "\n画像未取得").strip()
+                image_note = "画像未取得"
             parsed = extract_pricing_from_text(result.raw_text)
             for key, value in parsed.items():
                 setattr(result, key, value)
+            if image_note:
+                result.notes_text = "\n".join(
+                    part for part in (result.notes_text, image_note) if part
+                )
             result.course = self._selected_course_name
             result.line_type = self._selected_line_type
             result.selected_service = "ネットのみ"
