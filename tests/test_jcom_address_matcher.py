@@ -239,3 +239,19 @@ def test_town_and_sublocality_are_selected_as_separate_site_stages():
     assert decision.candidate_id == "0"
     assert decision.approximate_from == "35"
     assert decision.approximate_to == "３４番地"
+
+
+def test_site_chome_suffix_matches_hyphenated_input_number():
+    address = "奈良県奈良市鳥見町２－３－５４"
+    hints = split_address_components(address)
+    assert hints == ("鳥見町", "2", "3", "54")
+
+    decision = choose_address_candidate(
+        address,
+        "",
+        candidates("１丁目", "２丁目", "３丁目", "４丁目"),
+        hints,
+    )
+
+    assert decision.candidate_id == "1"
+    assert not decision.requires_user

@@ -118,6 +118,7 @@ def _matching_hint_end(value: str, hints: Sequence[str], start: int) -> Optional
         combined = "".join(hints[start:end])
         variants = (
             combined,
+            f"{combined}丁目",
             f"{combined}番",
             f"{combined}番地",
             f"{combined}号",
