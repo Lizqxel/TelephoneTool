@@ -258,3 +258,26 @@ def test_only_apartment_building_candidates_require_manual_selection():
         "府中市美好町３丁目|３０番地",
         [AddressCandidate("2:0", "３８号")],
     )
+
+
+def test_button_text_lookup_uses_one_dom_query_and_clicks_same_element():
+    class ButtonDriver:
+        current_url = "https://onlineshop.jcom.co.jp/"
+
+        def __init__(self):
+            self.button = object()
+            self.calls = []
+
+        def execute_script(self, script, *args):
+            self.calls.append((script, args))
+            if "querySelectorAll" in script:
+                return self.button
+            assert args == (self.button,)
+            return None
+
+    driver = ButtonDriver()
+    service = JcomSimulationService(threading.Event(), lambda message: None)
+    service.driver = driver
+    assert service._click_button_with_text(("エリアを設定する",)) is driver.button
+    assert len(driver.calls) == 2
+    assert driver.calls[0][1] == (None, ("エリアを設定する",))

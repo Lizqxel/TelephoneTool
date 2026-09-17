@@ -391,12 +391,15 @@ class JcomSimulationService:
     def _wait(self, condition, timeout: Optional[int] = None):
         end = time.monotonic() + (timeout or self.timeout)
         last_error = None
-        while time.monotonic() < end:
+        next_url_check = 0.0
+        while (now := time.monotonic()) < end:
             self._check_cancelled()
-            current_url = self.driver.current_url
-            if "/Err" in current_url:
-                match = re.search(r"[?&]errorId=([^&]+)", current_url)
-                raise JcomSiteError(match.group(1) if match else "不明")
+            if now >= next_url_check:
+                current_url = self.driver.current_url
+                if "/Err" in current_url:
+                    match = re.search(r"[?&]errorId=([^&]+)", current_url)
+                    raise JcomSiteError(match.group(1) if match else "不明")
+                next_url_check = now + 1.0
             try:
                 value = condition(self.driver)
                 if value:
@@ -428,20 +431,28 @@ class JcomSimulationService:
 
     def _click_button_with_text(self, texts: Iterable[str], scope=None):
         root = scope or self.driver
-        expected = tuple(texts)
+        expected = tuple(re.sub(r"\s+", "", text) for text in texts)
 
         def find(_):
-            elements = root.find_elements(By.CSS_SELECTOR, "button, a, [role='button']")
-            for element in elements:
-                try:
-                    label = re.sub(r"\s+", "", element.text)
-                    if element.is_displayed() and element.is_enabled() and any(
-                        re.sub(r"\s+", "", text) in label for text in expected
-                    ):
-                        return element
-                except StaleElementReferenceException:
-                    continue
-            return None
+            # 多数のリンクを1件ずつSeleniumへ問い合わせず、同一DOM状態で探す。
+            return self.driver.execute_script(
+                """
+                const root = arguments[0] || document;
+                const expected = arguments[1];
+                return Array.from(root.querySelectorAll('button, a, [role="button"]'))
+                    .find((el) => {
+                        if (!el.getClientRects().length ||
+                            getComputedStyle(el).visibility === 'hidden' ||
+                            el.matches(':disabled') ||
+                            el.getAttribute('aria-disabled') === 'true') return false;
+                        const label = (el.innerText || el.textContent || '')
+                            .replace(/\\s+/g, '');
+                        return expected.some((text) => label.includes(text));
+                    }) || null;
+                """,
+                None if root is self.driver else root,
+                expected,
+            )
 
         element = self._wait(find)
         self.driver.execute_script("arguments[0].click()", element)
@@ -470,14 +481,15 @@ class JcomSimulationService:
 
     def _candidate_elements(self, selected_address: str = ""):
         # 表示中のモーダル/住所選択領域だけを対象にする。
-        roots = self._visible(self.driver.find_elements(By.CSS_SELECTOR, "[role='dialog'], .modal, .address-modal"))
-        root = roots[-1] if roots else self.driver
-        # 大きな町域では番地見出しが数百件ある。要素ごとの.text照会を
-        # 繰り返さず、現在のモーダルを一度のDOM読取でスナップショットする。
-        entries = self.driver.execute_script(
+        # 本文・現在のモーダル・候補を同一のDOM状態から一度に読む。
+        snapshot = self.driver.execute_script(
             r"""
-            const scope = arguments[0] || document;
-            const selected = arguments[1] || '';
+            const selected = arguments[0] || '';
+            const visible = (el) => !!el.getClientRects().length &&
+                getComputedStyle(el).visibility !== 'hidden';
+            const roots = Array.from(document.querySelectorAll(
+                '[role="dialog"], .modal, .address-modal')).filter(visible);
+            const scope = roots.at(-1) || document;
             // 横スライドで隠れた前段列もgetClientRects()は残るため、
             // 選択済み住所があれば現在の列だけを候補として読む。
             const columns = scope.querySelector('.address-narrow-down');
@@ -487,8 +499,6 @@ class JcomSimulationService:
                     ? '.js-narrow-down-2nd' : '.js-narrow-down-first';
                 active = columns.querySelector(selector) || scope;
             }
-            const visible = (el) => !!el.getClientRects().length &&
-                getComputedStyle(el).visibility !== 'hidden';
             const collect = (selector) => Array.from(active.querySelectorAll(selector))
                 .filter(visible);
             let nodes = [];
@@ -509,18 +519,21 @@ class JcomSimulationService:
                         if (!nodes.includes(el)) nodes.push(el);
                     }
             }
-            return nodes.map((el) => ({
-                element: el,
-                text: (el.innerText || '').replace(/\\s+/g, ' ').trim(),
-                className: el.className || '',
-                noHref: !el.hasAttribute('href'),
-            })).filter((item) => item.text);
+            return {
+                bodyText: document.body.innerText || '',
+                entries: nodes.map((el) => ({
+                    element: el,
+                    text: (el.innerText || '').replace(/\\s+/g, ' ').trim(),
+                    className: el.className || '',
+                    noHref: !el.hasAttribute('href'),
+                })).filter((item) => item.text),
+            };
             """,
-            None if root is self.driver else root,
             selected_address,
         )
+        self._last_address_body_text = snapshot["bodyText"]
         result = []
-        for entry in entries:
+        for entry in snapshot["entries"]:
             element = entry["element"]
             text = entry["text"]
             special = classify_special_candidate(text)
@@ -532,7 +545,7 @@ class JcomSimulationService:
             ):
                 element._jcom_candidate_text = text
                 result.append(element)
-        return root, result
+        return None, result
 
     @staticmethod
     def _candidate_text(element):
@@ -611,10 +624,10 @@ class JcomSimulationService:
             zero_result_state = {"since": None}
 
             def candidates_ready(_):
-                body = self.driver.find_element(By.TAG_NAME, "body").text
+                root, elements = self._candidate_elements(selected)
+                body = self._last_address_body_text
                 if "提供エリア外" in body or "サービス提供エリア外" in body:
                     raise JcomOutOfArea()
-                root, elements = self._candidate_elements(selected)
                 actionable = []
                 for element in elements:
                     text = re.sub(r"\s+", "", self._candidate_text(element) or "")
@@ -746,7 +759,7 @@ class JcomSimulationService:
                         )
                         for e in new_elements
                     )
-                    return new_signature and new_signature != old_signature and "住所取得中" not in self.driver.find_element(By.TAG_NAME, "body").text
+                    return new_signature and new_signature != old_signature and "住所取得中" not in self._last_address_body_text
                 except StaleElementReferenceException:
                     return False
 
@@ -791,12 +804,11 @@ class JcomSimulationService:
 
         def page_ready(_):
             url = self.driver.current_url
-            inputs = self.driver.find_elements(By.CSS_SELECTOR, "input")
             if "/Simulation/Simulation03" in url:
                 return "age"
-            if "/Simulation/Simulation05" in url or any(
-                e.get_attribute("name") == "course-net" for e in inputs
-            ):
+            if "/Simulation/Simulation05" in url:
+                return "course"
+            if self.driver.find_elements(By.CSS_SELECTOR, "input[name='course-net']"):
                 return "course"
             return None
 
