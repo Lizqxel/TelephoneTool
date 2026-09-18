@@ -1734,6 +1734,8 @@ ND：{nd}
             self.jcom_panel.setVisible(self.current_product == "jcom")
         # 軽量なテスト用ウィンドウには非掲載商材の入力欄がない場合がある。
         MainWindow._update_unlisted_address_inputs(self)
+        MainWindow._update_unlisted_list_inputs(self)
+        MainWindow._apply_unlisted_fee_default(self)
 
         # J:COMではJ:COM専用シミュレーションだけを使用し、
         # フレッツ提供判定の操作・結果は画面に出さない。
@@ -1766,6 +1768,32 @@ ND：{nd}
 
     def _is_unlisted_self_collabo(self):
         return self.current_product == "self_collabo_unlisted"
+
+    def _update_unlisted_list_inputs(self):
+        """非掲載商材では不要なリスト名・リスト住所欄を隠す。"""
+        visible = not MainWindow._is_unlisted_self_collabo(self)
+        for widget_name in (
+            'list_name_label',
+            'list_name_input',
+            'list_address_label',
+            'list_address_input',
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setVisible(visible)
+
+    def _apply_unlisted_fee_default(self):
+        """非掲載商材の空の料金入力欄へ既定の料金帯を設定する。"""
+        if not MainWindow._is_unlisted_self_collabo(self):
+            return
+        fee_input = getattr(self, 'fee_input', None)
+        if fee_input is None or fee_input.text().strip():
+            return
+        default_fee = "2500円～3000円"
+        fee_combo = getattr(self, 'fee_combo', None)
+        if fee_combo is not None:
+            fee_combo.setCurrentText(default_fee)
+        fee_input.setText(default_fee)
 
     def _update_unlisted_address_inputs(self):
         """非掲載商材専用の手動住所入力欄を表示状態に合わせる。"""
@@ -2211,6 +2239,7 @@ ND：{nd}
         self.fee_input.textChanged.connect(self.reset_background_color)
         fee_layout.addWidget(self.fee_input)
         input_layout.addLayout(fee_layout)
+        self._apply_unlisted_fee_default()
         
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
@@ -2538,7 +2567,8 @@ ND：{nd}
         list_layout = QVBoxLayout()
         
         # リスト名
-        list_layout.addWidget(QLabel("リスト名"))
+        self.list_name_label = QLabel("リスト名")
+        list_layout.addWidget(self.list_name_label)
         self.list_name_input = QLineEdit()
         list_layout.addWidget(self.list_name_input)
         
@@ -2563,12 +2593,14 @@ ND：{nd}
         list_layout.addWidget(self.list_postal_code_input)
         
         # リスト住所
-        list_layout.addWidget(QLabel("リスト住所"))
+        self.list_address_label = QLabel("リスト住所")
+        list_layout.addWidget(self.list_address_label)
         self.list_address_input = QLineEdit()
         list_layout.addWidget(self.list_address_input)
         
         list_group.setLayout(list_layout)
         parent_layout.addWidget(list_group)
+        self._update_unlisted_list_inputs()
         
         # 受注情報セクション
         order_group = QGroupBox("受注情報")
