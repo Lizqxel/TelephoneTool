@@ -1708,6 +1708,20 @@ ND：{nd}
         if hasattr(self, 'jcom_panel'):
             self.jcom_panel.setVisible(self.current_product == "jcom")
 
+        # J:COMではJ:COM専用シミュレーションだけを使用し、
+        # フレッツ提供判定の操作・結果は画面に出さない。
+        show_flets_ui = self.current_product != "jcom"
+        for widget_name in (
+            'judgment_label',
+            'judgment_combo',
+            'area_search_btn',
+            'area_result_container',
+            'screenshot_btn',
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setVisible(show_flets_ui)
+
     def set_product(self, product):
         if product not in ("self_collabo", "jcom"):
             return
@@ -2189,7 +2203,8 @@ ND：{nd}
         address_layout = QVBoxLayout()
         
         # 提供判定
-        address_layout.addWidget(QLabel("提供判定"))
+        self.judgment_label = QLabel("提供判定")
+        address_layout.addWidget(self.judgment_label)
         self.judgment_combo = CustomComboBox()
         self.judgment_combo.addItems(["OK", "未提供"])
         address_layout.addWidget(self.judgment_combo)
@@ -2271,8 +2286,8 @@ ND：{nd}
             address_layout.addWidget(self.jcom_panel)
         
         # 提供エリア検索結果表示用のラベル
-        area_result_container = QWidget()
-        area_result_layout = QVBoxLayout(area_result_container)
+        self.area_result_container = QWidget()
+        area_result_layout = QVBoxLayout(self.area_result_container)
         area_result_layout.setContentsMargins(0, 0, 0, 0)
         area_result_layout.setSpacing(2)
 
@@ -2381,10 +2396,13 @@ ND：{nd}
 
         area_result_layout.addWidget(self.progress_bar)
 
-        address_layout.addWidget(area_result_container)
+        address_layout.addWidget(self.area_result_container)
         
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
+
+        # 保存済みの商材がJ:COMの場合も、初回描画からフレッツUIを隠す。
+        self._update_product_selector()
         
         # リスト情報セクション
         list_group = QGroupBox("リスト情報")
@@ -3448,6 +3466,12 @@ ND：{nd}
 
     def search_service_area(self):
         """提供エリア検索を開始"""
+        if self.current_product == "jcom":
+            logging.info("J:COM選択中のため、フレッツ提供判定を実行しません")
+            if hasattr(self, 'is_auto_processing'):
+                self.is_auto_processing = False
+            return
+
         is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
         refresh_before_area_search = self.settings.get('refresh_address_from_cti_before_area_search', True)
 
@@ -4490,6 +4514,11 @@ ND：{nd}
             # 1. 顧客情報取得を実行（既存のfetch_cti_dataメソッドを呼び出し）
             logging.info("1. 顧客情報の自動取得を開始")
             self.fetch_cti_data()
+
+            if self.current_product == "jcom":
+                logging.info("J:COM選択中のため、フレッツ提供判定の自動実行をスキップします")
+                self.is_auto_processing = False
+                return
             
             # 2. 顧客情報取得が完了してから提供判定検索を実行
             # シグナルを使用してメインスレッドで実行（スレッドセーフ）
@@ -4518,6 +4547,11 @@ ND：{nd}
     def auto_search_service_area(self):
         """CTI自動処理から呼び出される提供エリア検索"""
         try:
+            if self.current_product == "jcom":
+                logging.info("J:COM選択中のため、フレッツ提供判定の自動実行をスキップします")
+                self.is_auto_processing = False
+                return
+
             logging.info("2. 提供判定検索の自動実行を開始")
             
             # 郵便番号と住所の入力チェック
