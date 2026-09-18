@@ -38,6 +38,16 @@ def test_selected_product_is_saved_without_losing_other_settings(tmp_path):
     assert saved["other_setting"] == 123
 
 
+def test_unlisted_self_collabo_product_is_saved(tmp_path):
+    path = tmp_path / "settings.json"
+    owner = SimpleNamespace(settings_file=str(path), settings={})
+
+    assert MainWindow._persist_selected_product(owner, "self_collabo_unlisted")
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["selected_product"] == "self_collabo_unlisted"
+
+
 def test_load_settings_restores_product_and_live_comment_template(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps(_settings()), encoding="utf-8")
@@ -54,6 +64,23 @@ def test_load_settings_restores_product_and_live_comment_template(tmp_path):
     assert owner.format_template == "CUSTOM TEMPLATE"
     assert owner.settings["format_template"] == "CUSTOM TEMPLATE"
     assert json.loads(path.read_text(encoding="utf-8"))["format_template_simple"] == "CUSTOM TEMPLATE"
+
+
+def test_load_settings_restores_unlisted_self_collabo_product(tmp_path):
+    path = tmp_path / "settings.json"
+    settings = _settings()
+    settings["selected_product"] = "self_collabo_unlisted"
+    path.write_text(json.dumps(settings), encoding="utf-8")
+    owner = SimpleNamespace(
+        settings_file=str(path),
+        settings={},
+        current_product="self_collabo",
+        format_template="STALE TEMPLATE",
+    )
+
+    MainWindow.load_settings(owner)
+
+    assert owner.current_product == "self_collabo_unlisted"
 
 
 def test_settings_dialog_uses_parent_settings_path(tmp_path):
