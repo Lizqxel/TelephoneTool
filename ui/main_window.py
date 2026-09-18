@@ -2974,11 +2974,24 @@ ND：{nd}
         # CTI再取得と自動整形が完了した後に同一世代の不変条件を作る。
         self.jcom_generation += 1
         try:
+            birth_parts = (
+                self.era_combo.currentText().strip(),
+                self.year_combo.currentText().strip(),
+                self.month_combo.currentText().strip(),
+                self.day_combo.currentText().strip(),
+            )
+            if any(birth_parts) and not all(birth_parts):
+                raise ValueError(
+                    "生年月日を入力する場合は、元号・年・月・日をすべて選択してください。"
+                )
+            birth_date_text = self._build_birth_date()
+            if all(birth_parts) and not birth_date_text:
+                raise ValueError("生年月日が正しい日付ではありません。")
             criteria = JcomSearchCriteria.create(
                 generation=self.jcom_generation,
                 postal_code=self.postal_code_input.text().strip(),
                 address=self.address_input.text().strip(),
-                birth_date_text=self._build_birth_date(),
+                birth_date_text=birth_date_text,
                 residence_type=self.jcom_panel.residence_type(),
             )
         except ValueError as exc:
@@ -2987,9 +3000,14 @@ ND：{nd}
 
         self.jcom_active_request_id = criteria.request_id
         self.jcom_panel.invalidate_result("検索を開始します…")
-        self.jcom_panel.set_age_condition(
-            f"入力済み生年月日から判定: {criteria.age}歳／{criteria.age_bracket.value}"
-        )
+        if criteria.birth_date is None:
+            age_condition = "生年月日未入力のため自動選択: 27歳以上"
+        else:
+            age_condition = (
+                f"入力済み生年月日から判定: "
+                f"{criteria.age}歳／{criteria.age_bracket.value}"
+            )
+        self.jcom_panel.set_age_condition(age_condition)
         self.jcom_panel.set_running(True)
 
         worker = JcomSimulationWorker(criteria, self)

@@ -5,6 +5,7 @@ import pytest
 from services.jcom_simulation_models import (
     AddressApproximation,
     AgeBracket,
+    JcomSearchCriteria,
     JcomSimulationResult,
     JST,
     ResidenceType,
@@ -86,6 +87,43 @@ def test_birth_date_invalid_or_missing(value):
 def test_birth_date_future():
     with pytest.raises(ValueError):
         parse_birth_date("2999/1/1")
+
+
+def test_jcom_search_defaults_missing_birth_date_to_over_27():
+    criteria = JcomSearchCriteria.create(
+        generation=1,
+        postal_code="0410811",
+        address="北海道函館市富岡町3丁目27番13号",
+        birth_date_text="",
+        residence_type=ResidenceType.APARTMENT,
+    )
+
+    assert criteria.birth_date is None
+    assert criteria.age == 27
+    assert criteria.age_bracket is AgeBracket.OVER_27
+
+
+def test_result_explains_default_age_when_birth_date_was_missing():
+    result = JcomSimulationResult(
+        request_id="missing-birth-date",
+        generation=1,
+        acquired_at=datetime.now(JST),
+        input_address="入力住所",
+        confirmed_address="確定住所",
+        residence_type=ResidenceType.APARTMENT,
+        age=27,
+        calculated_age_bracket=AgeBracket.OVER_27,
+        applied_age_bracket=AgeBracket.OVER_27,
+        age_selection_used=True,
+        selected_service="ネットのみ",
+        line_type="J:COM NET 光(N)",
+        course="光(N) 1Gコース",
+        birth_date_provided=False,
+        status=SimulationStatus.SUCCESS,
+    )
+
+    assert "生年月日未入力のため自動選択: 27歳以上" in result.display_text()
+    assert "入力済み生年月日から判定" not in result.display_text()
 
 
 def test_existing_japanese_era_input_is_used():

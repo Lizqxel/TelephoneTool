@@ -1124,6 +1124,7 @@ class JcomSimulationService:
             selected_service=criteria.service,
             line_type="",
             course=criteria.course,
+            birth_date_provided=criteria.birth_date is not None,
             address_approximations=self._address_approximations,
         )
         try:

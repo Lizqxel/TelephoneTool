@@ -93,7 +93,7 @@ class JcomSearchCriteria:
     postal_code: str
     address_original: str
     address_normalized: str
-    birth_date: date
+    birth_date: Optional[date]
     age: int
     age_bracket: AgeBracket
     residence_type: ResidenceType
@@ -119,8 +119,14 @@ class JcomSearchCriteria:
         original = (address or "").strip()
         if not original:
             raise ValueError("住所を入力してください。")
-        birth_date = parse_birth_date(birth_date_text)
-        age = calculate_full_age(birth_date)
+        normalized_birth_date = (birth_date_text or "").strip()
+        if normalized_birth_date:
+            birth_date = parse_birth_date(normalized_birth_date)
+            age = calculate_full_age(birth_date)
+        else:
+            # J:COMの年齢選択画面では、未入力時は27歳以上を既定にする。
+            birth_date = None
+            age = 27
         return cls(
             request_id=uuid.uuid4().hex,
             generation=generation,
@@ -183,6 +189,7 @@ class JcomSimulationResult:
     selected_service: str
     line_type: str
     course: str
+    birth_date_provided: bool = True
     contract_period: str = ""
     next_month_price_yen: Optional[int] = None
     discount_period_text: str = ""
@@ -217,6 +224,11 @@ class JcomSimulationResult:
             lines.append("判定: 判定不能（光(N) 1Gコース未確認）")
         if self.address_approximations:
             lines.append("【注意】指定の番地・号がなく、近い候補の住所で検索しました。入力住所の料金ではありません。")
+        age_condition = (
+            f"入力済み生年月日から判定: {self.age}歳／{self.calculated_age_bracket.value}"
+            if self.birth_date_provided
+            else "生年月日未入力のため自動選択: 27歳以上"
+        )
         lines.extend((
             f"対象サービス: {self.selected_service or '未取得'}",
             f"回線種別: {self.line_type or '未取得'}",
@@ -226,7 +238,7 @@ class JcomSimulationResult:
             f"基本料金: {money(self.base_price_yen)}",
             f"契約期間: {self.contract_period or '未取得'}",
             f"住宅区分: {self.residence_type.label}",
-            f"入力済み生年月日から判定: {self.age}歳／{self.calculated_age_bracket.value}",
+            age_condition,
             f"サイト適用条件: {applied}",
         ))
         if self.address_approximations:
