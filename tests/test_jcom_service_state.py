@@ -100,6 +100,28 @@ def test_success_result_and_owned_driver_release():
     assert driver.quit_called
 
 
+def test_price_is_notified_before_screenshot_and_browser_cleanup():
+    events = []
+
+    class TimedDriver(FakeDriver):
+        def quit(self):
+            events.append("quit")
+            super().quit()
+
+    class TimedService(SuccessfulService):
+        def _capture_result_screenshot(self, element, path, confirmed_address=""):
+            events.append("capture")
+            return False
+
+    service = TimedService(TimedDriver())
+    service.result_ready_callback = lambda result: events.append("result")
+    service.screenshot_ready_callback = lambda result: events.append("screenshot")
+
+    service.run(criteria())
+
+    assert events == ["result", "capture", "screenshot", "quit"]
+
+
 def test_cancelled_search_releases_only_owned_driver():
     driver = FakeDriver()
     result = CancelledService(driver).run(criteria())

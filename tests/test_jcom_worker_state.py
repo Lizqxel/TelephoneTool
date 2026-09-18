@@ -40,6 +40,37 @@ def test_worker_factory_receives_candidate_prompt_resolver():
     assert observed["criteria"] == "snapshot"
 
 
+def test_worker_emits_price_before_delayed_screenshot():
+    events = []
+
+    class FakeResult:
+        screenshot_pending = False
+
+    class FakeService:
+        def run(self, criteria):
+            result = FakeResult()
+            result.screenshot_pending = True
+            self.result_ready_callback(result)
+            result.screenshot_pending = False
+            self.screenshot_ready_callback(result)
+            return result
+
+    worker = JcomSimulationWorker(
+        criteria="snapshot",
+        service_factory=lambda cancel, progress, resolver: FakeService(),
+    )
+    worker.result_ready.connect(
+        lambda result: events.append(("result", result.screenshot_pending))
+    )
+    worker.screenshot_ready.connect(
+        lambda result: events.append(("screenshot", result.screenshot_pending))
+    )
+
+    worker.run()
+
+    assert events == [("result", True), ("screenshot", False)]
+
+
 def test_candidate_reply_checks_stage_and_cancel_releases_waiter():
     worker = JcomSimulationWorker(criteria=None)
     request = AddressCandidateRequest(

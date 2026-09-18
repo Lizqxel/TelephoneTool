@@ -1732,7 +1732,22 @@ ND：{nd}
                 self.product_combo.setCurrentIndex(index)
         if hasattr(self, 'jcom_panel'):
             self.jcom_panel.setVisible(self.current_product == "jcom")
-        self._update_unlisted_address_inputs()
+        # 軽量なテスト用ウィンドウには非掲載商材の入力欄がない場合がある。
+        MainWindow._update_unlisted_address_inputs(self)
+
+        # J:COMではJ:COM専用シミュレーションだけを使用し、
+        # フレッツ提供判定の操作・結果は画面に出さない。
+        show_flets_ui = self.current_product != "jcom"
+        for widget_name in (
+            'judgment_label',
+            'judgment_combo',
+            'area_search_btn',
+            'area_result_container',
+            'screenshot_btn',
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setVisible(show_flets_ui)
 
     def set_product(self, product):
         if product not in ("self_collabo", "self_collabo_unlisted", "jcom"):
@@ -2300,7 +2315,8 @@ ND：{nd}
         address_layout = QVBoxLayout()
         
         # 提供判定
-        address_layout.addWidget(QLabel("提供判定"))
+        self.judgment_label = QLabel("提供判定")
+        address_layout.addWidget(self.judgment_label)
         self.judgment_combo = CustomComboBox()
         self.judgment_combo.addItems(["OK", "未提供"])
         address_layout.addWidget(self.judgment_combo)
@@ -2399,8 +2415,8 @@ ND：{nd}
             address_layout.addWidget(self.jcom_panel)
         
         # 提供エリア検索結果表示用のラベル
-        area_result_container = QWidget()
-        area_result_layout = QVBoxLayout(area_result_container)
+        self.area_result_container = QWidget()
+        area_result_layout = QVBoxLayout(self.area_result_container)
         area_result_layout.setContentsMargins(0, 0, 0, 0)
         area_result_layout.setSpacing(2)
 
@@ -2509,10 +2525,13 @@ ND：{nd}
 
         area_result_layout.addWidget(self.progress_bar)
 
-        address_layout.addWidget(area_result_container)
+        address_layout.addWidget(self.area_result_container)
         
         address_group.setLayout(address_layout)
         parent_layout.addWidget(address_group)
+
+        # 保存済みの商材がJ:COMの場合も、初回描画からフレッツUIを隠す。
+        self._update_product_selector()
         
         # リスト情報セクション
         list_group = QGroupBox("リスト情報")
@@ -3097,11 +3116,24 @@ ND：{nd}
         # CTI再取得と自動整形が完了した後に同一世代の不変条件を作る。
         self.jcom_generation += 1
         try:
+            birth_parts = (
+                self.era_combo.currentText().strip(),
+                self.year_combo.currentText().strip(),
+                self.month_combo.currentText().strip(),
+                self.day_combo.currentText().strip(),
+            )
+            if any(birth_parts) and not all(birth_parts):
+                raise ValueError(
+                    "生年月日を入力する場合は、元号・年・月・日をすべて選択してください。"
+                )
+            birth_date_text = self._build_birth_date()
+            if all(birth_parts) and not birth_date_text:
+                raise ValueError("生年月日が正しい日付ではありません。")
             criteria = JcomSearchCriteria.create(
                 generation=self.jcom_generation,
                 postal_code=self.postal_code_input.text().strip(),
                 address=self.address_input.text().strip(),
-                birth_date_text=self._build_birth_date(),
+                birth_date_text=birth_date_text,
                 residence_type=self.jcom_panel.residence_type(),
             )
         except ValueError as exc:
@@ -3110,9 +3142,14 @@ ND：{nd}
 
         self.jcom_active_request_id = criteria.request_id
         self.jcom_panel.invalidate_result("検索を開始します…")
-        self.jcom_panel.set_age_condition(
-            f"入力済み生年月日から判定: {criteria.age}歳／{criteria.age_bracket.value}"
-        )
+        if criteria.birth_date is None:
+            age_condition = "生年月日未入力のため自動選択: 27歳以上"
+        else:
+            age_condition = (
+                f"入力済み生年月日から判定: "
+                f"{criteria.age}歳／{criteria.age_bracket.value}"
+            )
+        self.jcom_panel.set_age_condition(age_condition)
         self.jcom_panel.set_running(True)
 
         worker = JcomSimulationWorker(criteria, self)
@@ -3122,6 +3159,7 @@ ND：{nd}
             lambda request, w=worker: self._on_jcom_candidate_requested(w, request)
         )
         worker.result_ready.connect(self._on_jcom_result)
+        worker.screenshot_ready.connect(self._on_jcom_screenshot_ready)
         worker.finished.connect(lambda w=worker: self._on_jcom_worker_finished(w))
         worker.start()
 
@@ -3240,6 +3278,17 @@ ND：{nd}
         ):
             return
         self.jcom_panel.show_result(result)
+
+    def _on_jcom_screenshot_ready(self, result):
+        # 料金結果と同じ検索世代の画像だけを後から差し替える。
+        if (
+            result.request_id != self.jcom_active_request_id
+            or result.generation != self.jcom_generation
+            or self.current_product != 'jcom'
+            or not hasattr(self, 'jcom_panel')
+        ):
+            return
+        self.jcom_panel.update_screenshot(result)
 
     def _on_jcom_worker_finished(self, worker):
         dialog = getattr(self, '_jcom_candidate_dialog', None)
@@ -3589,6 +3638,12 @@ ND：{nd}
 
     def search_service_area(self):
         """提供エリア検索を開始"""
+        if self.current_product == "jcom":
+            logging.info("J:COM選択中のため、フレッツ提供判定を実行しません")
+            if hasattr(self, 'is_auto_processing'):
+                self.is_auto_processing = False
+            return
+
         is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
         refresh_before_area_search = self.settings.get('refresh_address_from_cti_before_area_search', True)
 
@@ -4636,6 +4691,11 @@ ND：{nd}
             # 1. 顧客情報取得を実行（既存のfetch_cti_dataメソッドを呼び出し）
             logging.info("1. 顧客情報の自動取得を開始")
             self.fetch_cti_data()
+
+            if self.current_product == "jcom":
+                logging.info("J:COM選択中のため、フレッツ提供判定の自動実行をスキップします")
+                self.is_auto_processing = False
+                return
             
             # 2. 顧客情報取得が完了してから提供判定検索を実行
             # シグナルを使用してメインスレッドで実行（スレッドセーフ）
@@ -4664,8 +4724,16 @@ ND：{nd}
     def auto_search_service_area(self):
         """CTI自動処理から呼び出される提供エリア検索"""
         try:
+            if self.current_product == "jcom" or self._is_unlisted_self_collabo():
+                if self.current_product == "jcom":
+                    logging.info("J:COM選択中のため、フレッツ提供判定の自動実行をスキップします")
+                else:
+                    logging.info("非掲載商材では提供エリア検索は手動実行のみです")
+                self.is_auto_processing = False
+                return
             if self._is_unlisted_self_collabo():
                 logging.info("非掲載商材では提供エリア検索は手動実行のみです")
+                self.is_auto_processing = False
                 return
             logging.info("2. 提供判定検索の自動実行を開始")
             

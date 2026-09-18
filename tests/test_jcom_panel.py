@@ -59,6 +59,47 @@ def test_panel_displays_zero_yen_and_missing_image_separately():
     panel.close()
 
 
+def test_panel_shows_loading_until_delayed_screenshot_arrives(tmp_path):
+    application = app()
+    image_path = tmp_path / "delayed-result.png"
+    image = QPixmap(320, 640)
+    image.fill(QColor("white"))
+    assert image.save(str(image_path), "PNG")
+
+    panel = JcomSimulationPanel()
+    result = JcomSimulationResult(
+        request_id="request-loading",
+        generation=1,
+        acquired_at=datetime.now(JST),
+        input_address="入力住所",
+        confirmed_address="確定住所",
+        residence_type=ResidenceType.APARTMENT,
+        age=30,
+        calculated_age_bracket=AgeBracket.OVER_27,
+        applied_age_bracket=None,
+        age_selection_used=False,
+        selected_service="ネットのみ",
+        line_type="J:COM NET 光(N)",
+        course="光(N) 1Gコース",
+        screenshot_pending=True,
+        status=SimulationStatus.SUCCESS,
+    )
+
+    panel.show_result(result)
+    panel.tabs.setCurrentIndex(2)
+    assert "生成しています" in panel.image_label.text()
+    assert not panel.open_image_button.isEnabled()
+
+    result.screenshot_pending = False
+    result.screenshot_path = str(image_path)
+    panel.update_screenshot(result)
+
+    assert panel.tabs.currentIndex() == 2
+    assert not panel._source_pixmap.isNull()
+    assert panel.open_image_button.isEnabled()
+    panel.close()
+
+
 def test_partial_result_warns_that_price_uses_site_confirmed_address():
     application = app()
     panel = JcomSimulationPanel()
