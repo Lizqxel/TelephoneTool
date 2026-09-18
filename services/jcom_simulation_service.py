@@ -241,6 +241,9 @@ class JcomSimulationService:
         self._profile_dir = None
         self._selected_course_name = "光(N) 1Gコース"
         self._selected_line_type = "J:COM NET 光(N)"
+        # Workerから設定される段階通知。料金テキストを画像生成より先に返す。
+        self.result_ready_callback = None
+        self.screenshot_ready_callback = None
 
     @staticmethod
     def _default_screenshot_dir() -> Path:
@@ -1143,6 +1146,21 @@ class JcomSimulationService:
             element = self._select_course_and_result()
             result.raw_text = element.text
             result.source_url = self.driver.current_url
+            parsed = extract_pricing_from_text(result.raw_text)
+            for key, value in parsed.items():
+                setattr(result, key, value)
+            result.course = self._selected_course_name
+            result.line_type = self._selected_line_type
+            result.selected_service = "ネットのみ"
+            result.status = SimulationStatus.PARTIAL if result.partial_address else SimulationStatus.SUCCESS
+            result.screenshot_pending = True
+            self.progress("料金結果を取得しました")
+            if callable(self.result_ready_callback):
+                try:
+                    self.result_ready_callback(result)
+                except Exception:
+                    logging.exception("J:COM料金結果の先行通知に失敗")
+
             image_note = ""
             try:
                 self.screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -1157,18 +1175,16 @@ class JcomSimulationService:
             except Exception as exc:
                 logging.warning("J:COM料金領域の画像取得に失敗: %s", type(exc).__name__)
                 image_note = "画像未取得"
-            parsed = extract_pricing_from_text(result.raw_text)
-            for key, value in parsed.items():
-                setattr(result, key, value)
             if image_note:
                 result.notes_text = "\n".join(
                     part for part in (result.notes_text, image_note) if part
                 )
-            result.course = self._selected_course_name
-            result.line_type = self._selected_line_type
-            result.selected_service = "ネットのみ"
-            result.status = SimulationStatus.PARTIAL if result.partial_address else SimulationStatus.SUCCESS
-            self.progress("料金結果を取得しました")
+            result.screenshot_pending = False
+            if callable(self.screenshot_ready_callback):
+                try:
+                    self.screenshot_ready_callback(result)
+                except Exception:
+                    logging.exception("J:COMスクリーンショット結果の通知に失敗")
         except JcomCancelled:
             result.status = SimulationStatus.CANCELLED
             result.error_message = "検索をキャンセルしました。"

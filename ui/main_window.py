@@ -2999,6 +2999,7 @@ ND：{nd}
             lambda request, w=worker: self._on_jcom_candidate_requested(w, request)
         )
         worker.result_ready.connect(self._on_jcom_result)
+        worker.screenshot_ready.connect(self._on_jcom_screenshot_ready)
         worker.finished.connect(lambda w=worker: self._on_jcom_worker_finished(w))
         worker.start()
 
@@ -3117,6 +3118,17 @@ ND：{nd}
         ):
             return
         self.jcom_panel.show_result(result)
+
+    def _on_jcom_screenshot_ready(self, result):
+        # 料金結果と同じ検索世代の画像だけを後から差し替える。
+        if (
+            result.request_id != self.jcom_active_request_id
+            or result.generation != self.jcom_generation
+            or self.current_product != 'jcom'
+            or not hasattr(self, 'jcom_panel')
+        ):
+            return
+        self.jcom_panel.update_screenshot(result)
 
     def _on_jcom_worker_finished(self, worker):
         dialog = getattr(self, '_jcom_candidate_dialog', None)

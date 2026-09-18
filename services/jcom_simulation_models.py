@@ -193,6 +193,7 @@ class JcomSimulationResult:
     source_url: str = ""
     raw_text: str = ""
     screenshot_path: Optional[str] = None
+    screenshot_pending: bool = False
     status: SimulationStatus = SimulationStatus.ERROR
     partial_address: bool = False
     address_approximations: List[AddressApproximation] = field(default_factory=list)

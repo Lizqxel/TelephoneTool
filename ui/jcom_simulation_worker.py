@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import threading
 
 from PySide6.QtCore import QThread, Signal, Slot
@@ -13,6 +14,7 @@ from services.jcom_simulation_service import JcomSimulationService
 class JcomSimulationWorker(QThread):
     progress = Signal(str)
     result_ready = Signal(object)
+    screenshot_ready = Signal(object)
     candidate_requested = Signal(object)
 
     def __init__(self, criteria: JcomSearchCriteria, parent=None, service_factory=None):
@@ -48,6 +50,16 @@ class JcomSimulationWorker(QThread):
             return True
 
     def run(self):
+        early_result_emitted = False
+
+        def emit_result_early(result):
+            nonlocal early_result_emitted
+            early_result_emitted = True
+            self.result_ready.emit(copy.deepcopy(result))
+
+        def emit_screenshot_ready(result):
+            self.screenshot_ready.emit(copy.deepcopy(result))
+
         if self._service_factory:
             service = self._service_factory(
                 self.cancel_event, self.progress.emit, self._resolve_candidate
@@ -58,7 +70,11 @@ class JcomSimulationWorker(QThread):
                 progress=self.progress.emit,
                 candidate_resolver=self._resolve_candidate,
             )
-        self.result_ready.emit(service.run(self.criteria))
+        service.result_ready_callback = emit_result_early
+        service.screenshot_ready_callback = emit_screenshot_ready
+        result = service.run(self.criteria)
+        if not early_result_emitted:
+            self.result_ready.emit(result)
 
     @Slot()
     def cancel(self):
