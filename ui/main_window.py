@@ -1734,6 +1734,7 @@ ND：{nd}
             self.jcom_panel.setVisible(self.current_product == "jcom")
         # 軽量なテスト用ウィンドウには非掲載商材の入力欄がない場合がある。
         MainWindow._update_unlisted_address_inputs(self)
+        MainWindow._update_unlisted_list_inputs(self)
 
         # J:COMではJ:COM専用シミュレーションだけを使用し、
         # フレッツ提供判定の操作・結果は画面に出さない。
@@ -1766,6 +1767,19 @@ ND：{nd}
 
     def _is_unlisted_self_collabo(self):
         return self.current_product == "self_collabo_unlisted"
+
+    def _update_unlisted_list_inputs(self):
+        """非掲載商材では不要なリスト名・リスト住所欄を隠す。"""
+        visible = not MainWindow._is_unlisted_self_collabo(self)
+        for widget_name in (
+            'list_name_label',
+            'list_name_input',
+            'list_address_label',
+            'list_address_input',
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setVisible(visible)
 
     def _update_unlisted_address_inputs(self):
         """非掲載商材専用の手動住所入力欄を表示状態に合わせる。"""
@@ -2538,7 +2552,8 @@ ND：{nd}
         list_layout = QVBoxLayout()
         
         # リスト名
-        list_layout.addWidget(QLabel("リスト名"))
+        self.list_name_label = QLabel("リスト名")
+        list_layout.addWidget(self.list_name_label)
         self.list_name_input = QLineEdit()
         list_layout.addWidget(self.list_name_input)
         
@@ -2563,12 +2578,14 @@ ND：{nd}
         list_layout.addWidget(self.list_postal_code_input)
         
         # リスト住所
-        list_layout.addWidget(QLabel("リスト住所"))
+        self.list_address_label = QLabel("リスト住所")
+        list_layout.addWidget(self.list_address_label)
         self.list_address_input = QLineEdit()
         list_layout.addWidget(self.list_address_input)
         
         list_group.setLayout(list_layout)
         parent_layout.addWidget(list_group)
+        self._update_unlisted_list_inputs()
         
         # 受注情報セクション
         order_group = QGroupBox("受注情報")
