@@ -183,6 +183,23 @@ class JcomSimulationPanel(QGroupBox):
         self.copy_button.setEnabled(bool(text))
         self.tabs.setVisible(True)
         self.tabs.setCurrentIndex(0)
+        self._apply_screenshot_result(result)
+
+    def update_screenshot(self, result: JcomSimulationResult):
+        """表示済み料金を保ったまま、後着のサイト画像だけを反映する。"""
+        self.result_text.setPlainText(result.display_text())
+        self._apply_screenshot_result(result)
+
+    def _apply_screenshot_result(self, result: JcomSimulationResult):
+        if result.screenshot_pending:
+            self._screenshot_path = ""
+            self._source_pixmap = QPixmap()
+            self._set_image_controls_enabled(False)
+            self.image_label.setPixmap(QPixmap())
+            self.image_label.setText("スクリーンショットを生成しています…")
+            self.image_label.adjustSize()
+            return
+
         if result.screenshot_path and Path(result.screenshot_path).is_file():
             self._screenshot_path = result.screenshot_path
             self._source_pixmap = QPixmap(result.screenshot_path)
