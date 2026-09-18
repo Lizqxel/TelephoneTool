@@ -100,6 +100,40 @@ def test_success_result_and_owned_driver_release():
     assert driver.quit_called
 
 
+def test_headless_driver_uses_background_chrome_options(monkeypatch, tmp_path):
+    captured = {}
+
+    class CreatedDriver:
+        def set_page_load_timeout(self, timeout):
+            captured["page_load_timeout"] = timeout
+
+        def implicitly_wait(self, timeout):
+            captured["implicit_wait"] = timeout
+
+    def create_chrome(*, service, options):
+        captured["arguments"] = options.arguments
+        return CreatedDriver()
+
+    monkeypatch.setattr(
+        "services.jcom_simulation_service.webdriver.Chrome", create_chrome
+    )
+    service = JcomSimulationService(
+        threading.Event(),
+        lambda message: None,
+        screenshot_dir=tmp_path,
+        headless=True,
+    )
+
+    service._create_driver()
+
+    assert "--headless=new" in captured["arguments"]
+    assert "--disable-gpu" in captured["arguments"]
+    assert "--no-sandbox" in captured["arguments"]
+    assert "--disable-dev-shm-usage" in captured["arguments"]
+    assert "--disable-software-rasterizer" in captured["arguments"]
+    service._profile_dir.cleanup()
+
+
 def test_price_is_notified_before_screenshot_and_browser_cleanup():
     events = []
 

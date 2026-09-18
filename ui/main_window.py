@@ -3152,7 +3152,11 @@ ND：{nd}
         self.jcom_panel.set_age_condition(age_condition)
         self.jcom_panel.set_running(True)
 
-        worker = JcomSimulationWorker(criteria, self)
+        browser_settings = self.settings.get('browser_settings', {})
+        if not isinstance(browser_settings, dict):
+            browser_settings = {}
+        headless = bool(browser_settings.get('headless', False))
+        worker = JcomSimulationWorker(criteria, self, headless=headless)
         self.jcom_worker = worker
         worker.progress.connect(self._on_jcom_progress)
         worker.candidate_requested.connect(

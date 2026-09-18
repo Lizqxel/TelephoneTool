@@ -230,6 +230,7 @@ class JcomSimulationService:
         driver_factory: Optional[Callable[[], object]] = None,
         timeout: int = 25,
         screenshot_dir: Optional[Path] = None,
+        headless: bool = False,
     ):
         self.cancel_event = cancel_event
         self.progress = progress
@@ -237,6 +238,7 @@ class JcomSimulationService:
         self.driver_factory = driver_factory
         self.timeout = timeout
         self.screenshot_dir = screenshot_dir or self._default_screenshot_dir()
+        self.headless = bool(headless)
         self.driver = None
         self._profile_dir = None
         self._selected_course_name = "光(N) 1Gコース"
@@ -406,6 +408,12 @@ class JcomSimulationService:
         options.add_argument("--disable-sync")
         options.add_argument("--disable-notifications")
         options.add_argument("--disable-popup-blocking")
+        if self.headless:
+            options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-software-rasterizer")
         # Chrome自身の診断ログ（DevTools/GCM/Updater/最適化モデル）を
         # TelephoneToolのコンソールへ流さない。ページ通信は無効にしない。
         options.add_argument("--log-level=3")

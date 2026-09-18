@@ -17,9 +17,16 @@ class JcomSimulationWorker(QThread):
     screenshot_ready = Signal(object)
     candidate_requested = Signal(object)
 
-    def __init__(self, criteria: JcomSearchCriteria, parent=None, service_factory=None):
+    def __init__(
+        self,
+        criteria: JcomSearchCriteria,
+        parent=None,
+        service_factory=None,
+        headless=False,
+    ):
         super().__init__(parent)
         self.criteria = criteria
+        self.headless = bool(headless)
         self.cancel_event = threading.Event()
         self._service_factory = service_factory
         self._candidate_condition = threading.Condition()
@@ -69,6 +76,7 @@ class JcomSimulationWorker(QThread):
                 cancel_event=self.cancel_event,
                 progress=self.progress.emit,
                 candidate_resolver=self._resolve_candidate,
+                headless=self.headless,
             )
         service.result_ready_callback = emit_result_early
         service.screenshot_ready_callback = emit_screenshot_ready

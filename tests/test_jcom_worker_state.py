@@ -40,6 +40,29 @@ def test_worker_factory_receives_candidate_prompt_resolver():
     assert observed["criteria"] == "snapshot"
 
 
+def test_worker_passes_headless_setting_to_jcom_service(monkeypatch):
+    observed = {}
+
+    class FakeResult:
+        pass
+
+    class FakeService:
+        def __init__(self, **kwargs):
+            observed.update(kwargs)
+
+        def run(self, criteria):
+            return FakeResult()
+
+    monkeypatch.setattr(
+        "ui.jcom_simulation_worker.JcomSimulationService", FakeService
+    )
+    worker = JcomSimulationWorker(criteria="snapshot", headless=True)
+
+    worker.run()
+
+    assert observed["headless"] is True
+
+
 def test_worker_emits_price_before_delayed_screenshot():
     events = []
 
