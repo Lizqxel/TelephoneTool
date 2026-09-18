@@ -27,6 +27,7 @@ from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
+from services.postal_code_lookup import lookup_addresses
 from services.jcom_simulation_models import JcomSearchCriteria
 from utils.jcom_address_matcher import NEXT_WITH_CURRENT
 from ui.jcom_simulation_panel import JcomSimulationPanel
@@ -142,6 +143,22 @@ class NoWheelComboBox(QComboBox):
     """スクロールイベントを無視するQComboBox"""
     def wheelEvent(self, event):
         event.ignore()
+
+
+class PostalCodeLookupWorker(QThread):
+    """郵便番号検索をUIを止めずに実行する。"""
+    completed = Signal(int, list, str)
+
+    def __init__(self, generation: int, postal_code: str, parent=None):
+        super().__init__(parent)
+        self.generation = generation
+        self.postal_code = postal_code
+
+    def run(self):
+        try:
+            self.completed.emit(self.generation, lookup_addresses(self.postal_code), "")
+        except RuntimeError as exc:
+            self.completed.emit(self.generation, [], str(exc))
 
 class MainWindow(QMainWindow, MainWindowFunctions):
     """メインウィンドウクラス"""
@@ -292,6 +309,10 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
         # J:COM検索は既存提供判定とは完全に独立したワーカー/世代で管理する。
         self.current_product = "self_collabo"
+        self._unlisted_lookup_generation = 0
+        self._unlisted_lookup_worker = None
+        self._unlisted_lookup_postal_code = ""
+        self._unlisted_base_address = ""
         self.jcom_generation = 0
         self.jcom_worker = None
         self.jcom_active_request_id = None
@@ -327,7 +348,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
 
         saved_product = self.settings.get('selected_product', 'self_collabo')
         self.current_product = (
-            saved_product if saved_product in ('self_collabo', 'jcom') else 'self_collabo'
+            saved_product
+            if saved_product in ('self_collabo', 'self_collabo_unlisted', 'jcom')
+            else 'self_collabo'
         )
         
         # アクティブな検索スレッドを保持するリスト
@@ -934,6 +957,7 @@ ND：{nd}
         # シグナルの設定
         self.setup_signals()
         self.setup_corporate_name_sync()
+        self._update_unlisted_address_inputs()
         
         # Google Sheetsの設定
         self.setup_google_sheets()
@@ -1653,8 +1677,9 @@ ND：{nd}
             product_label.setStyleSheet("color: white; font-size: 9pt;")
             self.product_combo = CustomComboBox()
             self.product_combo.addItem("自社コラボ", "self_collabo")
+            self.product_combo.addItem("自社コラボ(非掲載)", "self_collabo_unlisted")
             self.product_combo.addItem("J:COM", "jcom")
-            self.product_combo.setFixedWidth(105)
+            self.product_combo.setFixedWidth(145)
             self.product_combo.setFixedHeight(22)
             self.product_combo.setStyleSheet("""
                 QComboBox {
@@ -1707,9 +1732,10 @@ ND：{nd}
                 self.product_combo.setCurrentIndex(index)
         if hasattr(self, 'jcom_panel'):
             self.jcom_panel.setVisible(self.current_product == "jcom")
+        self._update_unlisted_address_inputs()
 
     def set_product(self, product):
-        if product not in ("self_collabo", "jcom"):
+        if product not in ("self_collabo", "self_collabo_unlisted", "jcom"):
             return
         if product == self.current_product:
             self._update_product_selector()
@@ -1723,9 +1749,94 @@ ND：{nd}
             self.jcom_panel.invalidate_result("商材が変更されました。再検索してください。")
         self._update_product_selector()
 
+    def _is_unlisted_self_collabo(self):
+        return self.current_product == "self_collabo_unlisted"
+
+    def _update_unlisted_address_inputs(self):
+        """非掲載商材専用の手動住所入力欄を表示状態に合わせる。"""
+        if not hasattr(self, 'unlisted_address_widget'):
+            return
+        enabled = self._is_unlisted_self_collabo()
+        self.unlisted_address_widget.setVisible(enabled)
+        self.address_input.setReadOnly(enabled)
+        self.address_input.setToolTip(
+            "郵便番号から住所候補を選択すると反映されます。"
+            if enabled else ""
+        )
+        if enabled:
+            self._on_unlisted_postal_code_changed()
+
+    def _on_unlisted_postal_code_changed(self):
+        if not self._is_unlisted_self_collabo():
+            return
+        digits = re.sub(r"\D", "", self.postal_code_input.text())
+        if len(digits) != 7:
+            self._clear_unlisted_address_candidates()
+            return
+        if digits == self._unlisted_lookup_postal_code:
+            return
+        self._unlisted_lookup_postal_code = digits
+        self._unlisted_lookup_generation += 1
+        generation = self._unlisted_lookup_generation
+        self.unlisted_address_candidate_combo.clear()
+        self.unlisted_address_candidate_combo.addItem("住所候補を検索中…")
+        self.unlisted_address_candidate_combo.setEnabled(False)
+        worker = PostalCodeLookupWorker(generation, digits, self)
+        self._unlisted_lookup_worker = worker
+        worker.completed.connect(self._on_unlisted_address_lookup_completed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _clear_unlisted_address_candidates(self):
+        if not hasattr(self, 'unlisted_address_candidate_combo'):
+            return
+        self._unlisted_lookup_postal_code = ""
+        self.unlisted_address_candidate_combo.clear()
+        self.unlisted_address_candidate_combo.addItem("郵便番号を7桁入力してください")
+        self.unlisted_address_candidate_combo.setEnabled(False)
+
+    def _on_unlisted_address_lookup_completed(self, generation, candidates, error):
+        if generation != self._unlisted_lookup_generation or not self._is_unlisted_self_collabo():
+            return
+        combo = self.unlisted_address_candidate_combo
+        combo.clear()
+        if error:
+            combo.addItem(error)
+            combo.setEnabled(False)
+            return
+        if not candidates:
+            combo.addItem("該当する住所がありません")
+            combo.setEnabled(False)
+            return
+        combo.addItem("住所を選択してください", "")
+        for address in candidates:
+            combo.addItem(address, address)
+        combo.setEnabled(True)
+
+    def _on_unlisted_address_candidate_changed(self, index):
+        if not self._is_unlisted_self_collabo():
+            return
+        base_address = self.unlisted_address_candidate_combo.itemData(index) or ""
+        if not base_address:
+            return
+        self._unlisted_base_address = base_address
+        self._sync_unlisted_full_address()
+
+    def _sync_unlisted_full_address(self):
+        if not self._is_unlisted_self_collabo():
+            return
+        base_address = getattr(self, '_unlisted_base_address', '')
+        detail = self.unlisted_address_detail_input.text().strip()
+        self._push_text_change(self.address_input, f"{base_address}{detail}" if base_address else "")
+
+    @staticmethod
+    def _prefecture_only(address):
+        match = re.match(r"^(東京都|北海道|(?:京都|大阪)府|.+?県)", address or "")
+        return match.group(1) if match else ""
+
     def _persist_selected_product(self, product):
         """選択中の商材を既存設定を消さずにsettings.jsonへ保存する。"""
-        if product not in ('self_collabo', 'jcom'):
+        if product not in ('self_collabo', 'self_collabo_unlisted', 'jcom'):
             return False
         try:
             settings = {}
@@ -2197,12 +2308,29 @@ ND：{nd}
         # 郵便番号
         address_layout.addWidget(QLabel("郵便番号"))
         self.postal_code_input = QLineEdit()
+        self.postal_code_input.setMaxLength(8)
         address_layout.addWidget(self.postal_code_input)
         
         # 住所
         address_layout.addWidget(QLabel("住所"))
         self.address_input = QLineEdit()
         address_layout.addWidget(self.address_input)
+
+        # 非掲載商材では郵便番号で町域まで選択し、番地・号を手入力する。
+        self.unlisted_address_widget = QWidget()
+        unlisted_address_layout = QVBoxLayout(self.unlisted_address_widget)
+        unlisted_address_layout.setContentsMargins(0, 0, 0, 0)
+        unlisted_address_layout.addWidget(QLabel("郵便番号から住所を選択"))
+        self.unlisted_address_candidate_combo = NoWheelComboBox()
+        self.unlisted_address_candidate_combo.addItem("郵便番号を7桁入力してください")
+        self.unlisted_address_candidate_combo.setEnabled(False)
+        unlisted_address_layout.addWidget(self.unlisted_address_candidate_combo)
+        unlisted_address_layout.addWidget(QLabel("番地・号"))
+        self.unlisted_address_detail_input = QLineEdit()
+        self.unlisted_address_detail_input.setPlaceholderText("例：1-1")
+        unlisted_address_layout.addWidget(self.unlisted_address_detail_input)
+        self.unlisted_address_widget.hide()
+        address_layout.addWidget(self.unlisted_address_widget)
         
         # 住所フリガナ
         address_layout.addWidget(QLabel("住所フリガナ"))
@@ -2508,6 +2636,11 @@ ND：{nd}
             self.list_phone_input.textChanged.connect(self.format_phone_number_without_hyphen)
             self.postal_code_input.textChanged.connect(self.format_postal_code)
             self.postal_code_input.textChanged.connect(self.convert_to_half_width)
+            self.postal_code_input.textChanged.connect(self._on_unlisted_postal_code_changed)
+            self.unlisted_address_candidate_combo.currentIndexChanged.connect(
+                self._on_unlisted_address_candidate_changed
+            )
+            self.unlisted_address_detail_input.textChanged.connect(self._sync_unlisted_full_address)
             self.list_postal_code_input.textChanged.connect(self.format_postal_code)
             self.list_postal_code_input.textChanged.connect(self.convert_to_half_width)
             self.address_input.textChanged.connect(self.convert_to_full_width)
@@ -2737,8 +2870,16 @@ ND：{nd}
                 if self.current_mode != 'corporate':
                     self._push_text_change(self.contractor_input, contractor_name_text)
             
+            # 非掲載商材ではCTIからは都道府県だけを反映し、郵便番号・以降の
+            # 住所は専用の手入力フローで設定する。
+            if self._is_unlisted_self_collabo():
+                prefecture = self._prefecture_only(data.address)
+                self._unlisted_base_address = prefecture
+                self._push_text_change(self.address_input, prefecture)
+                self._push_text_change(self.unlisted_address_detail_input, "")
+                self._clear_unlisted_address_candidates()
             # 住所
-            if data.address:
+            elif data.address:
                 # 住所のハイフンとスペースの処理
                 converted_address = data.address.replace('－', '-')  # 全角ハイフンを半角に
                 converted_address = converted_address.replace('ー', '-')  # 長音記号を半角ハイフンに
@@ -2754,7 +2895,7 @@ ND：{nd}
                 self._push_text_change(self.list_phone_input, converted_phone)
             
             # 郵便番号
-            if data.postal_code:
+            if data.postal_code and not self._is_unlisted_self_collabo():
                 converted_postal_code = convert_to_half_width_except_space(data.postal_code)
                 self._push_text_change(self.postal_code_input, converted_postal_code)
                 self._push_text_change(self.list_postal_code_input, converted_postal_code)
@@ -3451,7 +3592,12 @@ ND：{nd}
         is_auto_processing = hasattr(self, 'is_auto_processing') and self.is_auto_processing
         refresh_before_area_search = self.settings.get('refresh_address_from_cti_before_area_search', True)
 
-        should_refresh_from_cti = is_auto_processing or refresh_before_area_search
+        # 非掲載商材は郵便番号・番地を手入力するため、検索開始時にもCTIで
+        # 住所を上書きしない。提供エリア検索はボタン操作で従来どおり実行する。
+        should_refresh_from_cti = (
+            not self._is_unlisted_self_collabo()
+            and (is_auto_processing or refresh_before_area_search)
+        )
 
         if should_refresh_from_cti:
             if not self.refresh_address_from_cti():
@@ -4518,6 +4664,9 @@ ND：{nd}
     def auto_search_service_area(self):
         """CTI自動処理から呼び出される提供エリア検索"""
         try:
+            if self._is_unlisted_self_collabo():
+                logging.info("非掲載商材では提供エリア検索は手動実行のみです")
+                return
             logging.info("2. 提供判定検索の自動実行を開始")
             
             # 郵便番号と住所の入力チェック

@@ -445,7 +445,7 @@ ND：{nd}
                     saved_product = settings.get(
                         'selected_product', getattr(self, 'current_product', 'self_collabo')
                     )
-                    if saved_product in ('self_collabo', 'jcom'):
+                    if saved_product in ('self_collabo', 'self_collabo_unlisted', 'jcom'):
                         self.current_product = saved_product
             else:
                 # デフォルトのフォーマットテンプレートを設定
