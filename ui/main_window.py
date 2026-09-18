@@ -1735,6 +1735,7 @@ ND：{nd}
         # 軽量なテスト用ウィンドウには非掲載商材の入力欄がない場合がある。
         MainWindow._update_unlisted_address_inputs(self)
         MainWindow._update_unlisted_list_inputs(self)
+        MainWindow._apply_unlisted_fee_default(self)
 
         # J:COMではJ:COM専用シミュレーションだけを使用し、
         # フレッツ提供判定の操作・結果は画面に出さない。
@@ -1780,6 +1781,19 @@ ND：{nd}
             widget = getattr(self, widget_name, None)
             if widget is not None:
                 widget.setVisible(visible)
+
+    def _apply_unlisted_fee_default(self):
+        """非掲載商材の空の料金入力欄へ既定の料金帯を設定する。"""
+        if not MainWindow._is_unlisted_self_collabo(self):
+            return
+        fee_input = getattr(self, 'fee_input', None)
+        if fee_input is None or fee_input.text().strip():
+            return
+        default_fee = "2500円～3000円"
+        fee_combo = getattr(self, 'fee_combo', None)
+        if fee_combo is not None:
+            fee_combo.setCurrentText(default_fee)
+        fee_input.setText(default_fee)
 
     def _update_unlisted_address_inputs(self):
         """非掲載商材専用の手動住所入力欄を表示状態に合わせる。"""
@@ -2225,6 +2239,7 @@ ND：{nd}
         self.fee_input.textChanged.connect(self.reset_background_color)
         fee_layout.addWidget(self.fee_input)
         input_layout.addLayout(fee_layout)
+        self._apply_unlisted_fee_default()
         
         # ネット利用
         input_layout.addWidget(QLabel("ネット利用"))
