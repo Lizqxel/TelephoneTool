@@ -1770,11 +1770,13 @@ ND：{nd}
         return self.current_product == "self_collabo_unlisted"
 
     def _update_unlisted_list_inputs(self):
-        """非掲載商材では不要なリスト名・リスト住所欄を隠す。"""
+        """非掲載商材では不要なリスト名・郵便番号・住所欄を隠す。"""
         visible = not MainWindow._is_unlisted_self_collabo(self)
         for widget_name in (
             'list_name_label',
             'list_name_input',
+            'list_postal_code_label',
+            'list_postal_code_input',
             'list_address_label',
             'list_address_input',
         ):
@@ -2588,7 +2590,8 @@ ND：{nd}
         list_layout.addWidget(self.list_phone_input)
         
         # リスト郵便番号
-        list_layout.addWidget(QLabel("リスト郵便番号"))
+        self.list_postal_code_label = QLabel("リスト郵便番号")
+        list_layout.addWidget(self.list_postal_code_label)
         self.list_postal_code_input = QLineEdit()
         list_layout.addWidget(self.list_postal_code_input)
         

@@ -16,6 +16,8 @@ def _owner(product):
         current_product=product,
         list_name_label=VisibleWidget(),
         list_name_input=VisibleWidget(),
+        list_postal_code_label=VisibleWidget(),
+        list_postal_code_input=VisibleWidget(),
         list_address_label=VisibleWidget(),
         list_address_input=VisibleWidget(),
     )
@@ -28,6 +30,8 @@ def test_unlisted_product_hides_list_name_and_address_fields():
 
     assert owner.list_name_label.visible is False
     assert owner.list_name_input.visible is False
+    assert owner.list_postal_code_label.visible is False
+    assert owner.list_postal_code_input.visible is False
     assert owner.list_address_label.visible is False
     assert owner.list_address_input.visible is False
 
@@ -40,5 +44,7 @@ def test_other_products_show_list_name_and_address_fields():
 
         assert owner.list_name_label.visible is True
         assert owner.list_name_input.visible is True
+        assert owner.list_postal_code_label.visible is True
+        assert owner.list_postal_code_input.visible is True
         assert owner.list_address_label.visible is True
         assert owner.list_address_input.visible is True
