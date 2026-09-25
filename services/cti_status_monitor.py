@@ -31,6 +31,8 @@ from enum import Enum
 import json
 import os
 
+from services.oneclick import OneClickService
+
 class CTIStatus(Enum):
     """CTI状態の列挙型"""
     WAITING = "待ち受け中"
@@ -51,7 +53,8 @@ class CTIStatusMonitor:
     def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None,
                  on_call_ended_callback: Optional[Callable] = None,
                  on_talking_started_callback: Optional[Callable] = None,
-                 on_cancel_processing_callback: Optional[Callable] = None):
+                 on_cancel_processing_callback: Optional[Callable] = None,
+                 on_screen_changed_callback: Optional[Callable] = None):
         """
         初期化
         
@@ -60,11 +63,13 @@ class CTIStatusMonitor:
             on_call_ended_callback: 通話終了時（通話中→待ち受け中）のコールバック関数
             on_talking_started_callback: 通話中状態開始時のコールバック関数
             on_cancel_processing_callback: アクションボタンクリック時の処理キャンセルコールバック関数
+            on_screen_changed_callback: CTI画面の表示内容切り替わり時のコールバック関数
         """
         self.on_dialing_to_talking_callback = on_dialing_to_talking_callback
         self.on_call_ended_callback = on_call_ended_callback
         self.on_talking_started_callback = on_talking_started_callback
         self.on_cancel_processing_callback = on_cancel_processing_callback
+        self.on_screen_changed_callback = on_screen_changed_callback
         
         # 状態管理
         self.current_status = CTIStatus.UNKNOWN
@@ -94,6 +99,10 @@ class CTIStatusMonitor:
         self.window_redetect_interval = 5  # ウィンドウ再検出間隔（秒）
         self.last_window_redetect_time = 0
         self.enable_auto_processing = True  # 自動処理の有効/無効
+        self.enable_screen_change_fetch = True  # CTI画面切り替わり時の顧客情報取得
+        self.last_screen_signature_poll_time = 0
+        self.screen_signature_poll_interval = 0.5
+        self.screen_data_service = OneClickService()
         
         # 通話時間設定
         self.call_duration_threshold = 0  # 通話時間の閾値（秒）
@@ -122,15 +131,18 @@ class CTIStatusMonitor:
                 with open("settings.json", 'r', encoding='utf-8') as f:
                     settings = json.load(f)
                     self.enable_auto_processing = settings.get('enable_auto_cti_processing', True)
+                    self.enable_screen_change_fetch = settings.get('enable_cti_screen_change_fetch', True)
                     self.monitor_interval = settings.get('cti_monitor_interval', 0.5)
                     self.call_duration_threshold = settings.get('call_duration_threshold', 0)
             else:
                 self.enable_auto_processing = True
+                self.enable_screen_change_fetch = True
                 self.monitor_interval = 0.5
                 self.call_duration_threshold = 0
         except Exception as e:
             logging.error(f"CTI監視設定の読み込みに失敗しました: {str(e)}")
             self.enable_auto_processing = True
+            self.enable_screen_change_fetch = True
             self.monitor_interval = 0.5
             self.call_duration_threshold = 0
             
@@ -286,6 +298,7 @@ class CTIStatusMonitor:
                 # 状態チェック間隔を制御
                 if current_time - self.last_detection_time >= self.monitor_interval:
                     self._check_status_change()
+                    self._check_screen_change()
                     self._check_action_button_click()  # アクションボタンクリックをチェック
                     self.last_detection_time = current_time
                     
@@ -294,6 +307,41 @@ class CTIStatusMonitor:
                 
             # CPU負荷軽減のため短いスリープ
             time.sleep(0.05)
+
+    def _get_customer_values(self):
+        """顧客情報取得処理が参照する顧客名・住所の現在値を取得する。"""
+        if not self.window_handle or not win32gui.IsWindow(self.window_handle):
+            return None
+
+        try:
+            self.screen_data_service.window_handle = self.window_handle
+            return self.screen_data_service.get_monitored_customer_values()
+        except Exception as e:
+            logging.debug(f"CTI顧客情報の監視値取得に失敗しました: {str(e)}")
+            return None
+
+    def _check_screen_change(self):
+        """CTIメイン画面の表示内容切り替わりを検出"""
+        if not self.enable_screen_change_fetch or not self.on_screen_changed_callback:
+            return
+
+        try:
+            current_time = time.time()
+            if current_time - self.last_screen_signature_poll_time < self.screen_signature_poll_interval:
+                return
+            self.last_screen_signature_poll_time = current_time
+
+            if not self.window_handle or not win32gui.IsWindow(self.window_handle):
+                if not self.find_cti_window():
+                    return
+
+            values = self._get_customer_values()
+            if values is None:
+                return
+
+            self.on_screen_changed_callback(*values)
+        except Exception as e:
+            logging.error(f"CTI画面切り替わり検出中にエラーが発生: {str(e)}")
             
     def _check_status_change(self):
         """

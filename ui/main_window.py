@@ -149,6 +149,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
     
     # カスタムシグナル：CTI自動処理用
     trigger_auto_search = Signal()
+    cti_screen_values_detected = Signal(str, str)
 
     class _TextChangeCommand(QUndoCommand):
         """テキスト変更用のUndoコマンド"""
@@ -377,6 +378,9 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.init_simple_mode()
         else:
             self.init_easy_mode()
+
+        self.cti_screen_values_detected.connect(self._handle_cti_screen_values)
+        self.trigger_auto_search.connect(self.auto_search_service_area)
         
         # 電話ボタン監視の初期化と開始
         self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
@@ -392,14 +396,11 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                     on_call_ended_callback=self.on_cti_call_ended,
                     on_talking_started_callback=self.on_cti_talking_started,
-                    on_cancel_processing_callback=self.on_cancel_processing_request
+                    on_cancel_processing_callback=self.on_cancel_processing_request,
+                    on_screen_changed_callback=self.on_cti_screen_changed
                 )
                 self.cti_status_monitor.start_monitoring()
                 logging.info("CTI状態監視を開始しました")
-                
-                # CTI自動処理用のシグナル・スロット接続（重複接続を防ぐ）
-                if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
-                    self.trigger_auto_search.connect(self.auto_search_service_area)
         else:
             logging.info("CTI監視が設定で無効になっています")
             self.cti_status_monitor = None
@@ -936,22 +937,6 @@ ND：{nd}
         # CTI連携サービスの初期化
         self.cti_service = OneClickService()
         
-        # 電話ボタン監視の初期化と開始
-        self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
-        self.phone_monitor.start_monitoring()
-        
-        # CTI状態監視の初期化と開始
-        self.cti_status_monitor = CTIStatusMonitor(
-            on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-            on_call_ended_callback=self.on_cti_call_ended,
-            on_talking_started_callback=self.on_cti_talking_started,
-            on_cancel_processing_callback=self.on_cancel_processing_request
-        )
-        self.cti_status_monitor.start_monitoring()
-        
-        # CTI自動処理用のシグナル・スロット接続
-        self.trigger_auto_search.connect(self.auto_search_service_area)
-        
         # カウントダウン表示用のラベル
         self.countdown_label = QLabel()
         self.countdown_label.setStyleSheet("""
@@ -1054,22 +1039,6 @@ ND：{nd}
         
         # CTI連携サービスの初期化
         self.cti_service = OneClickService()
-        
-        # 電話ボタン監視の初期化と開始
-        self.phone_monitor = PhoneButtonMonitor(self.fetch_cti_data)
-        self.phone_monitor.start_monitoring()
-        
-        # CTI状態監視の初期化と開始
-        self.cti_status_monitor = CTIStatusMonitor(
-            on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-            on_call_ended_callback=self.on_cti_call_ended,
-            on_talking_started_callback=self.on_cti_talking_started,
-            on_cancel_processing_callback=self.on_cancel_processing_request
-        )
-        self.cti_status_monitor.start_monitoring()
-        
-        # CTI自動処理用のシグナル・スロット接続
-        self.trigger_auto_search.connect(self.auto_search_service_area)
 
         self.init_menu()
     
@@ -2786,14 +2755,11 @@ ND：{nd}
                             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                             on_call_ended_callback=self.on_cti_call_ended,
                             on_talking_started_callback=self.on_cti_talking_started,
-                            on_cancel_processing_callback=self.on_cancel_processing_request
+                            on_cancel_processing_callback=self.on_cancel_processing_request,
+                            on_screen_changed_callback=self.on_cti_screen_changed
                         )
                         self.cti_status_monitor.start_monitoring()
                         logging.info("CTI状態監視を開始しました")
-                        
-                        # CTI自動処理用のシグナル・スロット接続
-                        if not self.trigger_auto_search.isSignalConnected(self.trigger_auto_search, self.auto_search_service_area):
-                            self.trigger_auto_search.connect(self.auto_search_service_area)
                     elif hasattr(self.cti_status_monitor, 'start_monitoring'):
                         self.cti_status_monitor.start_monitoring()
                         logging.info("CTI状態監視を再開しました")
@@ -2939,8 +2905,6 @@ ND：{nd}
             # CTIデータの取得処理
             data = self.cti_service.get_all_fields_data()
             if data:
-                # メインスレッドでUIを更新
-                QApplication.instance().postEvent(self, QEvent(QEvent.User))
                 self.update_form_with_data(data)
                 logging.info("CTIデータの取得に成功しました")
             else:
@@ -2949,14 +2913,6 @@ ND：{nd}
             logging.error(f"CTIデータの取得中にエラーが発生しました: {e}")
             QMessageBox.critical(self, "エラー", f"CTIデータの取得中にエラーが発生しました: {e}")
             
-    def event(self, event):
-        """イベントハンドラ"""
-        if event.type() == QEvent.User:
-            # メインスレッドでUIを更新
-            self.update_form_with_data(self.cti_service.get_all_fields_data())
-            return True
-        return super().event(event)
-
     def validate_contractor_name(self, text):
         """
         契約者名の入力を検証します。
@@ -4523,6 +4479,44 @@ ND：{nd}
         else:
             self.other_number_text_widget.hide()
             self.other_number_text_input.clear()
+
+    def on_cti_screen_changed(self, customer_name, address):
+        """監視スレッドで取得したCTI顧客情報をメインスレッドへ渡す。"""
+        self.cti_screen_values_detected.emit(customer_name or "", address or "")
+
+    @Slot(str, str)
+    def _handle_cti_screen_values(self, customer_name, address):
+        """CTIとUIの顧客情報が異なる場合だけ顧客情報を取得する。"""
+        try:
+            if not customer_name.strip() and not address.strip():
+                return
+
+            expected_name = convert_to_full_width(
+                customer_name.replace(' ', '　')
+            ).strip()
+
+            if self._is_unlisted_self_collabo():
+                expected_address = self._prefecture_only(address).strip()
+            else:
+                expected_address = address.replace('－', '-')
+                expected_address = expected_address.replace('ー', '-')
+                expected_address = expected_address.replace('−', '-')
+                expected_address = expected_address.replace(' ', '　')
+                expected_address = convert_to_full_width(expected_address).strip()
+
+            current_name = self.list_name_input.text().strip()
+            current_address = self.address_input.text().strip()
+
+            ui_is_empty = not current_name and not current_address
+            name_changed = bool(customer_name.strip()) and current_name != expected_name
+            address_changed = bool(address.strip()) and current_address != expected_address
+            if not ui_is_empty and not name_changed and not address_changed:
+                return
+
+            logging.info("CTIの顧客名または住所がUI保持値と異なるため、顧客情報を取得します")
+            self.fetch_cti_data()
+        except Exception as e:
+            logging.error(f"CTI画面切替時の顧客情報取得中にエラーが発生: {str(e)}")
 
     def on_cti_dialing_to_talking(self):
         """
