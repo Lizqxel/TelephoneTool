@@ -31,6 +31,8 @@ from enum import Enum
 import json
 import os
 
+from services.oneclick import OneClickService
+
 class CTIStatus(Enum):
     """CTI状態の列挙型"""
     WAITING = "待ち受け中"
@@ -98,9 +100,9 @@ class CTIStatusMonitor:
         self.last_window_redetect_time = 0
         self.enable_auto_processing = True  # 自動処理の有効/無効
         self.enable_screen_change_fetch = True  # CTI画面切り替わり時の顧客情報取得
-        self.last_screen_signature = None
-        self.last_screen_change_time = 0
-        self.screen_change_cooldown = 1.0
+        self.last_screen_signature_poll_time = 0
+        self.screen_signature_poll_interval = 0.5
+        self.screen_data_service = OneClickService()
         
         # 通話時間設定
         self.call_duration_threshold = 0  # 通話時間の閾値（秒）
@@ -306,41 +308,17 @@ class CTIStatusMonitor:
             # CPU負荷軽減のため短いスリープ
             time.sleep(0.05)
 
-    def _get_screen_signature(self):
-        """CTIメイン画面の表示内容から切り替わり検出用の署名を作成"""
+    def _get_customer_values(self):
+        """顧客情報取得処理が参照する顧客名・住所の現在値を取得する。"""
         if not self.window_handle or not win32gui.IsWindow(self.window_handle):
             return None
 
-        ignored_texts = {
-            "待ち受け中", "発信中", "通話中",
-            "次", "留守", "担当者不在", "NG",
-        }
-        values = []
-
-        def callback(hwnd, _):
-            try:
-                if not win32gui.IsWindowVisible(hwnd):
-                    return True
-                text = (win32gui.GetWindowText(hwnd) or "").strip()
-                if not text or text in ignored_texts:
-                    return True
-                if ":" in text and all(ch.isdigit() or ch in ": " for ch in text):
-                    return True
-                rect = win32gui.GetWindowRect(hwnd)
-                values.append((rect[0], rect[1], rect[2], rect[3], text))
-            except Exception:
-                pass
-            return True
-
         try:
-            win32gui.EnumChildWindows(self.window_handle, callback, None)
+            self.screen_data_service.window_handle = self.window_handle
+            return self.screen_data_service.get_monitored_customer_values()
         except Exception as e:
-            logging.debug(f"CTI画面署名の取得に失敗しました: {str(e)}")
+            logging.debug(f"CTI顧客情報の監視値取得に失敗しました: {str(e)}")
             return None
-
-        if not values:
-            return None
-        return tuple(sorted(values))
 
     def _check_screen_change(self):
         """CTIメイン画面の表示内容切り替わりを検出"""
@@ -348,31 +326,20 @@ class CTIStatusMonitor:
             return
 
         try:
+            current_time = time.time()
+            if current_time - self.last_screen_signature_poll_time < self.screen_signature_poll_interval:
+                return
+            self.last_screen_signature_poll_time = current_time
+
             if not self.window_handle or not win32gui.IsWindow(self.window_handle):
                 if not self.find_cti_window():
-                    self.last_screen_signature = None
                     return
 
-            signature = self._get_screen_signature()
-            if signature is None:
+            values = self._get_customer_values()
+            if values is None:
                 return
 
-            if self.last_screen_signature is None:
-                self.last_screen_signature = signature
-                return
-
-            if signature == self.last_screen_signature:
-                return
-
-            current_time = time.time()
-            self.last_screen_signature = signature
-            if current_time - self.last_screen_change_time < self.screen_change_cooldown:
-                logging.debug("CTI画面切り替わり検出をクールダウン中のためスキップします")
-                return
-
-            self.last_screen_change_time = current_time
-            logging.info("CTI画面の表示内容切り替わりを検出しました")
-            self.on_screen_changed_callback()
+            self.on_screen_changed_callback(*values)
         except Exception as e:
             logging.error(f"CTI画面切り替わり検出中にエラーが発生: {str(e)}")
             

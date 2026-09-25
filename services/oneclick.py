@@ -509,6 +509,7 @@ class OneClickService:
                 customer_field = self.find_field_near_label(customer_label_hwnd)
                 if customer_field and customer_field['text']:
                     data.customer_name = customer_field['text']
+                    self.field_info['customer_name'] = customer_field['hwnd']
                     logging.info(f"顧客名フィールドを直接検出: '{customer_field['text']}', "
                                f"handle={customer_field['hwnd']}, class='{customer_field['class']}', "
                                f"client_rect={customer_field['client_rect']}")
@@ -517,6 +518,7 @@ class OneClickService:
                     right_field = self._find_right_field_with_text(customer_field, controls)
                     if right_field and right_field.get('text'):
                         data.customer_name = right_field['text']
+                        self.field_info['customer_name'] = right_field['hwnd']
                         logging.info(
                             f"顧客名フィールド(右隣)を検出: '{right_field['text']}', "
                             f"handle={right_field['hwnd']}, class='{right_field['class']}', "
@@ -527,6 +529,7 @@ class OneClickService:
                     right_field = self._find_right_field_with_text(customer_field, controls)
                     if right_field and right_field.get('text'):
                         data.customer_name = right_field['text']
+                        self.field_info['customer_name'] = right_field['hwnd']
                         logging.info(
                             f"顧客名フィールド(右隣)を検出: '{right_field['text']}', "
                             f"handle={right_field['hwnd']}, class='{right_field['class']}', "
@@ -545,6 +548,8 @@ class OneClickService:
                         if attr_name == "list_name" and data.list_name:
                             continue
                         setattr(data, attr_name, value)
+                        if attr_name in ("customer_name", "address"):
+                            self.field_info[attr_name] = value_handle
                         logging.info(f"{label}の値を取得: {value}")
                     else:
                         logging.warning(f"{label}のフィールドが見つかりません")
@@ -709,6 +714,7 @@ class OneClickService:
             # 最適な住所フィールドが見つかった場合
             if best_field:
                 data.address = best_field['text']
+                self.field_info['address'] = best_field['hwnd']
                 logging.info(f"住所ラベルの近くで住所フィールドを検出: '{best_field['text']}', "
                            f"handle={best_field['hwnd']}, client_rect={best_field['client_rect']}")
         
@@ -737,6 +743,7 @@ class OneClickService:
                     not re.search(r'対応者|工事希望日|料金', text)):  # 営業メモの特徴的な文字列を含まない
                     
                     data.address = text
+                    self.field_info['address'] = control['hwnd']
                     logging.info(f"住所フィールドの特徴から検出: '{text}', "
                                f"handle={control['hwnd']}, client_rect={client_rect}")
                     break
@@ -861,6 +868,7 @@ class OneClickService:
                 customer_field = self.find_field_near_label(customer_label_hwnd)
                 if customer_field and customer_field['text']:
                     data.customer_name = customer_field['text']
+                    self.field_info['customer_name'] = customer_field['hwnd']
                     logging.info(f"顧客名フィールドを直接検出: '{customer_field['text']}', "
                                f"handle={customer_field['hwnd']}, class='{customer_field['class']}', "
                                f"client_rect={customer_field['client_rect']}")
@@ -875,6 +883,31 @@ class OneClickService:
         logging.info(f"リスト: {data.list_name}")
         
         return data
+
+    def get_monitored_customer_values(self):
+        """顧客名・住所の取得元コントロールから現在値だけを読み取る。"""
+        if not self.window_handle or not win32gui.IsWindow(self.window_handle):
+            self.field_info.clear()
+            if not self.find_cti_window():
+                return None
+
+        customer_handle = self.field_info.get('customer_name')
+        address_handle = self.field_info.get('address')
+        handles_valid = (
+            customer_handle and win32gui.IsWindow(customer_handle)
+            and address_handle and win32gui.IsWindow(address_handle)
+        )
+
+        if not handles_valid:
+            data = self.get_all_fields_data()
+            if data is None:
+                return None
+            return data.customer_name or "", data.address or ""
+
+        return (
+            self.get_control_text(customer_handle).strip(),
+            self.get_control_text(address_handle).strip(),
+        )
 
     def find_label_by_text(self, label_text):
         """
