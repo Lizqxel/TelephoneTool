@@ -17,14 +17,14 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import json
 import sys
 from pathlib import Path
 import logging
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit,
-    QComboBox, QDateEdit, QTimeEdit, QPushButton, QCheckBox, QListWidget,
+    QComboBox, QDateEdit, QPushButton, QCheckBox, QListWidget,
     QListWidgetItem
 )
 from PySide6.QtCore import Qt, QDate, QTime
@@ -218,7 +218,7 @@ class SpreadsheetPostDialog(QDialog):
                 except Exception as _se:
                     # フォールバック: 直接JSONを読みマージ後に再書き込み
                     try:
-                        import json as _json, os as _os
+                        import json as _json
                         from pathlib import Path as _Path
                         # settings探索候補と同様の扱い: dialog自身の __file__ からルートへ
                         here = _Path(__file__).resolve().parents[1]

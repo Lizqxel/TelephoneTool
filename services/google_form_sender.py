@@ -31,7 +31,6 @@ from typing import Dict, Any, Optional, Tuple
 
 import requests
 
-from utils.settings import settings
 
 
 class GoogleFormSender:

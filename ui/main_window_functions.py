@@ -11,14 +11,12 @@ import json
 import os
 import re
 import threading
-from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QProgressBar, QListView, QDialog, QVBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt, QEventLoop
+from PySide6.QtWidgets import QMessageBox, QApplication, QWidget, QListView, QDialog, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import QThread, Signal, Qt, QEventLoop
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QMessageBox, QApplication
 
 from ui.settings_dialog import SettingsDialog
 from services import area_search
-from services import oneclick
 from services.mapfan_service import MapfanService
 from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
                                format_postal_code, convert_to_half_width)
@@ -272,28 +270,6 @@ class MainWindowFunctions:
 
         return result["url"]
 
-    def _insert_call_preference_line(self, formatted_text, call_preference_text):
-        lines = formatted_text.splitlines()
-
-        # 既に「★架電希望」行がある場合は重複挿入しない
-        for line in lines:
-            if line.strip().startswith("★架電希望"):
-                return formatted_text
-
-        inserted = False
-        call_line = f"★架電希望：{call_preference_text}"
-
-        for i, line in enumerate(lines):
-            if line.strip().startswith("★出やすい時間帯"):
-                lines.insert(i + 1, call_line)
-                inserted = True
-                break
-
-        if not inserted:
-            lines.insert(1, call_line)
-
-        return "\n".join(lines)
-    
     def load_settings(self):
         """設定ファイルから設定を読み込む"""
         try:
@@ -1186,66 +1162,6 @@ ND：{nd}
                     widget.update()
             logging.info("設定を更新しました")
     
-    def toggle_mobile_input(self, text):
-        """携帯電話番号入力フィールドの有効/無効を切り替え - 現在は使用しない"""
-        # 携帯電話番号入力エリアの削除に伴い、このメソッドは使用しません
-        pass
-    
-    def toggle_clipboard_monitor(self):
-        """クリップボード監視の開始/停止を切り替え"""
-        if self.clipboard_toggle_btn.isChecked():
-            self.clipboard_timer.start(1000)  # 1秒ごとにチェック
-            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を開始しました。\n他のアプリからコピーした情報を自動で取得します。")
-        else:
-            self.clipboard_timer.stop()
-            QMessageBox.information(self, "クリップボード監視", "クリップボード監視を停止しました。")
-    
-    def check_clipboard(self):
-        """クリップボードの内容をチェック"""
-        text = self.clipboard.text()
-        if text and text != self.last_clipboard_text:
-            self.last_clipboard_text = text
-            self.analyze_clipboard_content(text)
-    
-    def analyze_clipboard_content(self, text):
-        """クリップボードの内容を解析して適切なフィールドに入力"""
-        # 電話番号（ハイフンあり/なし）のパターン
-        phone_pattern = re.compile(r'(\d{2,4}[-\s]?\d{2,4}[-\s]?\d{4})')
-        phone_matches = phone_pattern.finditer(text)
-        
-        # 郵便番号（ハイフンあり/なし）のパターン
-        postal_pattern = re.compile(r'(\d{3}[-\s]?\d{4})')
-        postal_match = postal_pattern.search(text)
-        
-        # 電話番号の処理
-        for match in phone_matches:
-            phone_number = match.group(1)
-            # 一般電話番号として扱う
-            self.list_phone_input.setText(phone_number)
-        
-        # 郵便番号の処理
-        if postal_match:
-            postal_code = postal_match.group(1)
-            self.postal_code_input.setText(postal_code)
-            self.list_postal_code_input.setText(postal_code)
-        
-        # 住所らしき文字列（漢字とカタカナが含まれる長い文字列）
-        if len(text) > 10 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            self.address_input.setText(text)
-            self.list_address_input.setText(text)
-        
-        # カタカナのみの文字列（フリガナとして扱う）
-        if all(ord(c) >= 0x30A0 and ord(c) <= 0x30FF or c.isspace() for c in text):
-            # 既にユーザー入力がある場合は上書きしない
-            if not self.list_furigana_input.text().strip():
-                self.list_furigana_input.setText(text)
-        
-        # その他の文字列（名前として扱う）
-        if len(text) <= 20 and any(ord(c) >= 0x4E00 and ord(c) <= 0x9FFF for c in text):
-            # 既にユーザー入力がある場合は上書きしない
-            if not self.list_name_input.text().strip():
-                self.list_name_input.setText(text)
-    
     def search_service_area(self):
         """提供エリア検索を実行"""
         try:
@@ -1756,27 +1672,6 @@ ND：{nd}
         except Exception as e:
             logging.error(f"住所フリガナ自動生成エラー: {str(e)}")
             
-    def auto_generate_list_address_furigana(self):
-        """リスト住所からフリガナを自動生成する"""
-        # 自動モードの場合のみ処理
-        if self.list_address_furigana_mode_combo.currentText() != "自動":
-            return
-            
-        # リスト住所が空の場合は何もしない
-        address = self.list_address_input.text()
-        if not address:
-            return
-            
-        try:
-            # フリガナ変換APIを使用
-            furigana = convert_to_furigana(address)
-            if furigana:
-                # 自動モードでは常に最新の変換結果で更新する
-                self.list_address_furigana_input.setText(furigana)
-                logging.info(f"リスト住所フリガナを自動生成しました: {address} → {furigana}")
-        except Exception as e:
-            logging.error(f"リスト住所フリガナ自動生成エラー: {str(e)}")
-    
     def generate_preview_text(self):
         """プレビューテキストを生成する"""
         try:

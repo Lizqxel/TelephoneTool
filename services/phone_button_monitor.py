@@ -18,7 +18,6 @@ import logging
 from typing import Optional, Callable, List, Tuple
 import time
 import threading
-from ctypes import windll, CFUNCTYPE, POINTER, c_int, c_void_p, byref, Structure, c_long, c_ulong, c_uint, c_ulonglong
 import json
 import os
 
@@ -253,12 +252,6 @@ class PhoneButtonMonitor:
         self.monitor_thread.start()
         
         logging.info("電話ボタン監視を開始しました")
-
-    def pause_monitoring(self):
-        """監視を一時停止（2秒間）"""
-        self.is_paused = True
-        self.pause_end_time = time.time() + self.pause_duration
-        logging.info(f"電話ボタン監視を{self.pause_duration}秒間一時停止します")
 
     def _check_pause_status(self) -> bool:
         """

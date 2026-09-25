@@ -7,10 +7,9 @@ CTIメインウィンドウから情報を取得し、
 
 import win32gui
 import win32con
-import win32api
 import logging
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional
 import ctypes
 import re
 
@@ -82,31 +81,6 @@ class OneClickService:
                 closest_field = control
 
         return closest_field
-
-    def is_edit_control(self, hwnd):
-        """
-        コントロールが編集可能なテキストボックスかどうかを判定
-        
-        Args:
-            hwnd: ウィンドウハンドル
-            
-        Returns:
-            bool: 編集可能なテキストボックスの場合True
-        """
-        try:
-            class_name = win32gui.GetClassName(hwnd)
-            if not class_name.startswith("WindowsForms10."):
-                return False
-                
-            # スタイルを取得
-            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
-            
-            # 編集可能なテキストボックスの条件をチェック
-            return ("EDIT" in class_name or "TextBox" in class_name) and not (style & win32con.ES_READONLY)
-            
-        except Exception as e:
-            logging.warning(f"コントロールチェック中にエラー: {e}")
-            return False
 
     def find_closest_textbox(self, label_hwnd, controls):
         """
@@ -627,78 +601,6 @@ class OneClickService:
         logging.info(f"すべてのコントロールを {len(all_controls)} 個検出")
         return all_controls
 
-    def find_list_name(self, controls):
-        """
-        リスト名を検出する特別な方法
-        
-        Args:
-            controls: コントロールのリスト
-            
-        Returns:
-            str: 検出されたリスト名
-        """
-        # リスト名の候補を格納する配列
-        list_candidates = []
-        
-        # リスト名の特徴的なキーワード
-        list_keywords = ["NP光", "在宅", "アナログ", "リスト", "西日本", "202410"]
-        
-        # すべてのコントロールを検索
-        for control in controls:
-            text = control['text']
-            if text:
-                # リスト名の特徴的なキーワードを含むテキストを検出
-                for keyword in list_keywords:
-                    if keyword in text:
-                        # 特に「【NP光在宅】」を含むテキストを優先
-                        if "【NP光在宅】" in text:
-                            logging.info(f"最適なリスト名を直接検出: '{text}', handle={control['hwnd']}, "
-                                       f"class='{control['class']}', client_rect={control['client_rect']}")
-                            return text
-                        
-                        list_candidates.append(text)
-                        logging.info(f"リスト名候補を検出: '{text}', handle={control['hwnd']}, "
-                                   f"class='{control['class']}', client_rect={control['client_rect']}")
-                        break
-        
-        # リスト名の候補から最適なものを選択
-        if list_candidates:
-            # 最も長いテキストを選択（より詳細な情報を含む可能性が高い）
-            best_candidate = max(list_candidates, key=len)
-            logging.info(f"最適なリスト名を選択: '{best_candidate}'")
-            return best_candidate
-        
-        # リストラベルの近くにあるテキストを探す
-        list_label_hwnd = None
-        
-        def find_list_label(hwnd, _):
-            nonlocal list_label_hwnd
-            if win32gui.IsWindowVisible(hwnd):
-                class_name = win32gui.GetClassName(hwnd)
-                if "STATIC" in class_name or "Label" in class_name:
-                    text = self.get_control_text(hwnd)
-                    if text == "リスト":
-                        list_label_hwnd = hwnd
-                        return False
-            return True
-        
-        win32gui.EnumChildWindows(self.window_handle, find_list_label, None)
-        
-        if list_label_hwnd:
-            label_rect = win32gui.GetWindowRect(list_label_hwnd)
-            
-            # リストラベルの近くにあるテキストを持つコントロールを探す
-            for control in controls:
-                control_rect = control['rect']
-                # リストラベルの右側にあるコントロール
-                if (control_rect[0] > label_rect[2] and 
-                    abs(control_rect[1] - label_rect[1]) < 50 and
-                    control['text']):
-                    logging.info(f"リストラベルの近くでテキストを検出: '{control['text']}'")
-                    return control['text']
-        
-        return ""
-
     def detect_fields_by_position(self, controls):
         """
         画面上の位置情報を使用してフィールドを検出する
@@ -1089,88 +991,3 @@ class OneClickService:
         
         return closest_field
 
-    def get_richedit_text(self, hwnd) -> str:
-        """
-        RICHEDITコントロールのテキストを取得する特別な方法
-        
-        Args:
-            hwnd: ウィンドウハンドル
-            
-        Returns:
-            str: コントロールのテキスト
-        """
-        try:
-            # 通常の方法でテキストを取得
-            text = self.get_control_text(hwnd)
-            if text:
-                return text
-            
-            # RICHEDITコントロールの場合、EM_GETTEXT/EM_GETTEXTLENGTHメッセージを使用
-            EM_GETTEXTLENGTH = 0x000E
-            EM_GETTEXT = 0x000D
-            
-            # テキストの長さを取得
-            length = ctypes.windll.user32.SendMessageW(hwnd, EM_GETTEXTLENGTH, 0, 0)
-            if length > 0:
-                # バッファを確保してテキストを取得
-                buffer = ctypes.create_unicode_buffer(length + 1)
-                ctypes.windll.user32.SendMessageW(hwnd, EM_GETTEXT, length + 1, buffer)
-                return buffer.value
-            
-            # 親ウィンドウを取得して子コントロールを探す
-            parent = win32gui.GetParent(hwnd)
-            if parent:
-                # 親ウィンドウの子コントロールを列挙
-                child_texts = []
-                
-                def enum_child_callback(child_hwnd, _):
-                    if child_hwnd != hwnd and "RICHEDIT" in win32gui.GetClassName(child_hwnd):
-                        child_text = self.get_control_text(child_hwnd)
-                        if child_text:
-                            child_texts.append(child_text)
-                    return True
-                
-                win32gui.EnumChildWindows(parent, enum_child_callback, None)
-                
-                # 子コントロールのテキストを結合
-                if child_texts:
-                    return " ".join(child_texts)
-            
-            # リストラベルの近くにあるテキストを探す
-            list_label_hwnd = None
-            
-            def find_list_label(hwnd, _):
-                nonlocal list_label_hwnd
-                if win32gui.IsWindowVisible(hwnd):
-                    class_name = win32gui.GetClassName(hwnd)
-                    if "STATIC" in class_name or "Label" in class_name:
-                        text = self.get_control_text(hwnd)
-                        if text == "リスト":
-                            list_label_hwnd = hwnd
-                            return False
-                return True
-            
-            win32gui.EnumChildWindows(self.window_handle, find_list_label, None)
-            
-            if list_label_hwnd:
-                label_rect = win32gui.GetWindowRect(list_label_hwnd)
-                
-                # リストラベルの近くにあるテキストを持つコントロールを探す
-                for control in self.find_edit_controls():
-                    control_rect = control['rect']
-                    # リストラベルの右側にあるコントロール
-                    if (control_rect[0] > label_rect[2] and 
-                        abs(control_rect[1] - label_rect[1]) < 50 and
-                        control['text']):
-                        return control['text']
-            
-            # すべてのコントロールを検索して、リスト名らしきテキストを探す
-            for control in self.find_edit_controls():
-                if control['text'] and any(keyword in control['text'] for keyword in ["リスト", "NP光", "在宅", "アナログ"]):
-                    return control['text']
-            
-            return ""
-            
-        except Exception as e:
-            logging.error(f"RICHEDITテキスト取得エラー: handle={hwnd}, error={str(e)}")
-            return ""

@@ -8,7 +8,6 @@ WebDriverの作成と管理を行うモジュール
 import logging
 import json
 import os
-import time
 import sys
 import re
 import subprocess
@@ -16,8 +15,6 @@ from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 
 
 def _resolve_chromedriver_executable(installed_path: str) -> str:

@@ -25,16 +25,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
-from bs4 import BeautifulSoup
 from datetime import datetime
 
-from services.web_driver import create_driver, load_browser_settings
 from utils.string_utils import normalize_string, calculate_similarity
-from utils.address_utils import normalize_address
-from services.area_search import take_full_page_screenshot, check_cancellation, CancellationError
+from services.area_search import CancellationError
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
@@ -664,55 +659,6 @@ def search_service_area(postal_code, address, progress_callback=None):
         # ブラウザはUI側のタイミングで終了する
         if driver:
             global_driver = driver
-
-def find_input_element(driver, attempt_count=0):
-    """
-    番地入力フォームを見つけるためのヘルパー関数
-    
-    Args:
-        driver: WebDriverインスタンス
-        attempt_count: 試行回数
-        
-    Returns:
-        element: 見つかった要素、見つからない場合はNone
-    """
-    try:
-        # iframeの確認
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        if iframes:
-            for iframe in iframes:
-                try:
-                    driver.switch_to.frame(iframe)
-                    element = driver.find_element(By.NAME, "banchi1to3manualAddressNum1")
-                    if element.is_displayed():
-                        return element
-                except:
-                    pass
-                finally:
-                    driver.switch_to.default_content()
-        
-        # 複数の方法で要素を探す
-        selectors = [
-            (By.NAME, "banchi1to3manualAddressNum1"),
-            (By.ID, "id_banchi1to3manualAddressNum1"),
-            (By.CSS_SELECTOR, "input[name='banchi1to3manualAddressNum1']"),
-            (By.CSS_SELECTOR, "input[type='tel'][name='banchi1to3manualAddressNum1']"),
-            (By.XPATH, "//input[@name='banchi1to3manualAddressNum1']"),
-            (By.XPATH, "//div[contains(@class, '_input')]//input[1]")
-        ]
-        
-        for by, selector in selectors:
-            try:
-                element = driver.find_element(by, selector)
-                if element.is_displayed():
-                    return element
-            except:
-                continue
-        
-        return None
-    except Exception as e:
-        logging.warning(f"要素検索中にエラー: {str(e)}")
-        return None
 
 def debug_page_state(driver, context=""):
     """

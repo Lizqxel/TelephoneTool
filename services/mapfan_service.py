@@ -435,212 +435,6 @@ class MapfanService:
             time.sleep(0.2)
         return None
 
-    def _submit_search_via_js(self, driver: WebDriver, address: str) -> bool:
-        """初期画面の上部入力欄へJSで直接入力し、検索ボタンを押下する"""
-        try:
-            result = driver.execute_script(
-                "const keyword = arguments[0];"
-                "const inputs = Array.from(document.querySelectorAll('input[type=\"text\"], input[type=\"search\"]'));"
-                "let target = null;"
-                "let bestScore = -1;"
-                "for (const el of inputs) {"
-                "  const rect = el.getBoundingClientRect();"
-                "  const style = window.getComputedStyle(el);"
-                "  const visible = rect.width > 220 && rect.height > 18 && rect.top >= 0 && rect.top < 220 && style.display !== 'none' && style.visibility !== 'hidden';"
-                "  if (!visible || el.disabled) continue;"
-                "  const ph = (el.getAttribute('placeholder') || '');"
-                "  let score = rect.width;"
-                "  if ((el.getAttribute('type') || '') === 'search') score += 200;"
-                "  if (ph.includes('スポット') || ph.includes('住所')) score += 800;"
-                "  if (score > bestScore) { bestScore = score; target = el; }"
-                "}"
-                "if (!target) return {ok:false, reason:'input_not_found'};"
-                "const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;"
-                "setter.call(target, keyword);"
-                "target.dispatchEvent(new Event('input', {bubbles:true}));"
-                "target.dispatchEvent(new Event('change', {bubbles:true}));"
-                "const val = (target.value || '').trim();"
-                "if (!val) return {ok:false, reason:'value_not_set'};"
-                "const inputRect = target.getBoundingClientRect();"
-                "const candidates = Array.from(document.querySelectorAll('button, a, [role=\"button\"]'));"
-                "let btn = null;"
-                "let best = Infinity;"
-                "for (const c of candidates) {"
-                "  const r = c.getBoundingClientRect();"
-                "  const s = window.getComputedStyle(c);"
-                "  if (r.width < 14 || r.height < 14) continue;"
-                "  if (s.display === 'none' || s.visibility === 'hidden') continue;"
-                "  if (r.top > inputRect.bottom + 60 || r.bottom < inputRect.top - 60) continue;"
-                "  if (r.left < inputRect.right - 20) continue;"
-                "  const dx = r.left - inputRect.right;"
-                "  const dy = Math.abs((r.top + r.height/2) - (inputRect.top + inputRect.height/2));"
-                "  const dist = Math.max(0, dx) + dy * 2;"
-                "  if (dist < best) { best = dist; btn = c; }"
-                "}"
-                "if (btn) { btn.click(); return {ok:true, mode:'button', value:val}; }"
-                "target.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', bubbles:true}));"
-                "target.dispatchEvent(new KeyboardEvent('keyup', {key:'Enter', code:'Enter', bubbles:true}));"
-                "return {ok:true, mode:'enter', value:val};",
-                address
-            )
-
-            if result and result.get("ok"):
-                logging.info(f"JS検索入力成功: value='{result.get('value')}', mode={result.get('mode')}")
-                return True
-
-            logging.info(f"JS検索入力は未完了: {result}")
-            return False
-        except Exception as e:
-            logging.info(f"JS入力検索ルートで例外: {e}")
-            return False
-
-    def _wait_initial_global_input(self, driver: WebDriver, timeout: int = 8):
-        end_time = time.time() + timeout
-        while time.time() < end_time:
-            element = self._find_initial_global_input(driver)
-            if element is not None:
-                logging.info("初期画面候補探索(Python)で入力欄を検出しました")
-                return element
-            time.sleep(0.3)
-        return None
-
-    def _find_initial_input_direct(self, driver: WebDriver):
-        """初期画面で見えている上部入力欄をSeleniumで直接取得"""
-        try:
-            # 初期画面では type=text の入力欄が主検索欄として現れる
-            candidates = driver.find_elements(By.XPATH, "//input[@type='text']")
-            if not candidates:
-                candidates = driver.find_elements(By.XPATH, "//input[@type='search']")
-            best = None
-            best_score = -1
-            for element in candidates:
-                try:
-                    if not element.is_displayed() or not element.is_enabled():
-                        continue
-                    loc = element.location
-                    size = element.size
-                    width = int(size.get('width', 0))
-                    height = int(size.get('height', 0))
-                    top = int(loc.get('y', 9999))
-                    if top > 260 or width < 220 or height < 18:
-                        continue
-                    score = width
-                    input_type = (element.get_attribute('type') or '').strip()
-                    if input_type == 'search':
-                        score += 200
-                    placeholder = (element.get_attribute('placeholder') or '').strip()
-                    if 'スポット' in placeholder or '住所' in placeholder:
-                        score += 800
-                    if score > best_score:
-                        best = element
-                        best_score = score
-                except Exception:
-                    continue
-            if best is not None:
-                self._log_element_summary(best, "初期画面入力欄(直接)を採用")
-                logging.info(f"初期画面入力欄候補を採用: score={best_score}")
-            return best
-        except Exception:
-            return None
-
-    def _find_initial_global_input(self, driver: WebDriver):
-        try:
-            candidates = driver.find_elements(By.XPATH, "//input[@type='text' or @type='search']")
-            best = None
-            best_score = -1
-
-            for element in candidates:
-                try:
-                    if not element.is_displayed() or not element.is_enabled():
-                        continue
-
-                    location = element.location
-                    size = element.size
-                    width = size.get('width', 0)
-                    height = size.get('height', 0)
-                    y_pos = location.get('y', 9999)
-
-                    # 初期画面上部の広い検索欄を優先
-                    if y_pos > 220 or width < 220 or height < 18:
-                        continue
-
-                    placeholder = (element.get_attribute("placeholder") or "").strip()
-                    input_type = (element.get_attribute("type") or "").strip()
-
-                    score = width
-                    if input_type == 'search':
-                        score += 200
-                    if 'スポット' in placeholder or '住所' in placeholder:
-                        score += 800
-
-                    if score > best_score:
-                        best_score = score
-                        best = element
-                except Exception:
-                    continue
-
-            if best is not None:
-                self._log_element_summary(best, "初期画面候補から使用要素を決定")
-            return best
-        except Exception:
-            return None
-
-    def _find_initial_global_input_js(self, driver: WebDriver):
-        """JSで初期画面の上部入力欄を幾何情報から特定"""
-        try:
-            element = driver.execute_script(
-                "const inputs = Array.from(document.querySelectorAll('input[type=\"text\"], input[type=\"search\"]'));"
-                "let best = null;"
-                "let bestScore = -1;"
-                "for (const el of inputs) {"
-                "  const rect = el.getBoundingClientRect();"
-                "  const style = window.getComputedStyle(el);"
-                "  const visible = rect.width > 220 && rect.height > 18 && rect.top >= 0 && rect.top < 220 && style.display !== 'none' && style.visibility !== 'hidden';"
-                "  if (!visible || el.disabled) continue;"
-                "  const ph = (el.getAttribute('placeholder') || '');"
-                "  let score = rect.width;"
-                "  if ((el.getAttribute('type') || '') === 'search') score += 200;"
-                "  if (ph.includes('スポット') || ph.includes('住所')) score += 800;"
-                "  if (score > bestScore) { bestScore = score; best = el; }"
-                "}"
-                "return best;"
-            )
-            if element is not None:
-                self._log_element_summary(element, "初期画面候補(JS)から使用要素を決定")
-            return element
-        except Exception as e:
-            logging.info(f"初期画面入力欄のJS探索に失敗: {e}")
-            return None
-
-    def _find_top_search_input(self, driver: WebDriver):
-        """上部の住所検索ボックスを優先的に取得"""
-        try:
-            element = driver.execute_script(
-                "const inputs = Array.from(document.querySelectorAll('input[type=\"search\"], input[type=\"text\"]'));"
-                "let best = null;"
-                "let bestScore = -1;"
-                "for (const el of inputs) {"
-                "  const rect = el.getBoundingClientRect();"
-                "  const style = window.getComputedStyle(el);"
-                "  const visible = rect.width > 180 && rect.height > 18 && rect.top >= 0 && rect.top < 240 && style.display !== 'none' && style.visibility !== 'hidden';"
-                "  if (!visible || el.disabled) continue;"
-                "  const ph = (el.getAttribute('placeholder') || '');"
-                "  let score = rect.width;"
-                "  if ((el.getAttribute('type') || '') === 'search') score += 100;"
-                "  if (ph.includes('スポット') || ph.includes('住所') || ph.includes('検索')) score += 500;"
-                "  if (score > bestScore) { bestScore = score; best = el; }"
-                "}"
-                "return best;"
-            )
-
-            if element is not None:
-                self._log_element_summary(element, "上部検索欄候補から使用要素を決定しました")
-                return element
-            logging.info("上部検索欄候補が見つかりませんでした")
-        except Exception:
-            pass
-        return None
-
     def _log_search_inputs(self, driver: WebDriver, phase: str) -> None:
         if not self.detailed_logging:
             return
@@ -745,26 +539,6 @@ class MapfanService:
 
         return self._find_first_clickable(driver, self.SEARCH_BUTTON_LOCATORS, wait, timeout_per_locator=1)
 
-    def _find_neighbor_search_button(self, driver: WebDriver, search_input):
-        """検索入力欄の隣接アイコン/ボタンを取得"""
-        try:
-            neighbor = driver.execute_script(
-                "const input = arguments[0];"
-                "const root = input.parentElement || document;"
-                "let btn = root.querySelector('button, a[role=\"button\"], a');"
-                "if (!btn) {"
-                "  const parent = input.closest('form, header, div') || document;"
-                "  btn = parent.querySelector('button, a[role=\"button\"], a');"
-                "}"
-                "return btn;",
-                search_input
-            )
-            if neighbor is not None:
-                return neighbor
-        except Exception:
-            pass
-        return None
-
     def _click_left_panel_info_button(self, driver: WebDriver, address: str) -> bool:
         """左パネル検索結果のiボタンを優先クリックする"""
         try:
@@ -868,9 +642,6 @@ class MapfanService:
             time.sleep(0.15)
         raise TimeoutException("MapFan検索結果の表示を確認できませんでした")
 
-    def _enter_map_view_if_needed(self, driver: WebDriver) -> None:
-        return
-
     def _dismiss_blocking_overlay(self, driver: WebDriver) -> None:
         try:
             overlays = driver.find_elements(By.CSS_SELECTOR, "div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing")
@@ -962,16 +733,6 @@ class MapfanService:
                 continue
         return None
 
-    def _find_first_present(self, driver: WebDriver, locators: List[Tuple[str, str]]):
-        for by, selector in locators:
-            try:
-                elements = driver.find_elements(by, selector)
-                if elements:
-                    return elements[0]
-            except Exception:
-                continue
-        return None
-
     def _safe_click(self, driver: WebDriver, element) -> None:
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
         try:
@@ -989,18 +750,3 @@ class MapfanService:
         ActionChains(driver).move_to_element(element).click().perform()
 
 
-def get_mapfan_detail_url(
-    address: str,
-    debug: bool = True,
-    auto_close: Optional[bool] = None,
-    force_headless: Optional[bool] = None,
-    cancel_event: Optional[threading.Event] = None
-) -> Optional[str]:
-    """MapFan詳細URL取得の簡易エントリーポイント"""
-    service = MapfanService(debug=debug)
-    return service.get_detail_url_from_address(
-        address=address,
-        auto_close=auto_close,
-        force_headless=force_headless,
-        cancel_event=cancel_event
-    )

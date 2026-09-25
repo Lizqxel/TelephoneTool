@@ -928,50 +928,6 @@ ND：{nd}
         if self.save_settings():
             super().accept()
     
-    def get_settings(self):
-        """現在の設定を取得する"""
-        browser_settings = {
-            "headless": self.headless_checkbox.isChecked(),
-            "mapfan_headless": True,
-            "mapfan_direct_url": True,
-            "disable_images": self.disable_images_checkbox.isChecked(),
-            "enable_screenshots": self.screenshots_checkbox.isChecked(),
-            "show_popup": self.popup_checkbox.isChecked(),
-            "auto_close": self.auto_close_checkbox.isChecked(),
-            "page_load_timeout": self.page_timeout_spin.value(),
-            "script_timeout": self.script_timeout_spin.value()
-        }
-        
-        # 選択されたモードを取得
-        if self.corporate_mode_radio.isChecked():
-            mode = 'corporate'
-        else:
-            mode = 'simple'
-        
-        auto_copy = self.corporate_auto_copy_checkbox.isChecked()
-        self.mode_templates[mode] = self.format_edit.toPlainText()
-        return {
-            'format_template': self.mode_templates.get(mode, self.default_format),
-            'format_template_simple': self.mode_templates.get('simple', self.default_format_simple),
-            'format_template_corporate': self.mode_templates.get('corporate', self.default_format_corporate),
-            'font_size': self.font_size_slider.value(),
-            'delay_seconds': self.delay_spin.value(),
-            'browser_settings': browser_settings,
-            'mode': mode,
-            'show_mode_selection': False,  # モード選択ダイアログを次回から表示しない
-            'corporate_settings': {
-                'allow_manual_contractor': not auto_copy,
-                'auto_copy_operator_to_contractor': auto_copy
-            },
-            # CTI監視設定を追加
-            'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
-            'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
-            'refresh_address_from_cti_before_area_search': self.cti_refresh_before_area_search_checkbox.isChecked(),
-            'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
-            'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
-            'call_duration_threshold': self.call_duration_spin.value()
-        } 
-
     # ===== 転記先（destinations）編集機能 =====
     def _populate_dest_table(self, dests):
         try:
