@@ -392,7 +392,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
                     on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                     on_call_ended_callback=self.on_cti_call_ended,
                     on_talking_started_callback=self.on_cti_talking_started,
-                    on_cancel_processing_callback=self.on_cancel_processing_request
+                    on_cancel_processing_callback=self.on_cancel_processing_request,
+                    on_screen_changed_callback=self.on_cti_screen_changed
                 )
                 self.cti_status_monitor.start_monitoring()
                 logging.info("CTI状態監視を開始しました")
@@ -945,7 +946,8 @@ ND：{nd}
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
             on_call_ended_callback=self.on_cti_call_ended,
             on_talking_started_callback=self.on_cti_talking_started,
-            on_cancel_processing_callback=self.on_cancel_processing_request
+            on_cancel_processing_callback=self.on_cancel_processing_request,
+            on_screen_changed_callback=self.on_cti_screen_changed
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -1064,7 +1066,8 @@ ND：{nd}
             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
             on_call_ended_callback=self.on_cti_call_ended,
             on_talking_started_callback=self.on_cti_talking_started,
-            on_cancel_processing_callback=self.on_cancel_processing_request
+            on_cancel_processing_callback=self.on_cancel_processing_request,
+            on_screen_changed_callback=self.on_cti_screen_changed
         )
         self.cti_status_monitor.start_monitoring()
         
@@ -2786,7 +2789,8 @@ ND：{nd}
                             on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
                             on_call_ended_callback=self.on_cti_call_ended,
                             on_talking_started_callback=self.on_cti_talking_started,
-                            on_cancel_processing_callback=self.on_cancel_processing_request
+                            on_cancel_processing_callback=self.on_cancel_processing_request,
+                            on_screen_changed_callback=self.on_cti_screen_changed
                         )
                         self.cti_status_monitor.start_monitoring()
                         logging.info("CTI状態監視を開始しました")
@@ -4523,6 +4527,27 @@ ND：{nd}
         else:
             self.other_number_text_widget.hide()
             self.other_number_text_input.clear()
+
+    def on_cti_screen_changed(self):
+        """CTIメイン画面の表示内容が切り替わった時に顧客情報を取得"""
+        try:
+            import time
+            current_time = time.time()
+
+            if hasattr(self, 'is_auto_processing') and self.is_auto_processing:
+                logging.info("CTI自動処理中のため、画面切替による顧客情報取得をスキップします")
+                return
+
+            last_time = getattr(self, 'last_cti_screen_fetch_time', 0)
+            if current_time - last_time < 1.0:
+                logging.info("CTI画面切替による顧客情報取得を短時間の重複としてスキップします")
+                return
+
+            self.last_cti_screen_fetch_time = current_time
+            logging.info("CTI画面切替による顧客情報取得を開始します")
+            self.fetch_cti_data()
+        except Exception as e:
+            logging.error(f"CTI画面切替時の顧客情報取得中にエラーが発生: {str(e)}")
 
     def on_cti_dialing_to_talking(self):
         """

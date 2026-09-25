@@ -114,6 +114,7 @@ def _default_settings() -> Dict[str, Any]:
         "show_mode_selection": False,
         "enable_cti_monitoring": True,
         "enable_auto_cti_processing": True,
+        "enable_cti_screen_change_fetch": True,
         "cti_monitor_interval": 0.5,
         "cti_auto_processing_cooldown": 3.0,
         "call_duration_threshold": 0

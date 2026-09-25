@@ -322,12 +322,19 @@ ND：{nd}
         if hasattr(parent, 'settings'):
             current_auto_processing = parent.settings.get('enable_auto_cti_processing', True)
             current_refresh_before_area_search = parent.settings.get('refresh_address_from_cti_before_area_search', True)
+            current_screen_change_fetch = parent.settings.get('enable_cti_screen_change_fetch', True)
         else:
             current_auto_processing = True
             current_refresh_before_area_search = True
+            current_screen_change_fetch = True
             
         self.cti_auto_processing_checkbox.setChecked(current_auto_processing)
         cti_monitor_layout.addWidget(self.cti_auto_processing_checkbox)
+
+        self.cti_screen_change_fetch_checkbox = QCheckBox("CTI画面切替時に顧客情報取得を実行する")
+        self.cti_screen_change_fetch_checkbox.setChecked(current_screen_change_fetch)
+        self.cti_screen_change_fetch_checkbox.setToolTip("有効にするとCTIメイン画面の顧客表示が切り替わった時に、顧客情報取得ボタンと同じ処理を自動実行します")
+        cti_monitor_layout.addWidget(self.cti_screen_change_fetch_checkbox)
 
         # 提供判定開始時の住所取得設定
         self.cti_refresh_before_area_search_checkbox = QCheckBox("提供判定開始時にCTI最新住所を優先取得する")
@@ -600,6 +607,7 @@ ND：{nd}
         """CTI設定をデフォルトに戻す"""
         self.cti_monitoring_checkbox.setChecked(True)
         self.cti_auto_processing_checkbox.setChecked(True)
+        self.cti_screen_change_fetch_checkbox.setChecked(True)
         self.cti_refresh_before_area_search_checkbox.setChecked(True)
         self.cti_interval_spin.setValue(200)  # 0.2秒
         self.cti_cooldown_spin.setValue(3)  # 3秒
@@ -671,6 +679,7 @@ ND：{nd}
                     # CTI監視設定の読み込み
                     cti_monitoring_enabled = settings.get('enable_cti_monitoring', True)
                     cti_auto_processing_enabled = settings.get('enable_auto_cti_processing', True)
+                    cti_screen_change_fetch_enabled = settings.get('enable_cti_screen_change_fetch', True)
                     cti_refresh_before_area_search = settings.get('refresh_address_from_cti_before_area_search', True)
                     cti_monitor_interval = settings.get('cti_monitor_interval', 0.2)
                     cti_auto_processing_cooldown = settings.get('cti_auto_processing_cooldown', 3.0)
@@ -683,6 +692,7 @@ ND：{nd}
                     # CTI監視設定の設定
                     self.cti_monitoring_checkbox.setChecked(cti_monitoring_enabled)
                     self.cti_auto_processing_checkbox.setChecked(cti_auto_processing_enabled)
+                    self.cti_screen_change_fetch_checkbox.setChecked(cti_screen_change_fetch_enabled)
                     self.cti_refresh_before_area_search_checkbox.setChecked(cti_refresh_before_area_search)
                     self.cti_interval_spin.setValue(int(cti_monitor_interval * 1000))  # 秒をミリ秒に変換
                     self.cti_cooldown_spin.setValue(int(cti_auto_processing_cooldown))
@@ -818,6 +828,7 @@ ND：{nd}
                 # CTI監視設定を追加
                 'enable_cti_monitoring': self.cti_monitoring_checkbox.isChecked(),
                 'enable_auto_cti_processing': self.cti_auto_processing_checkbox.isChecked(),
+                'enable_cti_screen_change_fetch': self.cti_screen_change_fetch_checkbox.isChecked(),
                 'refresh_address_from_cti_before_area_search': self.cti_refresh_before_area_search_checkbox.isChecked(),
                 'cti_monitor_interval': self.cti_interval_spin.value() / 1000.0,  # ミリ秒を秒に変換
                 'cti_auto_processing_cooldown': float(self.cti_cooldown_spin.value()),
