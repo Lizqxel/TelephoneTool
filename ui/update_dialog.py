@@ -11,12 +11,10 @@ import json
 import logging
 import requests
 import subprocess
-import glob
 from datetime import datetime
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QCheckBox, QSpinBox, QComboBox,
-    QTableWidget, QTableWidgetItem, QMessageBox,
-                              QProgressDialog, QApplication, QHeaderView, QGroupBox)
+    QPushButton, QCheckBox, QSpinBox, QTableWidget, QTableWidgetItem, QMessageBox,
+                              QProgressDialog, QHeaderView, QGroupBox)
 from PySide6.QtCore import Qt, QTimer
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO
 

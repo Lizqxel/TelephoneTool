@@ -14,14 +14,12 @@ import time
 import requests
 import threading
 import warnings
-from urllib.parse import quote
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QComboBox, QPushButton,
                               QTextEdit, QGroupBox, QMessageBox, QScrollArea,
-                              QApplication, QToolTip, QSplitter, QMenuBar, QMenu,
-                              QSizePolicy, QProgressBar, QListView)
-from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QRect, QPoint, QMetaObject, Q_ARG
-from PySide6.QtGui import QFont, QIntValidator, QClipboard, QPixmap, QIcon, QDesktopServices, QPalette, QColor, QUndoStack, QUndoCommand, QKeySequence
+                              QApplication, QToolTip, QSplitter, QSizePolicy, QProgressBar, QListView)
+from PySide6.QtCore import Qt, QTimer, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QPoint, QMetaObject
+from PySide6.QtGui import QFont, QIcon, QUndoStack, QUndoCommand, QKeySequence
 
 from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
 
@@ -32,35 +30,21 @@ from services.jcom_simulation_models import JcomSearchCriteria
 from utils.jcom_address_matcher import NEXT_WITH_CURRENT
 from ui.jcom_simulation_panel import JcomSimulationPanel
 from ui.jcom_simulation_worker import JcomSimulationWorker
-from utils.format_utils import (format_phone_number, format_phone_number_without_hyphen,
-                               format_postal_code, convert_to_half_width)
-import time
-from typing import Dict, Any, List, Optional, Union, Tuple
 
-from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, 
-                             QTextEdit, QComboBox, QWidget, 
-                             QMessageBox, QApplication, QDialog,
-                             QStatusBar, QSizePolicy, QSpacerItem,
-                             QTabWidget, QRadioButton, QGroupBox,
-                             QScrollArea, QSplitter, QToolTip, QMenuBar)
-from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot, QMetaObject, Q_ARG, QPoint, QEvent, QThread
-from PySide6.QtGui import QFont, QIntValidator, QCloseEvent, QTextOption, QShowEvent, QIcon, QUndoStack, QUndoCommand, QKeySequence
+from PySide6.QtWidgets import QDialog
+from PySide6.QtCore import Slot
 
 from ui.main_window_functions import MainWindowFunctions
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
 from services.cti_status_monitor import CTIStatusMonitor
-from utils.format_utils import format_phone_number, format_phone_number_without_hyphen, format_postal_code
 from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
-from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
+from ui.easy_mode_dialogs import DIALOG_CANCEL
 from ui.easy_mode_dialogs import convert_to_half_width
-from ui.settings_dialog import SettingsDialog
 from ui.mode_selection_dialog import ModeSelectionDialog
-from utils.string_utils import validate_name, validate_furigana, convert_to_half_width_except_space, convert_to_full_width
+from utils.string_utils import validate_furigana, convert_to_half_width_except_space, convert_to_full_width
 from utils.furigana_utils import convert_to_furigana
 from ui.update_dialog import UpdateDialog
-from services.area_search import search_service_area
 
 
 class CancelWorker(QObject):
@@ -442,30 +426,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self._redo_action.setShortcut(QKeySequence.Redo)
         self._redo_action.setShortcutContext(Qt.ApplicationShortcut)
         self.addAction(self._redo_action)
-    
-    def check_and_show_mode_selection(self):
-        """
-        モード選択ダイアログの表示を確認し、必要に応じて表示する
-        """
-        try:
-            # 設定ファイルの読み込み
-            if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-                    # モード設定が存在しない場合、または次回以降表示する設定の場合
-                    if 'mode' not in settings or settings.get('show_mode_selection', True):
-                        self.show_mode_selection_dialog()
-                    else:
-                        self.current_mode = settings.get('mode', 'simple')
-            else:
-                # 設定ファイルが存在しない場合は、必ずモード選択ダイアログを表示
-                self.show_mode_selection_dialog()
-                # 設定ファイルを作成
-                self.save_mode_settings('simple', True)
-        except Exception as e:
-            logging.error(f"モード設定の読み込み中にエラーが発生しました: {e}")
-            # エラーが発生した場合は、モード選択ダイアログを表示
-            self.show_mode_selection_dialog()
     
     def show_mode_selection(self):
         """
@@ -1968,32 +1928,6 @@ ND：{nd}
             return widget.toPlainText()
         return ""
 
-    def _on_text_edited(self, widget, new_text):
-        if self._undo_in_progress:
-            return
-        old_text = self._last_text_map.get(widget, "")
-        if new_text == old_text:
-            return
-        old_cursor_pos = None
-        new_cursor_pos = None
-        try:
-            from PySide6.QtWidgets import QLineEdit
-            if isinstance(widget, QLineEdit):
-                new_cursor_pos = widget.cursorPosition()
-                old_cursor_pos = min(new_cursor_pos, len(old_text))
-        except Exception:
-            pass
-        cmd = MainWindow._TextChangeCommand(
-            widget,
-            old_text,
-            new_text,
-            self._set_undo_flag,
-            old_cursor_pos=old_cursor_pos,
-            new_cursor_pos=new_cursor_pos,
-        )
-        self.undo_stack.push(cmd)
-        self._last_text_map[widget] = new_text
-
     def _on_text_changed(self, widget):
         if self._undo_in_progress:
             return
@@ -2241,6 +2175,8 @@ ND：{nd}
         self.fee_input.textChanged.connect(self.reset_background_color)
         fee_layout.addWidget(self.fee_input)
         input_layout.addLayout(fee_layout)
+        # 初期選択はcurrentTextChangedが発火しないため、表示中の料金帯を入力欄へ反映する
+        self.fee_input.setText(self.fee_combo.currentText())
         self._apply_unlisted_fee_default()
         
         # ネット利用
@@ -2444,7 +2380,11 @@ ND：{nd}
             self.jcom_panel.cancel_requested.connect(self.cancel_jcom_search)
             self.jcom_panel.residence_changed.connect(self._on_jcom_input_changed)
             address_layout.addWidget(self.jcom_panel)
-        
+        elif hasattr(self, 'jcom_panel'):
+            # 再構築で破棄された旧パネルへの参照を残すと、hasattr判定をすり抜けて
+            # 削除済みウィジェットにアクセスしてしまうため取り除く。
+            del self.jcom_panel
+
         # 提供エリア検索結果表示用のラベル
         self.area_result_container = QWidget()
         area_result_layout = QVBoxLayout(self.area_result_container)
@@ -4015,47 +3955,6 @@ ND：{nd}
         except Exception as e:
             logging.error(f"キャンセル進捗更新中にエラー: {str(e)}")
     
-    @Slot()
-    def check_cancel_timeout(self):
-        """
-        キャンセルタイムアウトをチェックし、必要に応じて強制リセット
-        TelephoneTeikyou-crossの高速方式を適用
-        """
-        try:
-            logging.info("キャンセルタイムアウトチェックを実行")
-            
-            # まだキャンセル処理中の場合は強制リセット
-            if hasattr(self, 'area_search_btn') and self.area_search_btn.text() == "キャンセル中...":
-                logging.warning("キャンセル処理が5秒以上継続：強制リセットを実行")
-                self.reset_search_button()
-                
-                # キャンセルスレッドの強制クリーンアップ
-                self.cleanup_cancel_thread()
-                
-                # 結果ラベルを更新
-                if hasattr(self, 'area_result_label'):
-                    self.area_result_label.setText("提供エリア: キャンセル完了（タイムアウト）")
-                    self.area_result_label.setStyleSheet("""
-                        QLabel {
-                            font-size: 14px;
-                            padding: 5px;
-                            border: 1px solid #E74C3C;
-                            border-radius: 4px;
-                            background-color: #FADBD8;
-                            color: #E74C3C;
-                        }
-                    """)
-            else:
-                logging.info("キャンセル処理は正常に完了済みです")
-                
-        except Exception as e:
-            logging.error(f"キャンセルタイムアウトチェック中にエラー: {str(e)}")
-            # エラー時も強制リセット
-            try:
-                self.reset_search_button()
-            except Exception as reset_error:
-                logging.error(f"強制リセット中にもエラー: {str(reset_error)}")
-
     def on_cancel_completed(self):
         """
         キャンセル処理完了時の処理
@@ -4095,79 +3994,6 @@ ND：{nd}
             except Exception as reset_error:
                 logging.error(f"強制UI状態リセット中にもエラー: {str(reset_error)}")
     
-    def on_cancel_timeout(self):
-        """
-        キャンセル処理がタイムアウトした場合の処理
-        """
-        try:
-            logging.warning("★★★ キャンセル処理がタイムアウトしました - 強制リセットを実行します ★★★")
-            
-            # 強制的にスレッドとワーカーをクリーンアップ
-            try:
-                self.cleanup_thread()
-            except Exception as cleanup_error:
-                logging.error(f"強制クリーンアップ中にエラー: {str(cleanup_error)}")
-            
-            # キャンセルワーカーとスレッドも強制終了
-            if hasattr(self, 'cancel_worker') and self.cancel_worker is not None:
-                try:
-                    self.cancel_worker.deleteLater()
-                except:
-                    pass
-                self.cancel_worker = None
-                
-            if hasattr(self, 'cancel_thread') and self.cancel_thread is not None:
-                try:
-                    from PySide6.QtCore import QThread
-                    if isinstance(self.cancel_thread, QThread):
-                        if self.cancel_thread.isRunning():
-                            logging.info("キャンセルスレッドを強制終了します")
-                            self.cancel_thread.terminate()
-                            self.cancel_thread.wait(1000)
-                        self.cancel_thread.deleteLater()
-                    else:
-                        logging.warning(f"cancel_threadが不正な型です: {type(self.cancel_thread)}")
-                except Exception as e:
-                    logging.error(f"キャンセルスレッド終了中にエラー: {str(e)}")
-                self.cancel_thread = None
-            
-            # 強制的にボタンを元に戻す
-            self.reset_search_button()
-            
-            # タイマーをクリーンアップ
-            if self.cancel_timer:
-                try:
-                    self.cancel_timer.deleteLater()
-                except:
-                    pass
-                self.cancel_timer = None
-            
-            # 結果ラベルを更新
-            if hasattr(self, 'area_result_label'):
-                self.area_result_label.setText("提供エリア: キャンセル（タイムアウト）")
-                self.area_result_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 14px;
-                        padding: 5px;
-                        border: 1px solid #E74C3C;
-                        border-radius: 4px;
-                        background-color: #FFEBEE;
-                        color: #E74C3C;
-                    }
-                """)
-            
-            logging.info("★★★ 強制リセットが完了しました ★★★")
-            
-        except Exception as e:
-            logging.error(f"キャンセルタイムアウト処理中にエラー: {str(e)}")
-            # 最後の手段として基本的なリセットのみ実行
-            try:
-                if hasattr(self, 'area_search_btn'):
-                    self.area_search_btn.setText("提供エリア検索")
-                    self.area_search_btn.setEnabled(True)
-            except:
-                pass
-
     def reset_search_button(self):
         """検索ボタンを初期状態に戻す"""
         # ★★★ ボタンリセット時にもキャンセルフラグをクリア ★★★
@@ -4847,59 +4673,6 @@ ND：{nd}
         except Exception as e:
             logging.error(f"通話中状態開始時の処理でエラーが発生: {str(e)}")
 
-    def apply_cti_settings(self):
-        """CTI監視設定を適用する"""
-        try:
-            cti_settings = self.settings.get('cti_settings', {})
-            
-            # CTI監視の有効/無効を設定
-            if cti_settings.get('enable_cti', True):
-                if not self.cti_status_monitor.is_monitoring:
-                    self.cti_status_monitor.start_monitoring()
-                    logging.info("CTI監視を開始しました")
-            else:
-                if self.cti_status_monitor.is_monitoring:
-                    self.cti_status_monitor.stop_monitoring()
-                    logging.info("CTI監視を停止しました")
-            
-            # 自動処理の有効/無効を設定
-            self.cti_status_monitor.enable_auto_processing = cti_settings.get('enable_auto_cti_processing', True)
-            
-            # 監視間隔を設定
-            self.cti_status_monitor.monitor_interval = cti_settings.get('cti_monitor_interval', 0.2)
-            
-            # 通話時間の閾値を設定
-            self.cti_status_monitor.call_duration_threshold = cti_settings.get('call_duration_threshold', 0)
-            
-            logging.info("CTI監視設定を適用しました")
-            
-        except Exception as e:
-            logging.error(f"CTI監視設定の適用中にエラー: {str(e)}")
-            QMessageBox.warning(self, "エラー", f"CTI監視設定の適用中にエラーが発生しました: {str(e)}")
-
-    def init_cti_monitoring(self):
-        """CTI監視機能を初期化"""
-        try:
-            # CTI状態監視を初期化
-            self.cti_status_monitor = CTIStatusMonitor(
-                on_dialing_to_talking_callback=self.on_cti_dialing_to_talking,
-                on_call_ended_callback=self.on_cti_call_ended,
-                on_talking_started_callback=self.on_cti_talking_started,
-                on_cancel_processing_callback=self.on_cancel_processing_request
-            )
-            
-            # CTI監視の有効状態をログ出力
-            logging.info(f"CTI監視: {self.cti_status_monitor.enable_auto_processing}")
-            
-            # フォントサイズを設定
-            self.set_font_size(self.font_size)
-            
-            if self.cti_status_monitor.enable_auto_processing:
-                # CTI状態監視を開始
-                self.cti_status_monitor.start_monitoring()
-            
-        except Exception as e:
-            logging.error(f"CTI監視機能の初期化中にエラー: {str(e)}")
             # エラーが発生してもアプリケーションを継続
 
     def on_cancel_processing_request(self, button_name: str):
@@ -5016,7 +4789,7 @@ ND：{nd}
             # エラー時も基本的なキャンセルを実行
             try:
                 # エラー時もキャンセルフラグを設定
-                from services.area_search import set_cancel_flag, clear_cancel_flag
+                from services.area_search import set_cancel_flag
                 set_cancel_flag()
                 logging.info("エラー時にキャンセルフラグを設定しました")
                 
@@ -5438,35 +5211,6 @@ class ServiceAreaSearchWorker(QObject):
 class CancellationError(Exception):
     """検索キャンセル時に発生する例外"""
     pass
-
-    def save_input_data(self, input_data):
-        """
-        入力データを保存する
-        
-        Args:
-            input_data (dict): 保存する入力データ
-        """
-        try:
-            # 保存先ディレクトリの作成
-            save_dir = "input_data"
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            
-            # ファイル名の生成（タイムスタンプ付き）
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"input_data_{timestamp}.json"
-            filepath = os.path.join(save_dir, filename)
-            
-            # データの保存
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(input_data, f, ensure_ascii=False, indent=4)
-            
-            logging.info(f"入力データを保存しました: {filepath}")
-            QMessageBox.information(self, "完了", "入力データの保存が完了しました。")
-            
-        except Exception as e:
-            logging.error(f"入力データの保存中にエラーが発生しました: {e}")
-            QMessageBox.critical(self, "エラー", f"入力データの保存中にエラーが発生しました: {e}")
 
     @Slot()
     def generate_preview_text(self):

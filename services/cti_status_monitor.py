@@ -25,12 +25,11 @@ import win32api
 import logging
 import time
 import threading
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 import json
 import os
-import traceback
 
 class CTIStatus(Enum):
     """CTI状態の列挙型"""
@@ -350,50 +349,6 @@ class CTIStatusMonitor:
             # 重要なエラーのみINFOレベルで出力
             logging.info(f"CTI状態チェック中にエラーが発生: {str(e)}")
     
-    def _handle_dialing_to_talking(self):
-        """発信中→通話中の変化時の処理"""
-        if self.is_processing:
-            logging.info("既に自動処理が実行中のため、重複実行をスキップします")
-            return
-            
-        self.is_processing = True
-        
-        try:
-            logging.info("★★★ CTI状態変化検出: 発信中 → 通話中 ★★★")
-            logging.info("自動処理を開始します: 顧客情報取得 → 提供判定検索")
-            
-            # コールバック関数を実行
-            if self.on_dialing_to_talking_callback:
-                self.on_dialing_to_talking_callback()
-                
-        except Exception as e:
-            logging.error(f"発信中→通話中の自動処理中にエラーが発生: {str(e)}")
-        finally:
-            # 一定時間後に処理フラグをリセット（重複実行防止の解除）
-            threading.Timer(5.0, self._reset_processing_flag).start()
-            
-    def _reset_processing_flag(self):
-        """処理中フラグをリセット"""
-        self.is_processing = False
-        logging.debug("CTI自動処理フラグをリセットしました")
-        
-    def get_status_info(self) -> Dict[str, Any]:
-        """現在の監視状態情報を取得"""
-        return {
-            'is_monitoring': self.is_monitoring,
-            'current_status': self.current_status.value,
-            'previous_status': self.previous_status.value,
-            'window_found': self.window_handle is not None,
-            'status_control_found': self.status_text_handle is not None,
-            'enable_auto_processing': self.enable_auto_processing,
-            'is_processing': self.is_processing
-        }
-        
-    def set_auto_processing(self, enabled: bool):
-        """自動処理の有効/無効を設定"""
-        self.enable_auto_processing = enabled
-        logging.info(f"CTI自動処理を{'有効' if enabled else '無効'}にしました")
-        
     def _detect_status_change(self, new_status: CTIStatus):
         """
         状態変化を検出し、必要に応じてコールバックを実行
@@ -610,52 +565,6 @@ class CTIStatusMonitor:
                 logging.info("通話が既に終了しているため自動処理をスキップ")
         except Exception as e:
             logging.error(f"自動処理実行チェック中にエラー: {str(e)}")
-
-    def _execute_auto_processing_in_thread(self):
-        """
-        提供判定を別スレッドで実行
-        """
-        try:
-            with self.processing_lock:
-                if self.processing_thread and self.processing_thread.is_alive():
-                    logging.info("既に提供判定が実行中です")
-                    return
-                    
-                self.is_processing = True
-                logging.info("★★★ 提供判定を開始します ★★★")
-                logging.info(f"- 開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                logging.info(f"- 現在のCTI状態: {self.current_status.value}")
-                
-                self.processing_thread = threading.Thread(
-                    target=self._execute_auto_processing,
-                    name="AutoProcessingThread"
-                )
-                self.processing_thread.daemon = True  # デーモンスレッドとして設定
-                self.processing_thread.start()
-                
-        except Exception as e:
-            logging.error(f"提供判定スレッドの起動中にエラー: {str(e)}")
-            with self.processing_lock:
-                self.is_processing = False
-
-    def _execute_auto_processing(self):
-        """
-        提供判定を実行
-        """
-        try:
-            # 提供判定の実行
-            if self.on_dialing_to_talking_callback:
-                self.on_dialing_to_talking_callback()
-                
-            logging.info("★★★ 提供判定が完了しました ★★★")
-            logging.info(f"- 完了時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            
-        except Exception as e:
-            logging.error(f"提供判定の実行中にエラー: {str(e)}")
-        finally:
-            with self.processing_lock:
-                self.is_processing = False
-                logging.info("提供判定の実行状態をリセットしました")
 
     def _check_action_button_click(self):
         """
@@ -884,45 +793,3 @@ class CTIStatusMonitor:
             logging.error(f"アクションボタンの検索中にエラー: {str(e)}")
             return False 
 
-    def _check_cti_status(self):
-        """CTIの状態を監視し、状態変化を検出する"""
-        try:
-            # CTIの状態を取得
-            current_status = self.get_current_status()
-            
-            # 状態が変化した場合
-            if current_status != self.current_status:
-                logging.info(f"CTI状態が変化: {self.current_status} → {current_status}")
-                
-                # 通話終了を検出
-                if self.current_status == "通話中" and current_status == "待ち受け中":
-                    logging.info("★★★ 通話終了を検出: 通話中 → 待ち受け中 ★★★")
-                    
-                    # 提供判定が実行中でない場合のみフラグをリセット
-                    if not self.is_processing:
-                        logging.info("通話終了により処理中フラグをリセットしました")
-                        self.talking_start_time = 0
-                    
-                    # 電話ボタン監視を再開
-                    logging.info("★★★ 通話終了を検出: 2秒後に電話ボタン監視を再開します ★★★")
-                    threading.Timer(2.0, self._start_phone_button_monitoring).start()
-                
-                # 状態を更新
-                self.current_status = current_status
-                
-                # 状態変化時のコールバックを実行
-                if current_status == "待ち受け中" and self.on_call_ended_callback:
-                    self.on_call_ended_callback()
-                elif current_status == "通話中" and self.on_talking_started_callback:
-                    self.on_talking_started_callback()
-                elif current_status == "発信中" and self.on_dialing_to_talking_callback:
-                    self.on_dialing_to_talking_callback()
-                
-                # 通話開始を検出
-                if current_status == "通話中" and self.current_status == "発信中":
-                    logging.info("★★★ 通話開始を検出: 発信中 → 通話中 ★★★")
-                    self._handle_dialing_to_talking()
-                
-        except Exception as e:
-            logging.error(f"CTI状態監視中にエラーが発生: {str(e)}")
-            logging.error(traceback.format_exc()) 

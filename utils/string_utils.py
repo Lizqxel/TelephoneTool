@@ -117,25 +117,6 @@ def calculate_similarity(str1, str2):
     return similarity
 
 
-def validate_name(text):
-    """
-    名前が有効かどうかを検証する関数
-    
-    Args:
-        text (str): 検証する名前
-        
-    Returns:
-        bool: 名前が有効な場合はTrue、無効な場合はFalse
-    """
-    if not text:
-        return True  # 空文字列は許可
-        
-    # 数字を含む場合は無効
-    if re.search(r'\d', text):
-        return False
-        
-    return True
-
 
 def validate_furigana(text):
     """

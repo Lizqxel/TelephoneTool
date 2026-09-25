@@ -27,12 +27,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 
-from services.web_driver import create_driver, load_browser_settings
-from utils.string_utils import normalize_string, calculate_similarity
-from utils.address_utils import split_address, normalize_address
+from utils.string_utils import calculate_similarity
 
 # グローバル変数でブラウザドライバーを保持
 global_driver = None
@@ -330,28 +327,6 @@ def normalize_string(text):
     normalized = normalized.strip()
     
     return normalized
-
-def extract_base_address(address):
-    """
-    住所から基本部分（丁目まで）を抽出する
-    
-    Args:
-        address (str): 住所文字列
-        
-    Returns:
-        str: 基本部分の住所
-    """
-    # 丁目を含む場合は丁目まで抽出
-    chome_match = re.search(r'^(.+?[0-9]+丁目)', address)
-    if chome_match:
-        return chome_match.group(1)
-    
-    # 数字を含む場合は最初の数字まで抽出
-    number_match = re.search(r'^(.+?[0-9]+)', address)
-    if number_match:
-        return number_match.group(1)
-    
-    return address
 
 def calculate_address_similarity(input_address, candidate_address):
     """

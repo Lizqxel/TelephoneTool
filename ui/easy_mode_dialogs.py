@@ -7,16 +7,13 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                               QLabel, QLineEdit, QPushButton,
                               QGroupBox, QMessageBox, QWidget, QComboBox, QScrollArea)
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QMetaObject, Q_ARG, QTimer, QPoint, QUrl, QObject
-from PySide6.QtGui import QFont, QIntValidator, QPalette, QColor
+from PySide6.QtCore import Qt, QEvent, QTimer, QPoint
+from PySide6.QtGui import QFont, QIntValidator
 import datetime
 import logging
 from services.area_search import search_service_area, normalize_address
 from utils.string_utils import convert_to_full_width
-import threading
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Slot
 
 # 高齢者向けのスタイル設定
 LARGE_FONT = QFont("MS Gothic", 16)
@@ -333,108 +330,6 @@ class AddressInfoDialog(QDialog):
             logging.error(f"エリア検索中にエラー: {e}")
             self.show_error("エリア検索中にエラーが発生しました。")
 
-    def on_search_finished(self, result):
-        """検索完了時の処理"""
-        
-        # 追加ログ：resultの内容を詳細に出力
-        logging.info(f"[UI] on_search_completed 受信 result: {result}")
-        logging.info(f"[UI] on_search_completed 受信 status: {result.get('status', 'キーなし')}, message: {result.get('message', 'キーなし')}")
-        try:
-            logging.info(f"★★★ 検索完了: {result} ★★★")
-            
-            # 検索結果のステータスを取得
-            status = result.get("status", "failure")
-            message = result.get("message", "判定失敗")
-            logging.info(f"★★★ 検索結果のステータス: {status}, メッセージ: {message} ★★★")
-            
-            # 判定結果テキストと表示スタイルを設定
-            if status == "available":
-                result_text = "提供エリア: 提供可能"
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 10px;
-                        border: 1px solid #27AE60;
-                        border-radius: 4px;
-                        background-color: #E8F5E9;
-                        color: #27AE60;
-                    }
-                """
-            elif status == "unavailable":
-                result_text = "提供エリア: 提供エリア外"
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 10px;
-                        border: 1px solid #E74C3C;
-                        border-radius: 4px;
-                        background-color: #FFEBEE;
-                        color: #E74C3C;
-                    }
-                """
-            elif status == "apartment":
-                result_text = "提供エリア: 集合住宅（アパート・マンション等）"
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 10px;
-                        border: 1px solid #388E3C;
-                        border-radius: 4px;
-                        background-color: #C8E6C9;
-                        color: #388E3C;
-                    }
-                """
-            else:
-                result_text = "提供エリア: 判定失敗"
-                style = """
-                    QLabel {
-                        font-size: 14px;
-                        padding: 10px;
-                        border: 1px solid #95A5A6;
-                        border-radius: 4px;
-                        background-color: #ECEFF1;
-                        color: #95A5A6;
-                    }
-                """
-
-            # 判定結果ラベルを更新
-            self.judgment_result.setText(result_text)
-            self.judgment_result.setStyleSheet(style)
-            logging.info(f"★★★ 判定結果ラベルを更新: {result_text} ★★★")
-
-            # 親ウィンドウの判定結果も更新
-            if self.parent_window:
-                logging.info(f"★★★ 親ウィンドウの判定結果を更新: {result_text} ★★★")
-                self.parent_window.update_judgment_result(result_text)
-
-            # 検索ボタンを有効化
-            self.judgment_btn.setEnabled(True)
-            self.judgment_btn.setText("検索")
-
-            # 詳細情報がある場合は表示
-            if "details" in result:
-                details = result["details"]
-                logging.info(f"★★★ 詳細情報: {details} ★★★")
-
-        except Exception as e:
-            logging.error(f"★★★ 検索結果の処理でエラー: {e} ★★★", exc_info=True)
-            self.on_search_error(str(e))
-
-    def on_search_error(self, error_message):
-        """検索エラー時の処理"""
-        self.judgment_result.setText("提供エリア: 検索エラー")
-        self.judgment_result.setStyleSheet("""
-            QLabel {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #f44336;
-                border-radius: 4px;
-                background-color: #FFEBEE;
-                color: #B71C1C;
-            }
-        """)
-        QMessageBox.critical(self, "エラー", f"提供エリアの検索中にエラーが発生しました: {error_message}")
-
     def on_cancel_clicked(self):
         """作成中止ボタンがクリックされた時の処理"""
         # 確認ダイアログを表示
@@ -706,45 +601,6 @@ class ListInfoDialog(QDialog):
         except Exception as e:
             logging.error(f"リストデータの取得中にエラー: {e}")
             return {}
-
-    def set_list_data(self, data):
-        """
-        リスト情報を設定する
-        
-        Args:
-            data: リスト情報データ
-        """
-        try:
-            # リスト名
-            if data.get('list_name'):
-                converted_name = convert_to_full_width(data['list_name'])
-                self.list_name_input.setText(converted_name)
-            
-            # リストフリガナ
-            if data.get('list_furigana'):
-                converted_furigana = convert_to_half_width(data['list_furigana'])
-                self.list_furigana_input.setText(converted_furigana)
-            
-            # 電話番号
-            if data.get('list_phone'):
-                converted_phone = convert_to_half_width(data['list_phone'])
-                self.list_phone_input.setText(converted_phone)
-            
-            # リスト郵便番号
-            if data.get('list_postal_code'):
-                converted_postal_code = convert_to_half_width(data['list_postal_code'])
-                self.list_postal_code_input.setText(converted_postal_code)
-            
-            # リスト住所
-            if data.get('list_address'):
-                converted_address = convert_to_full_width(data['list_address'])
-                self.list_address_input.setText(converted_address)
-            
-            logging.info("リストデータを正常に設定しました")
-            
-        except Exception as e:
-            logging.error(f"リスト情報の設定中にエラー: {e}")
-            QMessageBox.critical(self, "エラー", f"リスト情報の設定中にエラーが発生しました: {e}")
 
     def on_cancel_clicked(self):
         """作成中止ボタンがクリックされた時の処理"""
@@ -1285,129 +1141,6 @@ class OrdererInputDialog(QDialog):
     def get_saved_data(self):
         """保存されたデータを取得"""
         return self.get_orderer_data()
-
-    def set_orderer_data(self, data):
-        """
-        受注者情報を設定する
-        
-        Args:
-            data: 受注者情報データ
-        """
-        try:
-            # 対応者名
-            if data.get('operator'):
-                converted_operator = convert_to_half_width(data['operator'])
-                self.operator_input.setText(converted_operator)
-            
-            # 出やすい時間帯
-            if data.get('available_time'):
-                converted_time = convert_to_half_width(data['available_time'])
-                self.available_time_input.setText(converted_time)
-                
-                # 新しい携帯番号入力欄への対応
-                if converted_time == "携帯なし":
-                    self.mobile_pattern_combo.setCurrentText("②携帯なし")
-                    self.mobile_number_widget.hide()
-                    self.time_preference_widget.hide()
-                elif converted_time == "携帯不明":
-                    self.mobile_pattern_combo.setCurrentText("③携帯ありで番号がわからない")
-                    self.mobile_number_widget.hide()
-                    self.time_preference_widget.hide()
-                elif "-" in converted_time and len(converted_time.replace("-", "")) == 11:
-                    # 携帯番号の形式の場合
-                    parts = converted_time.split("-")
-                    if len(parts) == 3:
-                        self.mobile_pattern_combo.setCurrentText("①携帯ありで番号がわかる")
-                        self.mobile_number_widget.show()
-                        self.mobile_part1_input.setText(parts[0])
-                        self.mobile_part2_input.setText(parts[1])
-                        self.mobile_part3_input.setText(parts[2])
-                        self.time_preference_widget.show()
-                        self.time_preference_input.setText(parts[3])
-                    else:
-                        # 形式が正しくない場合はデフォルトに設定
-                        self.mobile_pattern_combo.setCurrentText("②携帯なし")
-                        self.mobile_number_widget.hide()
-                        self.time_preference_widget.hide()
-                        self.available_time_input.setText("携帯なし")
-                else:
-                    # その他の場合はデフォルトに設定
-                    self.mobile_pattern_combo.setCurrentText("②携帯なし")
-                    self.mobile_number_widget.hide()
-                    self.time_preference_widget.hide()
-                    self.available_time_input.setText("携帯なし")
-            
-            # 契約者名
-            if data.get('contractor'):
-                converted_contractor = convert_to_half_width(data['contractor'])
-                self.contractor_input.setText(converted_contractor)
-            
-            # フリガナ
-            if data.get('furigana'):
-                converted_furigana = convert_to_half_width(data['furigana'])
-                self.furigana_input.setText(converted_furigana)
-            
-            # 生年月日
-            if data.get('era'):
-                self.era_combo.setCurrentText(data['era'])
-            if data.get('year'):
-                converted_year = convert_to_half_width(data['year'])
-                self.year_combo.setCurrentText(converted_year)
-            if data.get('month'):
-                converted_month = convert_to_half_width(data['month'])
-                self.month_combo.setCurrentText(converted_month)
-            if data.get('day'):
-                converted_day = convert_to_half_width(data['day'])
-                self.day_combo.setCurrentText(converted_day)
-            
-            # 受注者名
-            if data.get('order_person'):
-                converted_person = convert_to_half_width(data['order_person'])
-                self.order_person_input.setText(converted_person)
-            
-            # 料金認識
-            if data.get('fee'):
-                converted_fee = convert_to_half_width(data['fee'])
-                self.fee_input.setText(converted_fee)
-            
-            # ネット利用
-            if data.get('net_usage'):
-                self.net_usage_input.setText(data['net_usage'])
-            
-            # 家族了承
-            if data.get('family_approval'):
-                self.family_approval_input.setText(data['family_approval'])
-            
-            # 他番号
-            if data.get('other_number'):
-                converted_other = convert_to_half_width(data['other_number'])
-                self.other_number_input.setText(converted_other)
-            
-            # 電話機
-            if data.get('phone_device'):
-                converted_device = convert_to_half_width(data['phone_device'])
-                self.phone_device_input.setText(converted_device)
-            
-            # 禁止回線
-            if data.get('forbidden_line'):
-                converted_forbidden = convert_to_half_width(data['forbidden_line'])
-                self.forbidden_line_input.setText(converted_forbidden)
-            
-            # ND
-            if data.get('nd'):
-                converted_nd = convert_to_half_width(data['nd'])
-                self.nd_input.setText(converted_nd)
-            
-            # リストとの関係性
-            if data.get('relationship'):
-                converted_relationship = convert_to_half_width(data['relationship'])
-                self.relationship_input.setText(converted_relationship)
-            
-            logging.info("受注者データを正常に設定しました")
-            
-        except Exception as e:
-            logging.error(f"受注者情報の設定中にエラー: {e}")
-            QMessageBox.critical(self, "エラー", f"受注者情報の設定中にエラーが発生しました: {e}")
 
     def on_cancel_clicked(self):
         """作成中止ボタンがクリックされた時の処理"""
