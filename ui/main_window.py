@@ -2175,6 +2175,8 @@ ND：{nd}
         self.fee_input.textChanged.connect(self.reset_background_color)
         fee_layout.addWidget(self.fee_input)
         input_layout.addLayout(fee_layout)
+        # 初期選択はcurrentTextChangedが発火しないため、表示中の料金帯を入力欄へ反映する
+        self.fee_input.setText(self.fee_combo.currentText())
         self._apply_unlisted_fee_default()
         
         # ネット利用
