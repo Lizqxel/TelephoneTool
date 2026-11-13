@@ -30,6 +30,7 @@ from services.jcom_simulation_models import JcomSearchCriteria
 from utils.jcom_address_matcher import NEXT_WITH_CURRENT
 from ui.jcom_simulation_panel import JcomSimulationPanel
 from ui.jcom_simulation_worker import JcomSimulationWorker
+from ui.call_statistics_dialog import CallStatisticsController
 
 from PySide6.QtWidgets import QDialog
 from PySide6.QtCore import Slot
@@ -378,6 +379,22 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.init_simple_mode()
         else:
             self.init_easy_mode()
+
+        self.call_statistics = CallStatisticsController(self)
+        statistics_toolbar = self.addToolBar("通話集計")
+        statistics_toolbar.setObjectName("call_statistics_toolbar")
+        statistics_toolbar.setMovable(False)
+        self.statistics_button = QPushButton("集計")
+        self.statistics_button.clicked.connect(lambda: self.call_statistics.show(collect=True))
+        statistics_toolbar.addWidget(self.statistics_button)
+        history_action = statistics_toolbar.addAction("集計表")
+        history_action.triggered.connect(lambda: self.call_statistics.show())
+        self.statistics_status = QLabel(" 30分ごとに集計" if self.call_statistics.automatic else " 自動集計 停止中")
+        self.statistics_status.setMaximumWidth(550)
+        self.statistics_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        statistics_toolbar.addWidget(self.statistics_status)
+        self.call_statistics.status_changed.connect(self._show_statistics_status)
+        self.call_statistics.changed.connect(self._update_statistics_button)
 
         self.cti_screen_values_detected.connect(self._handle_cti_screen_values)
         self.trigger_auto_search.connect(self.auto_search_service_area)
@@ -3245,10 +3262,26 @@ ND：{nd}
         elif hasattr(self, 'jcom_panel'):
             self.jcom_panel.set_running(False)
 
+    def _show_statistics_status(self, text):
+        self.statistics_status.setText(" " + (text if len(text) <= 56 else text[:55] + "…"))
+        self.statistics_status.setToolTip(text)
+
+    def _update_statistics_button(self):
+        self.statistics_button.setEnabled(not self.call_statistics.busy)
+        self.statistics_button.setText("集計中…" if self.call_statistics.busy else "集計")
+
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
         try:
             logging.info("アプリケーション終了処理を開始します")
+
+            statistics = getattr(self, 'call_statistics', None)
+            if statistics is not None and not statistics.stop():
+                event.ignore()
+                if not getattr(self, '_statistics_close_pending', False):
+                    self._statistics_close_pending = True
+                    statistics.worker.finished.connect(lambda: QTimer.singleShot(0, self.close))
+                return
 
             jcom_worker = getattr(self, 'jcom_worker', None)
             if jcom_worker is not None and jcom_worker.isRunning():
