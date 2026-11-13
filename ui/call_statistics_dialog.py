@@ -25,13 +25,21 @@ class StatisticsWorker(QThread):
 
     def run(self):
         try:
-            snapshot = CtiStatisticsCollector(self.cancelled).collect(self.numeric_unit)
+            collector = CtiStatisticsCollector(self.cancelled)
+            snapshot = collector.collect(self.numeric_unit)
             if self.cancelled.is_set():
                 return
             self.store.save(snapshot)
-            self.completed.emit(snapshot, "")
         except Exception as exc:
             self.completed.emit(None, str(exc))
+            return
+        try:
+            collector.clear_history()
+        except Exception as exc:
+            # Aggregation is already committed; a clear failure is a warning.
+            self.completed.emit(snapshot, f"架電履歴のクリア未完了：{exc}")
+        else:
+            self.completed.emit(snapshot, "")
 
 
 class CallStatisticsController(QObject):
@@ -98,10 +106,11 @@ class CallStatisticsController(QObject):
         self.changed.emit()
 
     def _completed(self, snapshot, error):
-        if error:
+        if snapshot is None:
             self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
         else:
-            self.set_status(f"{snapshot.acquired_at:%H:%M} 集計済み：{snapshot.staff_name}／履歴 {snapshot.history_rows}件")
+            message = f"{snapshot.acquired_at:%H:%M} 集計済み：{snapshot.staff_name}／履歴 {snapshot.history_rows}件"
+            self.set_status(f"{message}（保存済み）。{error}" if error else message)
 
     def _finished(self):
         worker = self.worker

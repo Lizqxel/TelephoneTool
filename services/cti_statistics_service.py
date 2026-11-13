@@ -126,15 +126,24 @@ def validate_phone_filter(nodes):
         raise RuntimeError("架電履歴の電話番号検索欄を空にしてください。")
 
 
+def search_conditions(nodes):
+    return {n["hwnd"]: n["text"] for n in nodes
+            if any(kind in n["class_name"] for kind in ("EDIT", "COMBOBOX", "LISTBOX", "SysDateTimePick32"))}
+
+
 class CtiStatisticsCollector:
     def __init__(self, cancel=None):
         self.cancel = cancel or threading.Event()
+        self._history_context = None
+        self.clear_history_info = None
 
     def check_cancelled(self):
         if self.cancel.is_set():
             raise RuntimeError("集計を中止しました。")
 
     def collect(self, numeric_unit="seconds"):
+        self._history_context = None
+        self.clear_history_info = None
         started = datetime.now(JST)
         day = started.date().isoformat()
         windows = Windows()
@@ -216,6 +225,64 @@ class CtiStatisticsCollector:
         if context != counter_context(before["nodes"]):
             raise RuntimeError("集計中にCTIのリストが切り替わりました。再実行してください。")
         self.check_cancelled()
+        self._history_context = {"cti": cti, "page_hwnd": pages[0]["hwnd"], "history_hwnd": history["hwnd"],
+                                 "staff_hwnd": staff_tables[0]["hwnd"], "staff_rows": staff["rows"],
+                                 "rows": history["rows"], "conditions": search_conditions(after_controls)}
         return StatisticsSnapshot(datetime.now(JST), staff_id, staff_name, f"{cti['pid']}:{cti['hwnd']}:{context}",
                                   counters, history_totals["talk_seconds"], len(history["rows"]),
                                   history_totals["counters"], history_totals["first_hour"])
+
+    def clear_history(self):
+        """呼び出し元が集計を保存した後で、取得した一覧だけをクリアする。"""
+        self.check_cancelled()
+        context = self._history_context
+        if context is None:
+            raise RuntimeError("クリア対象の集計済み履歴がありません。")
+        windows = Windows()
+        ctis = windows.windows("CTIメイン")
+        if not any(w["hwnd"] == context["cti"]["hwnd"] and w["pid"] == context["cti"]["pid"] for w in ctis):
+            raise RuntimeError("CTIが切り替わったため、履歴はクリアしていません。")
+        before = windows.snapshot(context["cti"]["hwnd"], 3000)
+        if before["errors"]:
+            raise RuntimeError("クリア前の画面を確認できませんでした。")
+        controls = descendants(before["nodes"], context["page_hwnd"])
+        buttons = [n for n in controls if n["text"] == "クリア" and "BUTTON" in n["class_name"]]
+        if len(buttons) != 1:
+            raise RuntimeError("架電履歴のクリアボタンを特定できませんでした。")
+        tables = msaa_tables(read_msaa([context["history_hwnd"], context["staff_hwnd"]]))
+        history = next((t for t in tables if t["hwnd"] == context["history_hwnd"]), None)
+        staff = next((t for t in tables if t["hwnd"] == context["staff_hwnd"]), None)
+        if not history or not staff or history["rows"] != context["rows"] or staff["rows"] != context["staff_rows"] or search_conditions(controls) != context["conditions"]:
+            raise RuntimeError("集計後に履歴または検索条件が変わったため、クリアしていません。")
+        self.check_cancelled()
+        button = buttons[0]
+        result = ctypes.c_size_t()
+        ok = windows.api.SendMessageTimeoutW(button["parent_hwnd"], 0x111, button["control_id"] & 0xffff,
+                                             button["hwnd"], 2, 15000, ctypes.byref(result))
+        if not ok:
+            raise RuntimeError("クリアの応答を確認できませんでした。CTI側の状態を確認してください。")
+        # Do not retry the command: a timeout can still mean that CTI processed it.
+        self._history_context = None
+        for _ in range(3):
+            if self.cancel.wait(0.3):
+                self.check_cancelled()
+            after = windows.snapshot(context["cti"]["hwnd"], 3000)
+            if after["errors"]:
+                continue
+            after_controls = descendants(after["nodes"], context["page_hwnd"])
+            current = msaa_tables(read_msaa([n["hwnd"] for n in after_controls if n["class_name"].startswith("WindowsForms10.Window.")]))
+            # Clear recreates the results grid and blanks the count label in CTI.
+            # Rediscover the grid; the old handle and a numeric label are not reliable.
+            candidates = [t for t in current if {"対応日時", "管理番号"}.issubset(t.get("headers", []))
+                          or t["hwnd"] == context["history_hwnd"]]
+            if len(candidates) == 1 and not candidates[0]["rows"]:
+                staff_after = next((t for t in current if {"選択", "スタッフ"}.issubset(t.get("headers", []))), None)
+                self.clear_history_info = {
+                    "rows_before": len(context["rows"]), "rows_after": 0,
+                    "search_conditions_preserved": search_conditions(after_controls) == context["conditions"],
+                    "staff_selection_preserved": bool(staff_after and staff_after["rows"] == context["staff_rows"]),
+                    "history_visible_before": next((n["visible"] for n in before["nodes"] if n["hwnd"] == context["page_hwnd"]), None),
+                    "history_visible_after": next((n["visible"] for n in after["nodes"] if n["hwnd"] == context["page_hwnd"]), None),
+                }
+                return
+        raise RuntimeError("クリア後に履歴が空になったことを確認できませんでした。")
