@@ -145,10 +145,11 @@ class CtiStatisticsCollector:
         before = windows.snapshot(cti["hwnd"], 3000)
         if before["errors"]:
             raise RuntimeError("CTIの画面構造をすべて取得できませんでした。")
-        uia = uia_snapshot(cti["hwnd"], SimpleNamespace(max_nodes=5000, max_depth=30))
+        # Read the footer directly so a large active grid cannot exhaust the scan.
+        uia = uia_snapshot(cti["hwnd"], SimpleNamespace(max_nodes=100, max_depth=5, control_type="StatusBar"))
         self.check_cancelled()
         staff_name, staff_id = read_staff(uia.get("nodes", []))
-        pages = [n for n in before["nodes"] if n["text"] == "架電履歴" and "BUTTON" not in n["class_name"]]
+        pages = [n for n in before["nodes"] if n["text"] == "架電履歴" and n["class_name"].startswith("WindowsForms10.Window.")]
         if len(pages) != 1:
             raise RuntimeError("CTIの架電履歴ページを特定できませんでした。")
         controls = descendants(before["nodes"], pages[0]["hwnd"])

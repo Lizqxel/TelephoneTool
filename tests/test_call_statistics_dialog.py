@@ -94,3 +94,23 @@ def test_dialog_shows_midday_logs_without_early_morning_rows(tmp_path):
     assert dialog.table.item(1, 0).text().startswith("13:00")
     assert dialog.table.item(1, 2).text() == "1"
     dialog.close()
+
+
+def test_approach_ng_with_null_id_appears_in_the_hourly_table(tmp_path):
+    from test_call_statistics import history_row, history_snapshot
+    app = QApplication.instance() or QApplication([])
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False)
+    controller.set_automatic(False)
+    rows = [history_row(call_id="(Null)"),
+            {**history_row("16:34", "NG", "7", "(Null)"), "架電結果詳細": "アプローチNG"}]
+    result = history_snapshot("2026-11-13T16:40:00", rows)
+    controller.store.save(result)
+    dialog = CallStatisticsDialog(controller)
+    dialog.day.setDate(QDate(2026, 11, 13))
+    controller._completed(result, "")
+    index = next(i for i in range(dialog.table.rowCount()) if dialog.table.item(i, 0).text().startswith("16:00"))
+    assert dialog.table.item(index, 1).text() == "00:00:07"
+    assert dialog.table.item(index, 2).text() == "1"
+    assert dialog.table.item(index, 4).text() == "1"
+    assert "集計済み" in dialog.status_label.text()
+    dialog.close()

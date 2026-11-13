@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 import sqlite3
+import unicodedata
 
 
 JST = timezone(timedelta(hours=9))
@@ -14,8 +15,14 @@ COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dial
 
 
 def normalize_name(value):
-    import unicodedata
     return "".join(unicodedata.normalize("NFKC", value or "").split())
+
+
+def usable_call_id(value):
+    """未設定の表示文字列は通話の識別子として使わない。実IDの大小文字は維持する。"""
+    text = str(value).strip() if value is not None else ""
+    placeholder = unicodedata.normalize("NFKC", text).casefold()
+    return "" if placeholder in ("", "-", "0", "null", "(null)") else text
 
 
 def parse_call_duration(value, numeric_unit="seconds"):
@@ -51,6 +58,8 @@ def history_outcome_counters(row):
     """履歴に明記された結果だけを分類する。曖昧な見込・NGは未判定にする。"""
     outcome = normalize_name(row.get("架電結果"))
     detail = normalize_name(row.get("架電結果詳細"))
+    if outcome == "NG" and detail == "アプローチNG":
+        detail = "対話有NG"
     if outcome in ("留守", "不在", "担当者不在", "受注", "禁止", "削除"):
         return dict(new_prospects=0, ng_with_dialogue=0, ng_without_dialogue=0)
     if outcome in ("新規見込", "継続見込") or (outcome == "見込" and detail in ("新規", "新規見込", "継続", "継続見込")):
@@ -78,10 +87,10 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds"):
         if when.date().isoformat() != day:
             raise ValueError("検索結果に別の日付が含まれています。架電履歴を当日で検索してください。")
         seconds = parse_call_duration(row.get("IP電話通話時間", ""), numeric_unit)
-        unique = (row.get("通話ユニークID") or "").strip()
+        unique = usable_call_id(row.get("通話ユニークID"))
         outcome_counts = history_outcome_counters(row)
         identity = (when, seconds, tuple(outcome_counts.items()))
-        if unique and unique not in ("-", "0"):
+        if unique:
             if unique in seen:
                 if seen[unique] != identity:
                     raise ValueError("同じ通話IDの値が異なるため、再取得してください。")

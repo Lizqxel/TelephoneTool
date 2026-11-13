@@ -223,3 +223,47 @@ def test_backfills_existing_database_without_discarding_counter_baseline(tmp_pat
     assert store.hours("staff-1", "2026-11-13")[13]["total_calls"] == 1
     assert store.latest("staff-1", "2026-11-13")["total_calls"] == 1
     assert store.display_hours("staff-1", "2026-11-13")[0]["hour"] == 13
+
+
+@pytest.mark.parametrize("missing_id", [None, "", "-", "0", "(Null)", "(null)", " (NULL) ", "null", "（Ｎｕｌｌ）"])
+def test_unset_call_ids_do_not_collapse_distinct_history_rows(missing_id):
+    rows = [history_row(call_id=missing_id),
+            {**history_row("16:34", "NG", "7", missing_id), "架電結果詳細": "アプローチNG"}]
+    totals = hourly_history_totals(rows, "2026-11-13", "姓　名")
+    assert totals["counters"][13]["total_calls"] == 1
+    assert totals["counters"][16]["total_calls"] == 1
+    assert totals["counters"][16]["ng_with_dialogue"] == 1
+    assert totals["talk_seconds"][16] == 7
+
+
+def test_real_call_ids_still_deduplicate_and_reject_conflicting_data():
+    row = history_row(seconds="7", call_id="valid-call-123")
+    totals = hourly_history_totals([row, row], "2026-11-13", "姓　名")
+    assert totals["counters"][13]["total_calls"] == 1
+    assert totals["talk_seconds"][13] == 7
+    with pytest.raises(ValueError, match="同じ通話ID"):
+        hourly_history_totals([row, {**row, "IP電話通話時間": "10"}], "2026-11-13", "姓　名")
+    distinct = {**row, "通話ユニークID": "VALID-call-123"}
+    assert hourly_history_totals([row, distinct], "2026-11-13", "姓　名")["counters"][13]["total_calls"] == 2
+
+
+def test_approach_ng_reaggregation_updates_old_totals_without_double_counting(tmp_path):
+    store = StatisticsStore(tmp_path / "stats.sqlite3")
+    old = history_row(call_id="(Null)")
+    ng = {**history_row("16:34", "NG", "7", "(Null)"), "架電結果詳細": "アプローチNG"}
+    store.save(history_snapshot("2026-11-13T16:30:00", [old]))
+    store.save(history_snapshot("2026-11-13T16:40:00", [ng, old]))
+    store.save(history_snapshot("2026-11-13T16:50:00", [ng, old]))
+    rows = store.display_hours("staff-1", "2026-11-13")
+    hour = next(row for row in rows if row["hour"] == 16)
+    assert sum(row["total_calls"] or 0 for row in rows) == 2
+    assert hour["total_calls"] == hour["ng_with_dialogue"] == 1
+    assert hour["talk_seconds"] == 7
+    assert hour["ng_without_dialogue"] == 0
+
+
+def test_unknown_ng_detail_remains_unclassified():
+    row = {**history_row(outcome="NG"), "架電結果詳細": "未確認の理由"}
+    counts = hourly_history_totals([row], "2026-11-13", "姓　名")["counters"][13]
+    assert counts["ng_with_dialogue"] is None
+    assert counts["ng_without_dialogue"] is None

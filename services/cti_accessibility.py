@@ -143,6 +143,13 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $cfg = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CONFIG__')) | ConvertFrom-Json
 $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]([long]$cfg.hwnd))
+if ($cfg.control_type -eq 'StatusBar') {
+    $condition = New-Object System.Windows.Automation.PropertyCondition -ArgumentList @(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::StatusBar)
+    $root = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($null -eq $root) { throw 'CTI status bar not found' }
+}
 $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
 $script:nodes = New-Object 'System.Collections.Generic.List[object]'
 $script:issues = New-Object 'System.Collections.Generic.List[string]'
@@ -218,7 +225,8 @@ Walk $root -1 0
 """
 
 def uia_snapshot(hwnd, args):
-    config = {"hwnd": hwnd, "max_nodes": args.max_nodes, "max_depth": args.max_depth}
+    config = {"hwnd": hwnd, "max_nodes": args.max_nodes, "max_depth": args.max_depth,
+              "control_type": getattr(args, "control_type", "")}
     encoded_config = base64.b64encode(json.dumps(config).encode("utf-8")).decode("ascii")
     script = UIA_SCRIPT.replace("__CONFIG__", encoded_config)
     encoded_script = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
