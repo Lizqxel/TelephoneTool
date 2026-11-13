@@ -389,7 +389,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         statistics_toolbar.addWidget(self.statistics_button)
         history_action = statistics_toolbar.addAction("集計表")
         history_action.triggered.connect(lambda: self.call_statistics.show())
-        self.statistics_status = QLabel(" 30分ごとに集計" if self.call_statistics.automatic else " 自動集計 停止中")
+        self.statistics_status = QLabel(" 1時間ごとに集計" if self.call_statistics.automatic else " 自動集計 停止中")
         self.statistics_status.setMaximumWidth(550)
         self.statistics_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         statistics_toolbar.addWidget(self.statistics_status)

@@ -11,7 +11,13 @@ import unicodedata
 
 
 JST = timezone(timedelta(hours=9))
-COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dialogue")
+# CTI上部の累計カウンター。時間帯別の値は取得間の差分で記録する。
+COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dialogue", "valid_calls")
+# 架電履歴から時間帯別に再計算できる値。トスは見込検索のランクと突き合わせる。
+HISTORY_COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dialogue", "dialogues", "toss")
+TOSS_RANK = "トス"
+# 架電結果「NG」のうち対話無NGに入る詳細。これ以外のNG詳細はすべて対話有NG（2026-11-13 運用側で確認）。
+NG_WITHOUT_DIALOGUE_DETAILS = ("現アナNG", "多重留守NG", "対話無NG")
 
 
 def normalize_name(value):
@@ -55,37 +61,62 @@ def parse_call_duration(value, numeric_unit="seconds"):
 
 
 def history_outcome_counters(row):
-    """履歴に明記された結果だけを分類する。曖昧な見込・NGは未判定にする。"""
+    """履歴の結果を分類する。新規・継続を区別できない見込や、未知の結果は未判定（None）にする。"""
     outcome = normalize_name(row.get("架電結果"))
     detail = normalize_name(row.get("架電結果詳細"))
-    if outcome == "NG" and detail == "アプローチNG":
-        detail = "対話有NG"
+    if outcome == "NG":
+        detail = "対話無NG" if detail in {normalize_name(d) for d in NG_WITHOUT_DIALOGUE_DETAILS} else "対話有NG"
     if outcome in ("留守", "不在", "担当者不在", "受注", "禁止", "削除"):
         return dict(new_prospects=0, ng_with_dialogue=0, ng_without_dialogue=0)
     if outcome in ("新規見込", "継続見込") or (outcome == "見込" and detail in ("新規", "新規見込", "継続", "継続見込")):
         return dict(new_prospects=int(outcome == "新規見込" or detail in ("新規", "新規見込")), ng_with_dialogue=0, ng_without_dialogue=0)
+    if outcome == "見込":
+        return dict(new_prospects=None, ng_with_dialogue=0, ng_without_dialogue=0)
     if outcome in ("対話有NG", "対話無NG") or (outcome == "NG" and detail in ("対話有NG", "対話無NG")):
         result = detail if outcome == "NG" else outcome
         return dict(new_prospects=0, ng_with_dialogue=int(result == "対話有NG"), ng_without_dialogue=int(result == "対話無NG"))
     return dict(new_prospects=None, ng_with_dialogue=None, ng_without_dialogue=None)
 
 
-def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds"):
+def dialogue_count(row):
+    """対話＝見込（新規・継続）＋対話有NG。未知の架電結果は None（未判定）。"""
+    if normalize_name(row.get("架電結果")) in ("見込", "新規見込", "継続見込"):
+        return 1
+    return history_outcome_counters(row)["ng_with_dialogue"]
+
+
+def may_be_new_prospect(row):
+    """新規見込の可能性がある行。実際の履歴は「見込／-」で新規・継続を区別しないことがある。"""
+    outcome = normalize_name(row.get("架電結果"))
+    detail = normalize_name(row.get("架電結果詳細"))
+    if outcome == "新規見込":
+        return True
+    return outcome == "見込" and detail not in ("継続", "継続見込")
+
+
+def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=None):
+    """本人・当日の行だけを時間帯別に集計する。他スタッフ・他日の行は除外する。
+
+    ranks は見込検索の {管理番号: ランク}。None なら見込の行がある時間帯のトスは未取得。
+    同じ管理番号の見込はその日の最初の時間帯に1件だけ数える。
+    """
     totals = {hour: 0.0 for hour in range(24)}
-    counters = {hour: {key: 0 for key in COUNTERS} for hour in range(24)}
+    counters = {hour: {key: 0 for key in HISTORY_COUNTERS} for hour in range(24)}
     first_hour = None
     seen = {}
+    prospects = {}
+    unknown = {}
     for row in rows:
         if not {"対応日時", "対応スタッフ", "IP電話通話時間"}.issubset(row):
             raise ValueError("集計に必要なカラムを取得できませんでした。")
         if normalize_name(row.get("対応スタッフ")) != normalize_name(staff_name):
-            raise ValueError("検索結果に別のスタッフが含まれています。本人だけをチェックしてください。")
+            continue
         try:
             when = datetime.fromisoformat(row["対応日時"].replace("/", "-"))
         except (ValueError, KeyError) as exc:
             raise ValueError("履歴の対応日時を読み取れませんでした。") from exc
         if when.date().isoformat() != day:
-            raise ValueError("検索結果に別の日付が含まれています。架電履歴を当日で検索してください。")
+            continue
         seconds = parse_call_duration(row.get("IP電話通話時間", ""), numeric_unit)
         unique = usable_call_id(row.get("通話ユニークID"))
         outcome_counts = history_outcome_counters(row)
@@ -99,12 +130,31 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds"):
         first_hour = when.hour if first_hour is None else min(first_hour, when.hour)
         totals[when.hour] += seconds
         counters[when.hour]["total_calls"] += 1
-        for key, value in outcome_counts.items():
+        dialogues = dialogue_count(row)
+        if dialogues is None:
+            label = "／".join(v for v in (row.get("架電結果"), row.get("架電結果詳細")) if v and v.strip() not in ("", "-"))
+            unknown[label] = unknown.get(label, 0) + 1
+        for key, value in (*outcome_counts.items(), ("dialogues", dialogues)):
             if value is None or counters[when.hour][key] is None:
                 counters[when.hour][key] = None
             else:
                 counters[when.hour][key] += value
-    return {"talk_seconds": totals, "counters": counters, "first_hour": first_hour}
+        if may_be_new_prospect(row):
+            number = str(row.get("管理番号") or "").strip() or f"unidentified-{len(prospects)}"
+            if number not in prospects or when < prospects[number]:
+                prospects[number] = when
+    unmatched = 0
+    for number, when in prospects.items():
+        hour = counters[when.hour]
+        if ranks is None:
+            hour["toss"] = None
+        elif number not in ranks:
+            # 解放・担当変更などで見込検索に無い見込はトスに数えない。
+            unmatched += 1
+        elif normalize_name(ranks[number]) == TOSS_RANK and hour["toss"] is not None:
+            hour["toss"] += 1
+    return {"talk_seconds": totals, "counters": counters, "first_hour": first_hour,
+            "prospects": len(prospects), "unmatched_prospects": unmatched, "unknown_dialogue_results": unknown}
 
 
 def hourly_talk_seconds(rows, day, staff_name, numeric_unit="seconds"):
@@ -122,6 +172,10 @@ def next_half_hour(now):
     return now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
 
 
+def next_hour(now):
+    return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+
 @dataclass(frozen=True)
 class StatisticsSnapshot:
     acquired_at: datetime
@@ -129,10 +183,11 @@ class StatisticsSnapshot:
     staff_name: str
     session: str
     counters: dict
-    talk_seconds: dict
+    talk_seconds: dict | None
     history_rows: int
     history_counters: dict | None = None
     first_history_hour: int | None = None
+    note: str = ""
 
 
 class StatisticsStore:
@@ -166,6 +221,11 @@ class StatisticsStore:
                     ng_with_dialogue INTEGER, ng_without_dialogue INTEGER,
                     PRIMARY KEY(staff_id,day,hour));
             """)
+            # 既存DB（有効コール・トス追加前）にも列を足す。保存済みの値は残す。
+            for table, column in (("snapshots", "valid_calls"), ("hourly", "valid_calls"),
+                                  ("history_hourly", "toss"), ("history_hourly", "dialogues")):
+                if column not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
 
     @contextmanager
     def connect(self):
@@ -196,7 +256,7 @@ class StatisticsStore:
             for hour in range(24):
                 db.execute("INSERT OR IGNORE INTO hourly(staff_id,day,hour) VALUES (?,?,?)", (snapshot.staff_id, day, hour))
                 # Future hours are unknown, rather than observed zeros.
-                if hour <= stamp.hour or (snapshot.history_counters and snapshot.history_counters.get(hour, {}).get("total_calls", 0)):
+                if snapshot.talk_seconds is not None and (hour <= stamp.hour or (snapshot.history_counters and snapshot.history_counters.get(hour, {}).get("total_calls", 0))):
                     db.execute("UPDATE hourly SET talk_seconds=?,talk_updated_at=? WHERE staff_id=? AND day=? AND hour=?",
                                (snapshot.talk_seconds.get(hour, 0), stamp.isoformat(), snapshot.staff_id, day, hour))
             if previous:
@@ -209,24 +269,29 @@ class StatisticsStore:
                         end = boundary
                 last = end - timedelta(microseconds=1)
                 same_hour = start.hour == last.hour
-                reset = previous["session"] != snapshot.session or any(snapshot.counters[k] < previous[k] for k in COUNTERS)
+                # 空欄で読めなかったカウンターは差分を取らない（次に読めた値が新しい基準になる）。
+                known = {k: (previous[k], snapshot.counters.get(k)) for k in COUNTERS
+                         if previous[k] is not None and snapshot.counters.get(k) is not None}
+                reset = previous["session"] != snapshot.session or any(now < before for before, now in known.values())
                 if same_hour and not reset:
                     hour = start.hour
                     status = "差分" if start.minute == 0 and start.second < 60 else "一部の差分"
                     row = db.execute("SELECT * FROM hourly WHERE staff_id=? AND day=? AND hour=?", (snapshot.staff_id, day, hour)).fetchone()
                     if row["counter_status"] != "未取得":
                         status = row["counter_status"]
-                    sums = [(row[k] or 0) + snapshot.counters[k] - previous[k] for k in COUNTERS]
-                    db.execute("UPDATE hourly SET total_calls=?,new_prospects=?,ng_with_dialogue=?,ng_without_dialogue=?,counter_status=?,counter_updated_at=? WHERE staff_id=? AND day=? AND hour=?",
-                               (*sums, status, stamp.isoformat(), snapshot.staff_id, day, hour))
+                    sums = {k: (row[k] or 0) + now - before for k, (before, now) in known.items()}
+                    assignments = "".join(f"{k}=?," for k in sums)
+                    db.execute(f"UPDATE hourly SET {assignments}counter_status=?,counter_updated_at=? WHERE staff_id=? AND day=? AND hour=?",
+                               (*sums.values(), status, stamp.isoformat(), snapshot.staff_id, day, hour))
                 else:
                     status = "リセットあり" if reset else "時間またぎ・差分不明"
                     for hour in range(start.hour, last.hour + 1):
                         db.execute("UPDATE hourly SET counter_status=?,counter_updated_at=? WHERE staff_id=? AND day=? AND hour=?",
                                    (status, stamp.isoformat(), snapshot.staff_id, day, hour))
-            db.execute("INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?,?)",
+            db.execute(f"INSERT OR REPLACE INTO snapshots (staff_id,day,staff_name,observed_at,session,{','.join(COUNTERS)}) "
+                       f"VALUES (?,?,?,?,?{',?' * len(COUNTERS)})",
                        (snapshot.staff_id, day, snapshot.staff_name, stamp.isoformat(), snapshot.session,
-                        *(snapshot.counters[k] for k in COUNTERS)))
+                        *(snapshot.counters.get(k) for k in COUNTERS)))
             if snapshot.history_counters is not None:
                 if snapshot.first_history_hour is not None:
                     db.execute("INSERT INTO history_bounds VALUES (?,?,?) ON CONFLICT(staff_id,day) DO UPDATE SET first_hour=MIN(first_hour,excluded.first_hour)",
@@ -236,8 +301,9 @@ class StatisticsStore:
                     for hour in range(bound[0], 24):
                         counts = snapshot.history_counters.get(hour, {})
                         if hour <= stamp.hour or counts.get("total_calls", 0):
-                            db.execute("INSERT OR REPLACE INTO history_hourly VALUES (?,?,?,?,?,?,?)",
-                                       (snapshot.staff_id, day, hour, *(counts.get(k) for k in COUNTERS)))
+                            db.execute(f"INSERT OR REPLACE INTO history_hourly (staff_id,day,hour,{','.join(HISTORY_COUNTERS)}) "
+                                       f"VALUES (?,?,?{',?' * len(HISTORY_COUNTERS)})",
+                                       (snapshot.staff_id, day, hour, *(counts.get(k) for k in HISTORY_COUNTERS)))
 
     def staff(self):
         with self.connect() as db:
@@ -246,18 +312,21 @@ class StatisticsStore:
     def hours(self, staff_id, day):
         with self.connect() as db:
             rows = {r["hour"]: dict(r) for r in db.execute("SELECT * FROM hourly WHERE staff_id=? AND day=? ORDER BY hour", (staff_id, day))}
+            for row in rows.values():
+                row["dialogues"] = row["toss"] = None
             for history in db.execute("SELECT * FROM history_hourly WHERE staff_id=? AND day=?", (staff_id, day)):
                 if history["hour"] not in rows:
                     continue
                 row = rows[history["hour"]]
                 missing = []
-                for key in COUNTERS:
+                for key in HISTORY_COUNTERS:
                     if history[key] is not None:
                         row[key] = history[key]
-                    else:
+                    elif key != "toss":
                         missing.append(key)
                 row["counter_status"] = "履歴集計" if not missing else "履歴＋差分／未判定"
-            return [rows.get(h, {"hour": h, "talk_seconds": None, **{k: None for k in COUNTERS}, "counter_status": "未取得"}) for h in range(24)]
+            return [rows.get(h, {"hour": h, "talk_seconds": None, **{k: None for k in COUNTERS}, "dialogues": None, "toss": None,
+                                 "counter_status": "未取得"}) for h in range(24)]
 
     def display_hours(self, staff_id, day):
         rows = self.hours(staff_id, day)

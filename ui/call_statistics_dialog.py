@@ -1,4 +1,7 @@
-"""30分周期の集計処理と、日別・時間帯別の通話集計表。"""
+"""毎時の集計・シート送信と、日別・時間帯別の通話集計表。
+
+起動時・毎時00分・手動で、架電履歴と見込検索を裏で検索して集計し、スプレッドシートへ送る。
+"""
 
 from datetime import datetime
 import os
@@ -10,46 +13,73 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdi
                                QHeaderView, QLabel, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout)
 
-from services.call_statistics import JST, StatisticsStore, format_duration, next_half_hour
+from services.call_statistics import JST, StatisticsStore, format_duration, next_hour
+from services.call_statistics_sheet import SheetSender, sheet_hours
 from services.cti_statistics_service import CtiStatisticsCollector
 
 
 class StatisticsWorker(QThread):
-    completed = Signal(object, str)
+    completed = Signal(object, str, str, bool)
 
-    def __init__(self, store, numeric_unit, parent=None):
+    def __init__(self, store, numeric_unit, full=True, sender_factory=None, parent=None):
         super().__init__(parent)
         self.store = store
         self.numeric_unit = numeric_unit
+        self.full = full
+        self.sender_factory = sender_factory or SheetSender.from_settings
         self.cancelled = threading.Event()
 
     def run(self):
         try:
-            snapshot = CtiStatisticsCollector(self.cancelled).collect(self.numeric_unit)
+            snapshot = CtiStatisticsCollector(self.cancelled).collect(self.numeric_unit, full=self.full)
             if self.cancelled.is_set():
                 return
             self.store.save(snapshot)
-            self.completed.emit(snapshot, "")
         except Exception as exc:
-            self.completed.emit(None, str(exc))
+            self.completed.emit(None, str(exc), "", self.full)
+            return
+        notice = self.send(snapshot) if self.full and not self.cancelled.is_set() else ""
+        self.completed.emit(snapshot, "", notice, self.full)
+
+    def send(self, snapshot):
+        """保存済みの当日分をシートへ送る。失敗しても集計結果は保存済みで、次回の送信で回復する。"""
+        try:
+            sender = self.sender_factory()
+            if sender is None:
+                return "シートの送信先が未設定のため送信していません。"
+            day = snapshot.acquired_at.astimezone(JST).date().isoformat()
+            hours = sheet_hours(self.store.display_hours(snapshot.staff_id, day))
+            if not hours:
+                return ""
+            result = sender.send(day, snapshot.staff_id, snapshot.staff_name, hours)
+            skipped = result.get("skipped") or []
+            if skipped:
+                return "シート送信済み（シートに枠が無い時間帯：" + "・".join(f"{h}時" for h in skipped) + "）"
+            return "シート送信済み"
+        except Exception as exc:
+            return f"シート送信失敗：{exc}"
 
 
 class CallStatisticsController(QObject):
     changed = Signal()
     status_changed = Signal(str)
 
-    def __init__(self, parent=None, store=None, autostart=True):
+    def __init__(self, parent=None, store=None, autostart=True, sender_factory=None):
         super().__init__(parent)
         if store is None:
             base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "TelephoneTool"
             store = StatisticsStore(base / "call_statistics.sqlite3")
         self.store = store
+        self.sender_factory = sender_factory
         self.worker = None
         self.dialog = None
         self.closing = False
-        self.status = "初回の集計前です。上部カウンターは初回を基準に差分を記録します。"
+        self.pending_full = False
+        self.status = "初回の集計前です。"
         self.automatic = self.store.preference("automatic", "1") == "1"
         self.timer = QTimer(self)
+        # 既定の粗いタイマーは最大5%早く発火し、00分の境界より前に読むと時間帯がずれるため。
+        self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._automatic_tick)
         self.schedule()
@@ -67,9 +97,10 @@ class CallStatisticsController(QObject):
     def schedule(self):
         self.timer.stop()
         now = datetime.now(JST)
-        self.next_run = next_half_hour(now)
+        self.next_run = next_hour(now)
         if self.automatic and not self.closing:
-            self.timer.start(max(1, int((self.next_run - now).total_seconds() * 1000)))
+            # 境界の2秒後に読み、前の時間帯の差分を確定させる（保存側で00分に切り揃える）。
+            self.timer.start(max(1, int((self.next_run - now).total_seconds() * 1000)) + 2000)
 
     def _automatic_tick(self):
         self.collect()
@@ -79,29 +110,42 @@ class CallStatisticsController(QObject):
         self.automatic = enabled
         self.store.set_preference("automatic", "1" if enabled else "0")
         self.schedule()
-        self.set_status("30分ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。集計ボタンから手動で取得できます。")
+        self.set_status("1時間ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。集計ボタンから手動で取得できます。")
 
     def set_status(self, message):
         self.status = message
         self.status_changed.emit(message)
         self.changed.emit()
 
-    def collect(self):
-        if self.busy or self.closing:
+    def collect(self, full=True):
+        if self.closing:
             return
-        self.set_status("CTIを集計しています…")
-        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), self)
+        if self.busy:
+            # 実行中に集計が重なった場合は、終わってから実行する。
+            self.pending_full = self.pending_full or full
+            return
+        if full:
+            self.set_status("CTIを集計しています…")
+        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), full, self.sender_factory, self)
         self.worker = worker
         worker.completed.connect(self._completed)
         worker.finished.connect(self._finished)
         worker.start()
         self.changed.emit()
 
-    def _completed(self, snapshot, error):
+    def _completed(self, snapshot, error, notice="", full=True):
         if error:
-            self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
-        else:
-            self.set_status(f"{snapshot.acquired_at:%H:%M} 集計済み：{snapshot.staff_name}／履歴 {snapshot.history_rows}件")
+            if full or not self.status.startswith("集計できませんでした"):
+                self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
+            return
+        if not full:
+            self.changed.emit()
+            return
+        parts = [f"{snapshot.acquired_at:%H:%M} 集計済み：{snapshot.staff_name}"]
+        if snapshot.history_counters is not None:
+            parts.append(f"本人の当日履歴 {snapshot.history_rows}件")
+        parts += [text for text in (snapshot.note, notice) if text]
+        self.set_status("／".join(parts))
 
     def _finished(self):
         worker = self.worker
@@ -109,6 +153,9 @@ class CallStatisticsController(QObject):
         if worker:
             worker.deleteLater()
         self.changed.emit()
+        if self.pending_full and not self.closing:
+            self.pending_full = False
+            self.collect(full=True)
 
     def show(self, collect=False):
         if self.dialog is None:
@@ -129,13 +176,19 @@ class CallStatisticsController(QObject):
         return True
 
 
+def status_text(row):
+    return row["counter_status"]
+
+
 class CallStatisticsDialog(QDialog):
+    HEADERS = ["時間帯", "コール", "対話", "トス", "応答時間", "新規見込", "対話NG", "取得状態"]
+
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
         self._scroll_key = None
         self.setWindowTitle("時間帯別 通話集計")
-        self.resize(920, 690)
+        self.resize(980, 690)
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
         self.day = QDateEdit(QDate.currentDate())
@@ -143,8 +196,9 @@ class CallStatisticsDialog(QDialog):
         self.day.setDisplayFormat("yyyy/MM/dd")
         self.staff = QComboBox()
         self.collect_button = QPushButton("集計")
-        self.collect_button.setToolTip("現在のログインスタッフの当日分を取得します。日付欄は保存済みの表の表示日です。")
-        self.automatic = QCheckBox("30分ごとに自動集計")
+        self.collect_button.setToolTip("現在のログインスタッフの当日分を取得し、シートへ送ります。日付欄は保存済みの表の表示日です。")
+        self.automatic = QCheckBox("1時間ごとに自動集計")
+        self.automatic.setToolTip("起動時と毎時00分に集計してシートへ送ります。")
         self.automatic.setChecked(controller.automatic)
         top.addWidget(QLabel("日付"))
         top.addWidget(self.day)
@@ -167,24 +221,24 @@ class CallStatisticsDialog(QDialog):
         self.status_label.setWordWrap(True)
         self.status_label.setTextFormat(Qt.PlainText)
         layout.addWidget(self.status_label)
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["時間帯", "応答時間", "総コール数", "新規見込", "対話NG", "取得状態"])
+        self.table = QTableWidget(0, len(self.HEADERS))
+        self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self.table.setToolTip("過去のコール数も履歴から集計します。新規見込・対話有NGは履歴で明確に判定できる分を優先し、それ以外は取得済みの累計差分を表示します。")
+        self.table.horizontalHeader().setSectionResizeMode(len(self.HEADERS) - 1, QHeaderView.ResizeToContents)
+        self.table.setToolTip("コール・対話・トスは架電履歴から、集計開始前の分も含めて当日分を集計します。")
         layout.addWidget(self.table, 1)
         self.total_label = QLabel()
         self.total_label.setTextFormat(Qt.PlainText)
         self.total_label.setWordWrap(True)
         layout.addWidget(self.total_label)
-        note = QLabel("集計開始前のコールも履歴から集計し、最初のログの時間帯から表示します。通話0秒のコールも件数に含めます。\n"
-                      "応答時間＝IP電話通話時間。対話NG＝対話有NG。履歴で判別できない結果は取得済みの差分を使い、復元できない値は未取得です。")
+        note = QLabel("コール＝架電履歴の件数（通話0秒・留守も含む）。対話＝見込＋対話有NG（NGは現アナNG・多重留守NG以外を対話有）。\n"
+                      "トス＝当日の見込のうち、見込検索のランクが「トス」のもの。応答時間＝IP電話通話時間。対話NG＝対話有NG。")
         note.setWordWrap(True)
         layout.addWidget(note)
-        self.collect_button.clicked.connect(controller.collect)
+        self.collect_button.clicked.connect(lambda: controller.collect())
         self.automatic.toggled.connect(controller.set_automatic)
         self.duration_unit.currentIndexChanged.connect(self._unit_changed)
         self.day.dateChanged.connect(self.refresh)
@@ -211,27 +265,37 @@ class CallStatisticsDialog(QDialog):
         self.collect_button.setText("集計中…" if controller.busy else "集計")
         self.duration_unit.setEnabled(not controller.busy)
         self.status_label.setText(controller.status)
-        self.next_label.setText(f"次回 {controller.next_run:%H:%M}" if controller.automatic else "自動集計 停止中")
+        self.next_label.setText(f"次回の集計・送信 {controller.next_run:%H:%M}" if controller.automatic else "自動集計 停止中")
         day = self.day.date().toString("yyyy-MM-dd")
         staff_id = self.staff.currentData() or ""
         rows = controller.store.display_hours(staff_id, day)
         self.table.setRowCount(len(rows))
         row_indexes = {}
+
+        def number(row, key):
+            return str(row[key]) if row.get(key) is not None else "未取得"
+
         for index, row in enumerate(rows):
             hour = row["hour"]
             row_indexes[hour] = index
-            values = [f"{hour:02}:00–{hour + 1:02}:00", format_duration(row["talk_seconds"]),
-                      *[str(row[k]) if row.get(k) is not None else "未取得" for k in ("total_calls", "new_prospects", "ng_with_dialogue")],
-                      row["counter_status"]]
+            values = [f"{hour:02}:00–{hour + 1:02}:00",
+                      *[number(row, k) for k in ("total_calls", "dialogues", "toss")],
+                      format_duration(row["talk_seconds"]),
+                      *[number(row, k) for k in ("new_prospects", "ng_with_dialogue")],
+                      status_text(row)]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(index, column, item)
-        seconds = [r["talk_seconds"] for r in rows if r["talk_seconds"] is not None]
         latest = controller.store.latest(staff_id, day)
         if latest:
-            self.total_label.setText(f"当日の応答時間 {format_duration(sum(seconds))}　｜　直近のCTI累計：総コール数 {latest['total_calls']}／新規見込 {latest['new_prospects']}／対話NG {latest['ng_with_dialogue']}\n"
-                                     f"最終取得 {datetime.fromisoformat(latest['observed_at']):%Y/%m/%d %H:%M:%S}")
+            def total(key):
+                known = [r[key] for r in rows if r.get(key) is not None]
+                return str(sum(known)) if known else "未取得"
+            seconds = [r["talk_seconds"] for r in rows if r["talk_seconds"] is not None]
+            self.total_label.setText(f"当日合計　コール {total('total_calls')}／対話 {total('dialogues')}／トス {total('toss')}／応答時間 {format_duration(sum(seconds))}\n"
+                                     f"CTI上部の累計：総コール数 {latest['total_calls']}／有効コール {latest.get('valid_calls')}／新規見込 {latest['new_prospects']}"
+                                     f"　最終取得 {datetime.fromisoformat(latest['observed_at']):%Y/%m/%d %H:%M:%S}")
             key = (staff_id, day)
             if self._scroll_key != key:
                 self._scroll_key = key

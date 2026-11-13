@@ -22,6 +22,21 @@ def read_msaa(handles):
     return [results] if isinstance(results, dict) else results
 
 
+def read_status_bar(handles):
+    """ステータスバー（MSAAのRole 23）の項目名。UI Automationと違い、CTIの最小化中も読める。"""
+    config = base64.b64encode(json.dumps({"handles": handles}).encode()).decode()
+    script = base64.b64encode(STATUS_SCRIPT.replace("__CONFIG__", config).encode("utf-16-le")).decode()
+    try:
+        process = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", script],
+                                 capture_output=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+    except subprocess.TimeoutExpired:
+        return []
+    if process.returncode:
+        return []
+    names = json.loads(process.stdout.decode("utf-8-sig") or "[]")
+    return [names] if isinstance(names, str) else [n for n in names if n]
+
+
 def msaa_tables(results):
     tables = []
     for result in results:
@@ -30,17 +45,34 @@ def msaa_tables(results):
             continue
         if result["truncated"] or result["errors"]:
             raise RuntimeError("履歴の読み取りが完了しませんでした。件数や検索範囲を確認してください。")
-        headers = [n["name"] for n in nodes if n["role"] == 25]
+        raw_headers = [n["name"] for n in nodes if n["role"] == 25]
+        # 見込検索のように同名カラム（スタッフ名・スタッフID）がある表は2つ目以降を「名前#2」とする。
+        headers, seen = [], {}
+        for name in raw_headers:
+            seen[name] = seen.get(name, 0) + 1
+            headers.append(name if seen[name] == 1 else f"{name}#{seen[name]}")
+
+        def belongs(cell, header):
+            return cell["name"] == header or (cell["name"] or "").startswith(header + " 行 ")
+
         rows = []
         for row in (n for n in nodes if n["parent_id"] == nodes[0]["id"] and n["role"] == 28):
             values = {}
-            for cell in (n for n in nodes if n["parent_id"] == row["id"] and n["role"] == 29):
-                labels = [h for h in headers if cell["name"] == h or (cell["name"] or "").startswith(h + " 行 ")]
-                if len(labels) != 1 or cell["value"] is None or cell.get("error"):
+            cells = [n for n in nodes if n["parent_id"] == row["id"] and n["role"] == 29]
+            positional = len(cells) == len(raw_headers) and all(belongs(c, raw_headers[i]) for i, c in enumerate(cells))
+            for index, cell in enumerate(cells):
+                if positional:
+                    label = headers[index]
+                else:
+                    labels = [h for h in raw_headers if belongs(cell, h)]
+                    if len(labels) != 1 or raw_headers.count(labels[0]) != 1:
+                        raise RuntimeError("履歴のセルを読み取れませんでした。")
+                    label = labels[0]
+                if cell["value"] is None or cell.get("error"):
                     raise RuntimeError("履歴のセルを読み取れませんでした。")
-                if labels[0] in values:
+                if label in values:
                     raise RuntimeError("履歴のカラム名が重複しています。")
-                values[labels[0]] = cell["value"]
+                values[label] = cell["value"]
             if values:
                 rows.append(values)
         tables.append({"hwnd": result["hwnd"], "headers": headers, "rows": rows})
@@ -61,6 +93,7 @@ class Windows:
             "GetDlgCtrlID": ([wintypes.HWND], ctypes.c_int),
             "IsWindowVisible": ([wintypes.HWND], wintypes.BOOL),
             "IsWindowEnabled": ([wintypes.HWND], wintypes.BOOL),
+            "IsIconic": ([wintypes.HWND], wintypes.BOOL),
             "GetWindowLongW": ([wintypes.HWND, ctypes.c_int], wintypes.LONG),
             "SendMessageTimeoutW": ([wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
                                      wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
@@ -243,6 +276,45 @@ def uia_snapshot(hwnd, args):
         return {"error": "UI Automation timed out after 60 seconds"}
     except Exception as exc:
         return {"error": str(exc)}
+
+STATUS_SCRIPT = r'''
+$ErrorActionPreference='Stop'
+[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)
+Add-Type -AssemblyName Accessibility
+$source=@'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using Accessibility;
+public static class StatusBarAcc {
+    [DllImport("oleacc.dll")]
+    static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint objectId, ref Guid iid,
+        [MarshalAs(UnmanagedType.Interface)] out IAccessible result);
+    [DllImport("oleacc.dll")]
+    static extern int AccessibleChildren(IAccessible container, int start, int count,
+        [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex=2)] object[] children, out int obtained);
+    public static List<string> Read(long hwnd) {
+        var names=new List<string>();
+        IAccessible acc; Guid iid=new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
+        if (AccessibleObjectFromWindow(new IntPtr(hwnd), 0xfffffffc, ref iid, out acc) < 0 || acc == null) return names;
+        if (Convert.ToInt32(acc.get_accRole(0)) != 23) return names;
+        int count=acc.accChildCount; var children=new object[count]; int obtained;
+        if (AccessibleChildren(acc, 0, count, children, out obtained) < 0) return names;
+        for (int i=0; i<obtained; i++) {
+            try {
+                var child=children[i] as IAccessible;
+                names.Add(child != null ? child.get_accName(0) : acc.get_accName(children[i]));
+            } catch {}
+        }
+        return names;
+    }
+}
+'@
+Add-Type -TypeDefinition $source -ReferencedAssemblies ([Accessibility.IAccessible].Assembly.Location)
+$cfg=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CONFIG__')) | ConvertFrom-Json
+$names=@(foreach($h in $cfg.handles) { [StatusBarAcc]::Read([long]$h) })
+ConvertTo-Json -InputObject $names -Compress
+'''
 
 MSAA_SCRIPT = r'''
 $ErrorActionPreference='Stop'
