@@ -31,15 +31,24 @@ class StatisticsWorker(QThread):
 
     def run(self):
         try:
-            snapshot = CtiStatisticsCollector(self.cancelled).collect(self.numeric_unit, full=self.full)
+            collector = CtiStatisticsCollector(self.cancelled)
+            snapshot = collector.collect(self.numeric_unit, full=self.full)
             if self.cancelled.is_set():
                 return
             self.store.save(snapshot)
         except Exception as exc:
             self.completed.emit(None, str(exc), "", self.full)
             return
-        notice = self.send(snapshot) if self.full and not self.cancelled.is_set() else ""
-        self.completed.emit(snapshot, "", notice, self.full)
+        notices = []
+        if snapshot.history_counters is not None:
+            # 保存に成功してから架電履歴の一覧をクリアする。失敗しても集計は保存済みなので警告だけにする。
+            try:
+                collector.clear_history()
+            except Exception as exc:
+                notices.append(f"架電履歴のクリア未完了：{exc}")
+        if self.full and not self.cancelled.is_set():
+            notices.append(self.send(snapshot))
+        self.completed.emit(snapshot, "", "／".join(n for n in notices if n), self.full)
 
     def send(self, snapshot):
         """保存済みの当日分をシートへ送る。失敗しても集計結果は保存済みで、次回の送信で回復する。"""
@@ -141,7 +150,9 @@ class CallStatisticsController(QObject):
         if not full:
             self.changed.emit()
             return
-        parts = [f"{snapshot.acquired_at:%H:%M} 集計済み：{snapshot.staff_name}"]
+        # クリアや送信だけ失敗した場合も、集計は保存済みであることを示す。
+        saved = "（保存済み）" if any(word in notice for word in ("未完了", "失敗")) else ""
+        parts = [f"{snapshot.acquired_at:%H:%M} 集計済み{saved}：{snapshot.staff_name}"]
         if snapshot.history_counters is not None:
             parts.append(f"本人の当日履歴 {snapshot.history_rows}件")
         parts += [text for text in (snapshot.note, notice) if text]

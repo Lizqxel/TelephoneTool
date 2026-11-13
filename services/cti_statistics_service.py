@@ -215,10 +215,17 @@ def staff_table(tables):
     return found[0]
 
 
+def search_conditions(nodes):
+    return {n["hwnd"]: n["text"] for n in nodes
+            if any(kind in n["class_name"] for kind in ("EDIT", "COMBOBOX", "LISTBOX", "SysDateTimePick32"))}
+
+
 class CtiStatisticsCollector:
     def __init__(self, cancel=None):
         self.cancel = cancel or threading.Event()
         self.windows = None
+        self._history_context = None
+        self.clear_history_info = None
 
     def check_cancelled(self):
         if self.cancel.is_set():
@@ -254,6 +261,8 @@ class CtiStatisticsCollector:
 
         履歴を取れない回（条件が合わない・エラー）もカウンターは返し、理由を note に入れる。
         """
+        self._history_context = None
+        self.clear_history_info = None
         started = datetime.now(JST)
         day = started.date().isoformat()
         self.windows = Windows()
@@ -284,8 +293,10 @@ class CtiStatisticsCollector:
         except CollectionCancelled:
             raise
         except CollectionSkipped as exc:
+            self._history_context = None  # 集計していない一覧はクリアしない
             return StatisticsSnapshot(**base, note=str(exc))
         except (RuntimeError, ValueError) as exc:
+            self._history_context = None
             return StatisticsSnapshot(**base, note=f"履歴を取得できませんでした：{exc}")
         if totals["unmatched_prospects"]:
             rank_note = (rank_note + " " if rank_note else "") + f"見込検索に無い見込{totals['unmatched_prospects']}件はトスに数えていません。"
@@ -336,6 +347,7 @@ class CtiStatisticsCollector:
         after_controls = descendants(after["nodes"], refreshed_page["hwnd"])
         total = history_total(after_controls)
         rows = list(grid["rows"])
+        first_page = list(grid["rows"])
         if len(rows) < total:
             next_button = find_button(after_controls, "次へ")
             for _ in range(MAX_HISTORY_PAGES):
@@ -364,7 +376,66 @@ class CtiStatisticsCollector:
         final_controls = descendants(final["nodes"], refreshed_page["hwnd"])
         validate_search_dates(final_controls, day)
         validate_phone_filter(final_controls)
+        # 保存後のクリア用。1ページ目へ戻した状態の一覧と検索条件が変わっていなければクリアする。
+        self._history_context = {"cti": cti, "page_hwnd": refreshed_page["hwnd"], "history_hwnd": grid["hwnd"],
+                                 "staff_hwnd": staff["hwnd"], "staff_rows": (staff_after or staff)["rows"],
+                                 "rows": first_page, "conditions": search_conditions(final_controls)}
         return rows
+
+    def clear_history(self):
+        """呼び出し元が集計を保存した後で、取得した一覧だけをクリアする。"""
+        self.check_cancelled()
+        context = self._history_context
+        if context is None:
+            raise RuntimeError("クリア対象の集計済み履歴がありません。")
+        windows = Windows()
+        ctis = windows.windows("CTIメイン")
+        if not any(w["hwnd"] == context["cti"]["hwnd"] and w["pid"] == context["cti"]["pid"] for w in ctis):
+            raise RuntimeError("CTIが切り替わったため、履歴はクリアしていません。")
+        before = windows.snapshot(context["cti"]["hwnd"], 3000)
+        if before["errors"]:
+            raise RuntimeError("クリア前の画面を確認できませんでした。")
+        controls = descendants(before["nodes"], context["page_hwnd"])
+        buttons = [n for n in controls if n["text"] == "クリア" and "BUTTON" in n["class_name"]]
+        if len(buttons) != 1:
+            raise RuntimeError("架電履歴のクリアボタンを特定できませんでした。")
+        tables = msaa_tables(read_msaa([context["history_hwnd"], context["staff_hwnd"]]))
+        history = next((t for t in tables if t["hwnd"] == context["history_hwnd"]), None)
+        staff = next((t for t in tables if t["hwnd"] == context["staff_hwnd"]), None)
+        if not history or not staff or history["rows"] != context["rows"] or staff["rows"] != context["staff_rows"] or search_conditions(controls) != context["conditions"]:
+            raise RuntimeError("集計後に履歴または検索条件が変わったため、クリアしていません。")
+        self.check_cancelled()
+        button = buttons[0]
+        result = ctypes.c_size_t()
+        ok = windows.api.SendMessageTimeoutW(button["parent_hwnd"], WM_COMMAND, button["control_id"] & 0xffff,
+                                             button["hwnd"], SMTO_ABORTIFHUNG, 15000, ctypes.byref(result))
+        if not ok:
+            raise RuntimeError("クリアの応答を確認できませんでした。CTI側の状態を確認してください。")
+        # Do not retry the command: a timeout can still mean that CTI processed it.
+        self._history_context = None
+        for _ in range(3):
+            if self.cancel.wait(0.3):
+                self.check_cancelled()
+            after = windows.snapshot(context["cti"]["hwnd"], 3000)
+            if after["errors"]:
+                continue
+            after_controls = descendants(after["nodes"], context["page_hwnd"])
+            current = msaa_tables(read_msaa([n["hwnd"] for n in after_controls if n["class_name"].startswith("WindowsForms10.Window.")]))
+            # Clear recreates the results grid and blanks the count label in CTI.
+            # Rediscover the grid; the old handle and a numeric label are not reliable.
+            candidates = [t for t in current if {"対応日時", "管理番号"}.issubset(t.get("headers", []))
+                          or t["hwnd"] == context["history_hwnd"]]
+            if len(candidates) == 1 and not candidates[0]["rows"]:
+                staff_after = next((t for t in current if {"選択", "スタッフ"}.issubset(t.get("headers", []))), None)
+                self.clear_history_info = {
+                    "rows_before": len(context["rows"]), "rows_after": 0,
+                    "search_conditions_preserved": search_conditions(after_controls) == context["conditions"],
+                    "staff_selection_preserved": bool(staff_after and staff_after["rows"] == context["staff_rows"]),
+                    "history_visible_before": next((n["visible"] for n in before["nodes"] if n["hwnd"] == context["page_hwnd"]), None),
+                    "history_visible_after": next((n["visible"] for n in after["nodes"] if n["hwnd"] == context["page_hwnd"]), None),
+                }
+                return
+        raise RuntimeError("クリア後に履歴が空になったことを確認できませんでした。")
 
     def collect_ranks(self, cti, before, staff_name):
         """見込検索から本人の {管理番号: ランク}。取れなければ (None, 理由) でトスを未取得にする。"""

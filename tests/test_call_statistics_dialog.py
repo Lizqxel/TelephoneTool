@@ -6,6 +6,14 @@ from PySide6.QtWidgets import QApplication
 
 from services.call_statistics import StatisticsStore
 from ui.call_statistics_dialog import CallStatisticsController, CallStatisticsDialog
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def no_sheet_sending(monkeypatch):
+    # sender_factory を渡さないテストでも、本物の送信用フォームへ送らない。
+    from ui import call_statistics_dialog as module
+    monkeypatch.setattr(module.SheetSender, "from_settings", classmethod(lambda cls: None))
 
 
 def test_dialog_displays_unknowns_and_does_not_collect_when_opened(tmp_path):
