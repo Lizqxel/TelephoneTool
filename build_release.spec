@@ -40,6 +40,8 @@ added_files = [
     ('utils', 'utils'),
     ('ui', 'ui'),
     ('services', 'services'),
+    ('apps_script', 'apps_script'),
+    ('docs', 'docs'),
     ('drivers', 'drivers')
 ]
 
@@ -57,6 +59,8 @@ hiddenimports = []
 hiddenimports += collect_submodules('selenium')
 hiddenimports += collect_submodules('webdriver_manager')
 hiddenimports += collect_submodules('pykakasi')  # pykakasiのサブモジュールを追加
+hiddenimports += collect_submodules('pywinauto')
+hiddenimports += collect_submodules('comtypes')
 hiddenimports += ['PySide6', 'PySide6.QtWidgets', 'PySide6.QtGui', 'PySide6.QtCore']  # 明示的に追加
 hiddenimports += ['jaconv']  # pykakasiの依存関係を追加
 hiddenimports += ['bs4', 'soupsieve']  # BeautifulSoup と CSS セレクタ依存を明示
@@ -102,4 +106,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='icon.ico'
-) 
+)

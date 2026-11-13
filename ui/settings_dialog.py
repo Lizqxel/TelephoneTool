@@ -385,6 +385,51 @@ ND：{nd}
         cti_monitor_layout.addLayout(cti_reset_layout)
         cti_monitor_group.setLayout(cti_monitor_layout)
         content_layout.addWidget(cti_monitor_group)
+
+        # 実績集計は既存Googleフォームとは独立したApps Scriptを使用する。
+        performance_group = QGroupBox("実績集計・同期")
+        performance_layout = QVBoxLayout()
+        performance_desc = QLabel(
+            "CTIの総コール・有効コール・新規見込・IP電話通話時間を保存します。\n"
+            "同期先が未設定でもPC内への保存と実績画面は利用できます。"
+        )
+        performance_desc.setWordWrap(True)
+        performance_layout.addWidget(performance_desc)
+
+        performance_config = {}
+        if hasattr(parent, 'settings') and isinstance(parent.settings, dict):
+            performance_config = parent.settings.get('performanceTracking', {}) or {}
+
+        self.performance_enabled_checkbox = QCheckBox("実績収集を有効にする")
+        self.performance_enabled_checkbox.setChecked(bool(performance_config.get('enabled', True)))
+        performance_layout.addWidget(self.performance_enabled_checkbox)
+
+        endpoint_row = QHBoxLayout()
+        endpoint_row.addWidget(QLabel("Apps Script URL:"))
+        self.performance_endpoint_edit = QLineEdit(str(performance_config.get('endpoint', '')))
+        self.performance_endpoint_edit.setPlaceholderText("https://script.google.com/macros/s/.../exec")
+        endpoint_row.addWidget(self.performance_endpoint_edit)
+        performance_layout.addLayout(endpoint_row)
+
+        performance_token_row = QHBoxLayout()
+        performance_token_row.addWidget(QLabel("実績用トークン:"))
+        self.performance_token_edit = QLineEdit(str(performance_config.get('sharedToken', '')))
+        self.performance_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        performance_token_row.addWidget(self.performance_token_edit)
+        performance_layout.addLayout(performance_token_row)
+
+        performance_interval_row = QHBoxLayout()
+        performance_interval_row.addWidget(QLabel("同期間隔:"))
+        self.performance_interval_spin = QSpinBox()
+        self.performance_interval_spin.setRange(10, 300)
+        self.performance_interval_spin.setValue(int(performance_config.get('syncIntervalSeconds', 30)))
+        self.performance_interval_spin.setSuffix(" 秒")
+        performance_interval_row.addWidget(self.performance_interval_spin)
+        performance_interval_row.addStretch()
+        performance_layout.addLayout(performance_interval_row)
+
+        performance_group.setLayout(performance_layout)
+        content_layout.addWidget(performance_group)
         
         # ブラウザ設定グループ
         browser_group = QGroupBox("ブラウザ設定")
@@ -723,6 +768,14 @@ ND：{nd}
                         self.token_edit.setText(token_val)
                     except Exception:
                         self.token_edit.setText('')
+
+                    performance = settings.get('performanceTracking', {}) if isinstance(settings, dict) else {}
+                    if not isinstance(performance, dict):
+                        performance = {}
+                    self.performance_enabled_checkbox.setChecked(bool(performance.get('enabled', True)))
+                    self.performance_endpoint_edit.setText(str(performance.get('endpoint', '')))
+                    self.performance_token_edit.setText(str(performance.get('sharedToken', '')))
+                    self.performance_interval_spin.setValue(int(performance.get('syncIntervalSeconds', 30)))
             else:
                 self.mode_templates = {
                     'simple': self.default_format_simple,
@@ -882,6 +935,14 @@ ND：{nd}
                 }
 
             base['googleFormPosting'] = gfp
+
+            # 既存Googleフォーム設定とは別の実績同期設定。
+            base['performanceTracking'] = {
+                'enabled': self.performance_enabled_checkbox.isChecked(),
+                'endpoint': self.performance_endpoint_edit.text().strip(),
+                'sharedToken': self.performance_token_edit.text().strip(),
+                'syncIntervalSeconds': self.performance_interval_spin.value()
+            }
 
             # 上書きキーを設定
             base.update(settings)

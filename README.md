@@ -1,6 +1,6 @@
 # TelephoneTool - コールセンター業務効率化ツール
 
-![バージョン](https://img.shields.io/badge/version-2.4.0-blue.svg)
+![バージョン](https://img.shields.io/badge/version-3.10.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![ライセンス](https://img.shields.io/badge/license-proprietary-red.svg)
 
@@ -25,6 +25,9 @@ TelephoneToolは、コールセンター業務の効率化を目的として開�
 - **電話番号監視** - 着信番号の自動検出
 - **フォーマット自動生成** - 着信情報に基づくフォーマット作成
 - **リアルタイム更新** - 通話状況に応じた動的な情報更新
+- **実績ダッシュボード** - 総コール・有効コール・新規見込・IP電話通話時間を担当者別／時間帯別に表示
+- **個人明細** - 担当者名をクリックして架電時刻・結果・対話時間を確認
+- **オフライン保存** - 通信切断中もPC内へ保存し、復旧後にApps Scriptへ再同期
 
 ## 🛠️ 技術スタック
 
@@ -141,6 +144,9 @@ TelephoneTool/
 ```
 
 ## ⚙️ 設定
+
+実績集計のGoogle連携は既存Googleフォームとは独立しています。導入と復旧方法は
+[`docs/performance_tracking_setup.md`](docs/performance_tracking_setup.md) を参照してください。
 
 ### settings.json の主要設定項目
 ```json

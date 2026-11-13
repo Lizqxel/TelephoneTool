@@ -83,6 +83,7 @@ screenshots/
 
 # Local settings
 settings.json
+work/
 
 # Secrets and credentials
 telephonetool-42f9d38d14ee.json

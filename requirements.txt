@@ -5,6 +5,8 @@ google-api-python-client>=2.108.0
 google-auth-httplib2>=0.1.1
 google-auth-oauthlib>=1.1.0
 pywin32>=306
+pywinauto>=0.6.9
+comtypes>=1.4.0
 pillow>=10.1.0
 selenium==4.18.1
 webdriver-manager==4.0.1

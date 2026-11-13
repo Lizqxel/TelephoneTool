@@ -51,6 +51,8 @@ from ui.main_window_functions import MainWindowFunctions
 from services.oneclick import OneClickService
 from services.phone_button_monitor import PhoneButtonMonitor
 from services.cti_status_monitor import CTIStatusMonitor
+from services.performance_manager import PerformanceManager
+from ui.performance_dashboard import PerformanceDashboardDialog
 from utils.format_utils import format_phone_number, format_phone_number_without_hyphen, format_postal_code
 from ui.easy_mode_dialogs import AddressInfoDialog, ListInfoDialog, OrdererInputDialog, OrderInfoDialog
 from ui.easy_mode_dialogs import DIALOG_BACK, DIALOG_NEXT, DIALOG_CANCEL
@@ -442,6 +444,14 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self._redo_action.setShortcut(QKeySequence.Redo)
         self._redo_action.setShortcutContext(Qt.ApplicationShortcut)
         self.addAction(self._redo_action)
+
+        # CTI実績は既存Googleフォームと独立した機能として初期化する。
+        self.performance_manager = PerformanceManager(
+            self.settings,
+            getattr(self, 'cti_status_monitor', None),
+            parent=self,
+        )
+        self.performance_manager.start()
     
     def check_and_show_mode_selection(self):
         """
@@ -1631,6 +1641,10 @@ ND：{nd}
         self.cti_copy_btn = QPushButton("営コメ作成")
         self.screenshot_btn = QPushButton("提供判定のスクリーンショット確認")
         self.spreadsheet_btn = QPushButton("スプレッドシート転記")
+        self.performance_btn = QPushButton("本日の実績")
+        self.performance_btn.setVisible(
+            bool((self.settings.get('performanceTracking') or {}).get('enabled', True))
+        )
         self.settings_btn = QPushButton("設定")
         
         # ボタンのスタイル設定
@@ -1654,7 +1668,7 @@ ND：{nd}
         
         # 各ボタンのサイズポリシーを設定
         buttons = [self.clear_btn, self.cti_copy_btn, 
-                  self.screenshot_btn, self.spreadsheet_btn, self.settings_btn]
+                  self.screenshot_btn, self.spreadsheet_btn, self.performance_btn, self.settings_btn]
         
         for btn in buttons:
             btn.setStyleSheet(button_style)
@@ -1665,6 +1679,7 @@ ND：{nd}
         self.cti_copy_btn.clicked.connect(self.copy_cti_to_clipboard)
         self.screenshot_btn.clicked.connect(self.show_screenshot)
         self.spreadsheet_btn.clicked.connect(self.write_to_spreadsheet)
+        self.performance_btn.clicked.connect(self.show_performance_dashboard)
         self.settings_btn.clicked.connect(self.show_settings)
         
         # ボタンをレイアウトに追加
@@ -2833,6 +2848,17 @@ ND：{nd}
                 if hasattr(self.cti_status_monitor, 'update_settings'):
                     self.cti_status_monitor.update_settings()
                     logging.info("CTI監視サービスの設定を更新しました")
+
+            if hasattr(self, 'performance_manager'):
+                self.performance_manager.set_cti_monitor(getattr(self, 'cti_status_monitor', None))
+                self.performance_manager.update_settings(self.settings)
+            performance_visible = bool(
+                (self.settings.get('performanceTracking') or {}).get('enabled', True)
+            )
+            if hasattr(self, 'performance_btn'):
+                self.performance_btn.setVisible(performance_visible)
+            if hasattr(self, 'performance_menu'):
+                self.performance_menu.menuAction().setVisible(performance_visible)
             
             # フォントサイズを適用
             self.apply_font_size()
@@ -2848,6 +2874,24 @@ ND：{nd}
                 else:
                     QWidget.update(widget)
             logging.info("設定を更新しました")
+
+    def show_performance_dashboard(self):
+        """当日全員分のCTI実績画面を開く。"""
+        try:
+            manager = getattr(self, 'performance_manager', None)
+            if manager is None:
+                manager = PerformanceManager(
+                    self.settings,
+                    getattr(self, 'cti_status_monitor', None),
+                    parent=self,
+                )
+                self.performance_manager = manager
+                manager.start()
+            dialog = PerformanceDashboardDialog(manager, self)
+            dialog.exec()
+        except Exception as exc:
+            logging.error("実績画面の表示に失敗しました: %s", exc, exc_info=True)
+            QMessageBox.critical(self, "実績画面エラー", f"実績画面を開けませんでした。\n{exc}")
     
     def update_countdown(self):
         """カウントダウン表示を更新"""
@@ -3315,6 +3359,12 @@ ND：{nd}
         try:
             logging.info("アプリケーション終了処理を開始します")
 
+            if hasattr(self, 'performance_manager'):
+                try:
+                    self.performance_manager.stop()
+                except Exception as e:
+                    logging.error(f"実績収集の終了処理エラー: {str(e)}")
+
             jcom_worker = getattr(self, 'jcom_worker', None)
             if jcom_worker is not None and jcom_worker.isRunning():
                 jcom_worker.cancel()
@@ -3501,6 +3551,14 @@ ND：{nd}
         # 終了
         exit_action = file_menu.addAction("終了")
         exit_action.triggered.connect(self.close)
+
+        # 実績画面は全モードから開ける。
+        self.performance_menu = menubar.addMenu("実績")
+        self.performance_menu.menuAction().setVisible(
+            bool((self.settings.get('performanceTracking') or {}).get('enabled', True))
+        )
+        performance_action = self.performance_menu.addAction("本日の実績を開く")
+        performance_action.triggered.connect(self.show_performance_dashboard)
         
         # ヘルプメニュー
         help_menu = menubar.addMenu("ヘルプ")

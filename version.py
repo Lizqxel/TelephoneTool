@@ -5,7 +5,7 @@
 """
 
 # アプリケーションのバージョン
-VERSION = "3.9.0"
+VERSION = "3.10.0"
 
 # アプリケーション名
 APP_NAME = "TelephoneTool"
@@ -25,4 +25,4 @@ GITHUB_OWNER = "Lizqxel"
 GITHUB_REPO = "TelephoneTool"
 
 # アップデートチェックの間隔（秒）
-UPDATE_CHECK_INTERVAL = 86400  # 24時間 
+UPDATE_CHECK_INTERVAL = 86400  # 24時間

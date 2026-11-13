@@ -52,7 +52,8 @@ class CTIStatusMonitor:
     def __init__(self, on_dialing_to_talking_callback: Optional[Callable] = None,
                  on_call_ended_callback: Optional[Callable] = None,
                  on_talking_started_callback: Optional[Callable] = None,
-                 on_cancel_processing_callback: Optional[Callable] = None):
+                 on_cancel_processing_callback: Optional[Callable] = None,
+                 on_action_button_callback: Optional[Callable] = None):
         """
         初期化
         
@@ -66,6 +67,8 @@ class CTIStatusMonitor:
         self.on_call_ended_callback = on_call_ended_callback
         self.on_talking_started_callback = on_talking_started_callback
         self.on_cancel_processing_callback = on_cancel_processing_callback
+        # 実績収集など、提供判定キャンセルとは独立したボタン通知。
+        self.on_action_button_callback = on_action_button_callback
         
         # 状態管理
         self.current_status = CTIStatus.UNKNOWN
@@ -78,6 +81,8 @@ class CTIStatusMonitor:
         self.rusu_button_handle = None  # 「留守」ボタンのハンドル
         self.tantou_fuzai_button_handle = None  # 「担当者不在」ボタンのハンドル
         self.ng_button_handle = None  # 「NG」ボタンのハンドル
+        self.mikomi_button_handle = None  # 「見込」ボタンのハンドル
+        self.juchu_button_handle = None  # 「受注」ボタンのハンドル
         
         # 監視制御
         self.is_monitoring = False
@@ -667,7 +672,9 @@ class CTIStatusMonitor:
                 self.next_button_handle,
                 self.rusu_button_handle,
                 self.tantou_fuzai_button_handle,
-                self.ng_button_handle
+                self.ng_button_handle,
+                self.mikomi_button_handle,
+                self.juchu_button_handle,
             ]):
                 if not self.find_action_buttons():
                     return
@@ -724,6 +731,24 @@ class CTIStatusMonitor:
                                 button_rect = rect
                         except Exception:
                             self.ng_button_handle = None
+
+                    if self.mikomi_button_handle and win32gui.IsWindow(self.mikomi_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.mikomi_button_handle)
+                            if rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]:
+                                clicked_button = "見込"
+                                button_rect = rect
+                        except Exception:
+                            self.mikomi_button_handle = None
+
+                    if self.juchu_button_handle and win32gui.IsWindow(self.juchu_button_handle):
+                        try:
+                            rect = win32gui.GetWindowRect(self.juchu_button_handle)
+                            if rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3]:
+                                clicked_button = "受注"
+                                button_rect = rect
+                        except Exception:
+                            self.juchu_button_handle = None
                     
                     if clicked_button:
                         # 提供判定の実行状態を確認
@@ -739,9 +764,17 @@ class CTIStatusMonitor:
                         logging.info(f"- 提供判定状態: {'実行中' if is_processing else '未実行'}")
                         
                         self.last_button_click_time = current_time
+
+                        if self.on_action_button_callback:
+                            try:
+                                self.on_action_button_callback(clicked_button)
+                            except Exception as callback_error:
+                                logging.error(f"アクションボタン通知エラー: {callback_error}")
                         
                         # 提供判定をキャンセル
-                        self._cancel_processing(clicked_button)
+                        # 見込・受注は結果確定通知のみ。従来のキャンセル対象にはしない。
+                        if clicked_button not in ("見込", "受注"):
+                            self._cancel_processing(clicked_button)
                         
         except Exception as e:
             logging.error(f"アクションボタンクリックの検出中にエラー: {str(e)}")
@@ -847,6 +880,10 @@ class CTIStatusMonitor:
                             rect = win32gui.GetWindowRect(hwnd)
                             if not self.buttons_detected:
                                 logging.info(f"「NG」ボタンを検出: handle={hwnd}, rect={rect}")
+                        elif text == "見込":
+                            self.mikomi_button_handle = hwnd
+                        elif text == "受注":
+                            self.juchu_button_handle = hwnd
                     except Exception:
                         pass
                 return True
@@ -856,6 +893,8 @@ class CTIStatusMonitor:
             self.rusu_button_handle = None
             self.tantou_fuzai_button_handle = None
             self.ng_button_handle = None
+            self.mikomi_button_handle = None
+            self.juchu_button_handle = None
             
             # CTIメインウィンドウ内の子ウィンドウを列挙
             if self.window_handle:
@@ -866,7 +905,9 @@ class CTIStatusMonitor:
                 self.next_button_handle,
                 self.rusu_button_handle,
                 self.tantou_fuzai_button_handle,
-                self.ng_button_handle
+                self.ng_button_handle,
+                self.mikomi_button_handle,
+                self.juchu_button_handle,
             ])
             
             if found and not self.buttons_detected:
@@ -925,4 +966,4 @@ class CTIStatusMonitor:
                 
         except Exception as e:
             logging.error(f"CTI状態監視中にエラーが発生: {str(e)}")
-            logging.error(traceback.format_exc()) 
+            logging.error(traceback.format_exc())

@@ -116,7 +116,13 @@ def _default_settings() -> Dict[str, Any]:
         "enable_auto_cti_processing": True,
         "cti_monitor_interval": 0.5,
         "cti_auto_processing_cooldown": 3.0,
-        "call_duration_threshold": 0
+        "call_duration_threshold": 0,
+        "performanceTracking": {
+            "enabled": True,
+            "endpoint": "",
+            "sharedToken": "",
+            "syncIntervalSeconds": 30
+        }
     }
 
 
