@@ -30,6 +30,7 @@ from services.jcom_simulation_models import JcomSearchCriteria
 from utils.jcom_address_matcher import NEXT_WITH_CURRENT
 from ui.jcom_simulation_panel import JcomSimulationPanel
 from ui.jcom_simulation_worker import JcomSimulationWorker
+from ui.call_statistics_dialog import CallStatisticsController
 
 from PySide6.QtWidgets import QDialog
 from PySide6.QtCore import Slot
@@ -378,6 +379,21 @@ class MainWindow(QMainWindow, MainWindowFunctions):
             self.init_simple_mode()
         else:
             self.init_easy_mode()
+
+        self.call_statistics = CallStatisticsController(self)
+        statistics_toolbar = self.addToolBar("通話集計")
+        statistics_toolbar.setObjectName("call_statistics_toolbar")
+        statistics_toolbar.setMovable(False)
+        # 手動の集計は集計表の中の「今すぐ集計」から行う
+        history_action = statistics_toolbar.addAction("集計表")
+        history_action.triggered.connect(lambda: self.call_statistics.show())
+        team_action = statistics_toolbar.addAction("全員の集計")
+        team_action.triggered.connect(self._show_team_statistics)
+        self.statistics_status = QLabel(" 1時間ごとに集計" if self.call_statistics.automatic else " 自動集計 停止中")
+        self.statistics_status.setMaximumWidth(550)
+        self.statistics_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        statistics_toolbar.addWidget(self.statistics_status)
+        self.call_statistics.status_changed.connect(self._show_statistics_status)
 
         self.cti_screen_values_detected.connect(self._handle_cti_screen_values)
         self.trigger_auto_search.connect(self.auto_search_service_area)
@@ -3245,10 +3261,32 @@ ND：{nd}
         elif hasattr(self, 'jcom_panel'):
             self.jcom_panel.set_running(False)
 
+    def _show_statistics_status(self, text):
+        self.statistics_status.setText(" " + (text if len(text) <= 56 else text[:55] + "…"))
+        self.statistics_status.setToolTip(text)
+
+    def _show_team_statistics(self):
+        """スプレッドシートの全員分の集計を表示する（初回だけGoogleログイン）。"""
+        if getattr(self, 'team_statistics', None) is None:
+            from ui.team_statistics_dialog import TeamStatisticsDialog
+            staff = self.call_statistics.store.staff()
+            self.team_statistics = TeamStatisticsDialog(own_name=staff[0]["staff_name"] if staff else "", parent=self)
+        self.team_statistics.show()
+        self.team_statistics.raise_()
+        self.team_statistics.activateWindow()
+
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
         try:
             logging.info("アプリケーション終了処理を開始します")
+
+            statistics = getattr(self, 'call_statistics', None)
+            if statistics is not None and not statistics.stop():
+                event.ignore()
+                if not getattr(self, '_statistics_close_pending', False):
+                    self._statistics_close_pending = True
+                    statistics.worker.finished.connect(lambda: QTimer.singleShot(0, self.close))
+                return
 
             jcom_worker = getattr(self, 'jcom_worker', None)
             if jcom_worker is not None and jcom_worker.isRunning():

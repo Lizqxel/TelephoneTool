@@ -40,7 +40,9 @@ added_files = [
     ('utils', 'utils'),
     ('ui', 'ui'),
     ('services', 'services'),
-    ('drivers', 'drivers')
+    ('drivers', 'drivers'),
+    # 全員の集計のGoogleログイン設定（gitignore済み。存在するときだけ同梱）
+    ('google_oauth_client.json', '.'),
 ]
 
 # データファイルの収集

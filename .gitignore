@@ -88,4 +88,6 @@ settings.json
 telephonetool-42f9d38d14ee.json
 telephonetool-*.json
 *.credentials.json
+# Googleログイン（全員の集計）のOAuthクライアント。ビルド時にexeへ同梱する
+google_oauth_client.json
 *.secret.json
