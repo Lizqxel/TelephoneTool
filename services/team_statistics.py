@@ -14,7 +14,11 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 import unicodedata
+import webbrowser
+import wsgiref.simple_server
+import wsgiref.util
 
 SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email",
           "https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -23,6 +27,35 @@ SHEET_NAME_PREFIX = "コール集計打ち込み用_"
 CLIENT_FILE = "google_oauth_client.json"
 LABELS = ("コール", "対話", "トス")
 API = "https://sheets.googleapis.com/v4/spreadsheets"
+SUCCESS_PAGE = ("<!doctype html><meta charset='utf-8'><title>TelephoneTool</title>"
+                "<p style='font:18px sans-serif;margin:40px'>TelephoneToolのログインが完了しました。このページは閉じてかまいません。</p>")
+
+
+class LoginCancelled(RuntimeError):
+    pass
+
+
+class _RedirectReceiver:
+    """Googleのログイン後に戻ってくる http://localhost:PORT/?code=... を受け取る。"""
+
+    def __init__(self):
+        self.uri = None
+
+    def __call__(self, environ, start_response):
+        query = environ.get("QUERY_STRING", "")
+        # favicon などの別のリクエストは無視し、code か error が付いたものだけを結果にする
+        if "code=" in query or "error=" in query:
+            self.uri = wsgiref.util.request_uri(environ)
+            body = SUCCESS_PAGE if "code=" in query else SUCCESS_PAGE.replace("完了しました", "中止されました")
+        else:
+            body = ""
+        start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+        return [body.encode("utf-8")]
+
+
+class _QuietHandler(wsgiref.simple_server.WSGIRequestHandler):
+    def log_message(self, *args):  # 配布版（コンソール無し）で標準エラーに書かない
+        pass
 
 
 def normalize(value):
@@ -116,16 +149,41 @@ class GoogleLogin:
         self.token_path.parent.mkdir(parents=True, exist_ok=True)
         self.token_path.write_text(json.dumps(data), encoding="utf-8")
 
-    def login(self, timeout_seconds=300):
-        """既定のブラウザでGoogleのログイン画面を開き、許可されるまで待つ。"""
+    def login(self, timeout_seconds=300, cancel=None, on_url=None, open_browser=True):
+        """既定のブラウザでGoogleのログイン画面を開き、許可されるまで待つ。
+
+        cancel（threading.Event）が立てば中止する。on_url にはログイン画面のURLを渡すので、
+        別のブラウザ（社内アカウントのブラウザ）に貼り付けてもログインできる。
+        """
         if not self.client:
             raise RuntimeError(f"Googleログインの設定ファイル（{CLIENT_FILE}）がありません。")
         from google_auth_oauthlib.flow import InstalledAppFlow
         os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
         flow = InstalledAppFlow.from_client_config(self.client, SCOPES)
-        credentials = flow.run_local_server(
-            port=0, open_browser=True, timeout_seconds=timeout_seconds, prompt="select_account",
-            authorization_prompt_message="", success_message="TelephoneToolのログインが完了しました。このページは閉じてかまいません。")
+        receiver = _RedirectReceiver()
+        server = wsgiref.simple_server.make_server("localhost", 0, receiver, handler_class=_QuietHandler)
+        try:
+            flow.redirect_uri = f"http://localhost:{server.server_port}/"
+            url, _ = flow.authorization_url(prompt="select_account")
+            if on_url:
+                on_url(url)
+            if open_browser:
+                webbrowser.open(url, new=1)
+            server.timeout = 0.5  # 0.5秒ごとに中止・時間切れを確かめる
+            deadline = time.monotonic() + timeout_seconds
+            while receiver.uri is None:
+                if cancel is not None and cancel.is_set():
+                    raise LoginCancelled("ログインを中止しました。")
+                if time.monotonic() > deadline:
+                    raise RuntimeError("ログインが時間内に完了しませんでした。もう一度やり直してください。")
+                server.handle_request()
+        finally:
+            server.server_close()
+        if "code=" not in receiver.uri:
+            raise LoginCancelled("Googleの画面でログインが中止されました。")
+        # oauthlib は https 以外を受け付けないため（ライブラリ標準の run_local_server と同じ扱い）
+        flow.fetch_token(authorization_response=receiver.uri.replace("http://", "https://", 1))
+        credentials = flow.credentials
         if not credentials or not credentials.refresh_token:
             raise RuntimeError("Googleのログインが完了しませんでした。")
         email = email_from_id_token(getattr(credentials, "id_token", "") or "")

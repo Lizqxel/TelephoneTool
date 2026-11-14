@@ -3270,7 +3270,8 @@ ND：{nd}
         if getattr(self, 'team_statistics', None) is None:
             from ui.team_statistics_dialog import TeamStatisticsDialog
             staff = self.call_statistics.store.staff()
-            self.team_statistics = TeamStatisticsDialog(own_name=staff[0]["staff_name"] if staff else "", parent=self)
+            self.team_statistics = TeamStatisticsDialog(own_name=staff[0]["staff_name"] if staff else "", parent=self,
+                                                        controller=self.call_statistics)
         self.team_statistics.show()
         self.team_statistics.raise_()
         self.team_statistics.activateWindow()
