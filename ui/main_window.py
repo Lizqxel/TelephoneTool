@@ -384,9 +384,7 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         statistics_toolbar = self.addToolBar("通話集計")
         statistics_toolbar.setObjectName("call_statistics_toolbar")
         statistics_toolbar.setMovable(False)
-        self.statistics_button = QPushButton("集計")
-        self.statistics_button.clicked.connect(lambda: self.call_statistics.show(collect=True))
-        statistics_toolbar.addWidget(self.statistics_button)
+        # 手動の集計は集計表の中の「今すぐ集計」から行う
         history_action = statistics_toolbar.addAction("集計表")
         history_action.triggered.connect(lambda: self.call_statistics.show())
         team_action = statistics_toolbar.addAction("全員の集計")
@@ -396,7 +394,6 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         self.statistics_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         statistics_toolbar.addWidget(self.statistics_status)
         self.call_statistics.status_changed.connect(self._show_statistics_status)
-        self.call_statistics.changed.connect(self._update_statistics_button)
 
         self.cti_screen_values_detected.connect(self._handle_cti_screen_values)
         self.trigger_auto_search.connect(self.auto_search_service_area)
@@ -3277,10 +3274,6 @@ ND：{nd}
         self.team_statistics.show()
         self.team_statistics.raise_()
         self.team_statistics.activateWindow()
-
-    def _update_statistics_button(self):
-        self.statistics_button.setEnabled(not self.call_statistics.busy)
-        self.statistics_button.setText("集計中…" if self.call_statistics.busy else "集計")
 
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""

@@ -119,7 +119,7 @@ class CallStatisticsController(QObject):
         self.automatic = enabled
         self.store.set_preference("automatic", "1" if enabled else "0")
         self.schedule()
-        self.set_status("1時間ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。集計ボタンから手動で取得できます。")
+        self.set_status("1時間ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。「今すぐ集計」から手動で取得できます。")
 
     def set_status(self, message):
         self.status = message
@@ -206,8 +206,8 @@ class CallStatisticsDialog(QDialog):
         self.day.setCalendarPopup(True)
         self.day.setDisplayFormat("yyyy/MM/dd")
         self.staff = QComboBox()
-        self.collect_button = QPushButton("集計")
-        self.collect_button.setToolTip("現在のログインスタッフの当日分を取得し、シートへ送ります。日付欄は保存済みの表の表示日です。")
+        self.collect_button = QPushButton("今すぐ集計")
+        self.collect_button.setToolTip("毎時00分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")
         self.automatic = QCheckBox("1時間ごとに自動集計")
         self.automatic.setToolTip("起動時と毎時00分に集計してシートへ送ります。")
         self.automatic.setChecked(controller.automatic)
@@ -273,7 +273,7 @@ class CallStatisticsDialog(QDialog):
             self.staff.setCurrentIndex(max(0, self.staff.findData(selected)))
         self.staff.blockSignals(False)
         self.collect_button.setEnabled(not controller.busy and not controller.closing)
-        self.collect_button.setText("集計中…" if controller.busy else "集計")
+        self.collect_button.setText("集計中…" if controller.busy else "今すぐ集計")
         self.duration_unit.setEnabled(not controller.busy)
         self.status_label.setText(controller.status)
         self.next_label.setText(f"次回の集計・送信 {controller.next_run:%H:%M}" if controller.automatic else "自動集計 停止中")
@@ -314,4 +314,4 @@ class CallStatisticsDialog(QDialog):
                 index = row_indexes.get(hour, 0)
                 self.table.scrollToItem(self.table.item(index, 0), QAbstractItemView.PositionAtCenter)
         else:
-            self.total_label.setText("この日の保存済み集計はありません。集計ボタンは現在のログインスタッフの当日分を取得します。")
+            self.total_label.setText("この日の保存済み集計はありません。「今すぐ集計」で現在のログインスタッフの当日分を取得します。")
