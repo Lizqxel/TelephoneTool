@@ -26,3 +26,8 @@ def test_tag_prefixes_and_suffixes_are_ignored():
     assert version_key("v3.10.0") == (3, 10, 0)
     assert version_key("3.9.5-beta") == (3, 9, 5)
 
+
+def test_current_version_reaches_users_on_the_old_string_comparison():
+    # 3.9.4 以前の配布版は「文字の並び」で比べる。その判定でも新しいと見なされる番号でないと更新が届かない。
+    assert VERSION > "3.9.4"
+    assert is_newer_version(VERSION, "3.9.4")
