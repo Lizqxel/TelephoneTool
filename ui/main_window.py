@@ -389,6 +389,8 @@ class MainWindow(QMainWindow, MainWindowFunctions):
         statistics_toolbar.addWidget(self.statistics_button)
         history_action = statistics_toolbar.addAction("集計表")
         history_action.triggered.connect(lambda: self.call_statistics.show())
+        team_action = statistics_toolbar.addAction("全員の集計")
+        team_action.triggered.connect(self._show_team_statistics)
         self.statistics_status = QLabel(" 1時間ごとに集計" if self.call_statistics.automatic else " 自動集計 停止中")
         self.statistics_status.setMaximumWidth(550)
         self.statistics_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -3265,6 +3267,16 @@ ND：{nd}
     def _show_statistics_status(self, text):
         self.statistics_status.setText(" " + (text if len(text) <= 56 else text[:55] + "…"))
         self.statistics_status.setToolTip(text)
+
+    def _show_team_statistics(self):
+        """スプレッドシートの全員分の集計を表示する（初回だけGoogleログイン）。"""
+        if getattr(self, 'team_statistics', None) is None:
+            from ui.team_statistics_dialog import TeamStatisticsDialog
+            staff = self.call_statistics.store.staff()
+            self.team_statistics = TeamStatisticsDialog(own_name=staff[0]["staff_name"] if staff else "", parent=self)
+        self.team_statistics.show()
+        self.team_statistics.raise_()
+        self.team_statistics.activateWindow()
 
     def _update_statistics_button(self):
         self.statistics_button.setEnabled(not self.call_statistics.busy)

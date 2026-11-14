@@ -3,14 +3,14 @@
  *
  * 会社の設定でウェブアプリを「全員」に公開できないため、ログイン不要の送信用Googleフォームで受け取る。
  * このスプレッドシートは開くだけで数十秒〜100秒近くかかるため、送信のたびには開かず、
- * 10分ごとの時間トリガーで、届いた送信をまとめて1回開いて書き込む。
+ * 1分ごとの時間トリガーで、届いた送信をまとめて1回開いて書き込む（送信が無い回は開かない）。
  * TelephoneTool は毎時「本人・当日」の全時間帯を送るので、同じ人・同じ日は最新の送信だけを書けばよい。
  * 書き込むのは 日付の表 × 名前の行 × 「H時台」の3列（コール／対話／トス）だけで、
  * 名前・部署・GPユニット・日計の列や表の構成には触れない。何度書いても重複しない。
  *
  * 初回の設定：
  *   1. プロジェクトの設定 → スクリプト プロパティに TOKEN（TelephoneToolの共有トークンと同じ値）を登録する。
- *   2. エディタで setup を実行して権限を承認する。送信用フォームと10分ごとのトリガーが作られ、
+ *   2. エディタで setup を実行して権限を承認する。送信用フォームと1分ごとのトリガーが作られ、
  *      TelephoneTool に設定する formResponseUrl・tokenEntry・dataEntry が実行ログに出る。
  * 書き込み結果やエラーは「実行数」の画面（processSubmissions のログ）で確認できる。
  */
@@ -20,7 +20,7 @@ const SHEET_NAME_PREFIX = 'コール集計打ち込み用_';
 const LOOKUP_COLUMNS = 4; // 名前の列と日付見出しを探す範囲（A〜D列）
 const FORM_TITLE = 'TelephoneTool 通話集計（自動送信用・手入力しないでください）';
 const HANDLER = 'processSubmissions';
-const INTERVAL_MINUTES = 10;
+const INTERVAL_MINUTES = 1; // 送信が無い回はシートを開かないので、短くしても負担は小さい
 
 /** 初回だけエディタから実行する。何度実行しても、フォームとトリガーは1つだけになる。 */
 function setup() {
@@ -75,7 +75,7 @@ function setup() {
   return info;
 }
 
-/** 10分ごとの時間トリガー。届いた送信をまとめてシートへ書き込み、処理した回答（トークンを含む）は消す。 */
+/** 1分ごとの時間トリガー。届いた送信をまとめてシートへ書き込み、処理した回答（トークンを含む）は消す。 */
 function processSubmissions() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return; // 前回の処理がまだ続いている
