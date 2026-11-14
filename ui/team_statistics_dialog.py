@@ -8,7 +8,7 @@ import threading
 from PySide6.QtCore import QDate, QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (QComboBox, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout)
+                               QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from services.team_statistics import LABELS, GoogleLogin, fetch_day, normalize
 
@@ -56,7 +56,7 @@ class TeamStatisticsDialog(QDialog):
         self.unit.addItem(ALL_UNITS)
         self.refresh_button = QPushButton("更新")
         self.account = QLabel()
-        self.login_button = QPushButton()
+        self.logout_button = QPushButton("ログアウト")
         top.addWidget(QLabel("日付"))
         top.addWidget(self.day)
         top.addWidget(QLabel("GPユニット"))
@@ -64,16 +64,55 @@ class TeamStatisticsDialog(QDialog):
         top.addWidget(self.refresh_button)
         top.addStretch()
         top.addWidget(self.account)
-        top.addWidget(self.login_button)
+        top.addWidget(self.logout_button)
         layout.addLayout(top)
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.PlainText)
         layout.addWidget(self.status)
+
+        # 未ログインの間は、表の代わりに大きなログイン案内を出す
+        self.pages = QStackedWidget()
+        self.login_page = QWidget()
+        login_layout = QVBoxLayout(self.login_page)
+        login_layout.addStretch(2)
+        self.login_title = QLabel()
+        self.login_title.setAlignment(Qt.AlignCenter)
+        self.login_title.setWordWrap(True)
+        self.login_title.setStyleSheet("font-size:22px; font-weight:bold;")
+        self.login_detail = QLabel()
+        self.login_detail.setAlignment(Qt.AlignCenter)
+        self.login_detail.setWordWrap(True)
+        self.login_detail.setTextFormat(Qt.PlainText)
+        self.login_detail.setStyleSheet("font-size:14px; line-height:150%;")
+        self.login_button = QPushButton("Googleでログイン")
+        self.login_button.setCursor(Qt.PointingHandCursor)
+        self.login_button.setMinimumSize(320, 56)
+        self.login_button.setStyleSheet(
+            "QPushButton { font-size:18px; font-weight:bold; color:#ffffff; background:#1a73e8; border:none; border-radius:8px; padding:12px 40px; }"
+            "QPushButton:hover { background:#1765cc; }"
+            "QPushButton:disabled { background:#9aa0a6; color:#f1f3f4; }")
+        self.login_error = QLabel()
+        self.login_error.setAlignment(Qt.AlignCenter)
+        self.login_error.setWordWrap(True)
+        self.login_error.setTextFormat(Qt.PlainText)
+        self.login_error.setStyleSheet("font-size:14px; color:#d93025; font-weight:bold;")
+        login_layout.addWidget(self.login_title)
+        login_layout.addSpacing(12)
+        login_layout.addWidget(self.login_detail)
+        login_layout.addSpacing(20)
+        login_layout.addWidget(self.login_button, 0, Qt.AlignHCenter)
+        login_layout.addSpacing(12)
+        login_layout.addWidget(self.login_error)
+        login_layout.addStretch(3)
+
+        self.table_page = QWidget()
+        table_layout = QVBoxLayout(self.table_page)
+        table_layout.setContentsMargins(0, 0, 0, 0)
         self.banner = QLabel()
         self.banner.setStyleSheet(f"background:{BLACK}; color:{TITLE_TEXT}; font-weight:bold; font-size:15px; padding:4px 8px;")
         self.banner.hide()
-        layout.addWidget(self.banner)
+        table_layout.addWidget(self.banner)
         self.table = QTableWidget(0, 0)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -82,7 +121,10 @@ class TeamStatisticsDialog(QDialog):
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(24)
         self.table.setStyleSheet("QTableWidget { gridline-color: #8c8c8c; }")
-        layout.addWidget(self.table, 1)
+        table_layout.addWidget(self.table, 1)
+        self.pages.addWidget(self.login_page)
+        self.pages.addWidget(self.table_page)
+        layout.addWidget(self.pages, 1)
         note = QLabel("スプレッドシート「コール集計打ち込み用」の内容を表示しています（読み取りのみ）。"
                       "各自のTelephoneToolが毎時送った値が、1〜2分ほどで反映されます。")
         note.setWordWrap(True)
@@ -92,41 +134,55 @@ class TeamStatisticsDialog(QDialog):
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.fetch)
         self.refresh_button.clicked.connect(self.fetch)
-        self.login_button.clicked.connect(self.toggle_login)
+        self.login_button.clicked.connect(self.start_login)
+        self.logout_button.clicked.connect(self.logout)
         self.day.dateChanged.connect(self.fetch)
         self.unit.currentIndexChanged.connect(self.render)
         self.update_login_state()
 
     # ----- ログイン -----
     def update_login_state(self):
+        logged_in = bool(self.login.client) and self.login.logged_in and not self.logging_in
+        self.pages.setCurrentWidget(self.table_page if logged_in else self.login_page)
+        for widget in (self.day, self.unit):
+            widget.setEnabled(logged_in)
+        self.refresh_button.setEnabled(logged_in and not self.busy)
+        self.logout_button.setVisible(logged_in)
+        self.account.setText(f"ログイン中：{self.login.email or 'Googleアカウント'}" if logged_in else "")
+        if logged_in:
+            return
         if not self.login.client:
-            self.account.setText("Googleログインの設定ファイルがありません（管理者に確認してください）")
+            self.login_title.setText("Googleログインの設定ファイルがありません")
+            self.login_detail.setText(
+                "配布版のTelephoneTool（exe）には入っているので、そのまま使えます。\n"
+                "ソースから動かしている場合は、管理者から google_oauth_client.json を受け取り、\n"
+                "main.py と同じフォルダに置いてから、TelephoneToolを起動し直してください。")
             self.login_button.setText("Googleでログイン")
             self.login_button.setEnabled(False)
         elif self.logging_in:
-            self.account.setText("ブラウザでログインしてください…")
-            self.login_button.setText("ログイン中…")
+            self.login_title.setText("ブラウザでログインしてください")
+            self.login_detail.setText(
+                "開いたブラウザで、シートを開ける社内のGoogleアカウントを選んでログインし、「許可」を押してください。\n"
+                "「ログインが完了しました」と出たら、この画面に戻ってください（5分以内）。")
+            self.login_button.setText("ログイン待ち…")
             self.login_button.setEnabled(False)
-        elif self.login.logged_in:
-            self.account.setText(f"ログイン中：{self.login.email or 'Googleアカウント'}")
-            self.login_button.setText("ログアウト")
-            self.login_button.setEnabled(True)
         else:
-            self.account.setText("未ログイン")
+            self.login_title.setText("全員分の集計を見るには、Googleにログインしてください")
+            self.login_detail.setText(
+                "ログインは最初の1回だけです。\n\n"
+                "① 下のボタンを押すと、ブラウザが開きます\n"
+                "② シートを開ける社内のGoogleアカウントを選んでログインします\n"
+                "③ 「許可」を押します\n"
+                "④ 「ログインが完了しました」と出たら、この画面に戻ります")
             self.login_button.setText("Googleでログイン")
             self.login_button.setEnabled(True)
-        self.refresh_button.setEnabled(self.login.logged_in and not self.busy)
 
-    def toggle_login(self):
-        if self.login.logged_in:
-            self.login.logout()
-            self.data = None
-            self.render()
-            self.status.setText("ログアウトしました。")
-            self.update_login_state()
+    def start_login(self):
+        if self.logging_in or self.login.logged_in or not self.login.client:
             return
         self.logging_in = True
-        self.status.setText("ブラウザが開きます。シートを開ける社内のGoogleアカウントでログインし、許可してください。")
+        self.login_error.setText("")
+        self.status.setText("")
         self.update_login_state()
 
         def work():
@@ -137,11 +193,18 @@ class TeamStatisticsDialog(QDialog):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def logout(self):
+        self.login.logout()
+        self.data = None
+        self.render()
+        self.status.setText("ログアウトしました。")
+        self.update_login_state()
+
     def _login_done(self, email, error):
         self.logging_in = False
         self.update_login_state()
         if error:
-            self.status.setText(f"ログインできませんでした：{error}")
+            self.login_error.setText(f"ログインできませんでした：{error}\nもう一度ボタンを押してやり直してください。")
             return
         self.status.setText(f"{email or 'Googleアカウント'} でログインしました。")
         self.fetch()
@@ -149,9 +212,7 @@ class TeamStatisticsDialog(QDialog):
     # ----- 読み取り -----
     def fetch(self):
         if self.busy or not self.login.logged_in:
-            self.update_login_state()
-            if not self.login.logged_in and self.login.client:
-                self.status.setText("全員分を見るには、シートを開ける社内のGoogleアカウントでログインしてください（初回のみ）。")
+            self.update_login_state()  # 未ログインなら大きなログイン案内を表示する
             return
         self.busy = True
         day = self.day.date().toString("yyyy-MM-dd")
@@ -171,6 +232,12 @@ class TeamStatisticsDialog(QDialog):
         self.update_login_state()
         if day != self.day.date().toString("yyyy-MM-dd"):
             self.fetch()  # 読み込み中に日付が変わった
+            return
+        if error and "もう一度ログイン" in error:
+            # ログインの期限切れ・取り消し。保存したログイン情報を消して、ログイン案内に戻す。
+            self.login.logout()
+            self.update_login_state()
+            self.login_error.setText(error)
             return
         if error:
             self.status.setText(f"シートを読み取れませんでした：{error}" + ("（前回の表示を残しています）" if self.data else ""))

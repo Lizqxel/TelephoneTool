@@ -167,15 +167,37 @@ def test_dialog_keeps_previous_table_when_a_refresh_fails():
     dialog.close()
 
 
-def test_dialog_asks_for_login_and_explains_missing_setup():
+def test_dialog_shows_a_large_login_screen_until_logged_in():
     app = QApplication.instance() or QApplication([])
     dialog = TeamStatisticsDialog(login=FakeLogin(logged_in=False))
     dialog.fetch()
-    assert dialog.login_button.text() == "Googleでログイン"
-    assert "ログインしてください" in dialog.status.text()
+    assert dialog.pages.currentWidget() is dialog.login_page
+    assert "Googleにログインしてください" in dialog.login_title.text()
+    assert dialog.login_button.text() == "Googleでログイン" and dialog.login_button.isEnabled()
+    assert dialog.logout_button.isHidden() and not dialog.refresh_button.isEnabled()
+    dialog.close()
+
+
+def test_missing_oauth_file_explains_where_to_put_it():
+    app = QApplication.instance() or QApplication([])
     missing = FakeLogin(logged_in=False)
     missing.client = None
     dialog = TeamStatisticsDialog(login=missing)
+    assert dialog.pages.currentWidget() is dialog.login_page
+    assert "設定ファイルがありません" in dialog.login_title.text()
+    assert "google_oauth_client.json" in dialog.login_detail.text()
     assert not dialog.login_button.isEnabled()
-    assert "設定ファイルがありません" in dialog.account.text()
+    dialog.close()
+
+
+def test_logged_in_dialog_shows_the_table_and_expired_login_returns_to_the_login_screen():
+    app = QApplication.instance() or QApplication([])
+    login = FakeLogin()
+    login.logout = lambda: setattr(login, "logged_in", False)
+    dialog = TeamStatisticsDialog(login=login)
+    assert dialog.pages.currentWidget() is dialog.table_page
+    assert not dialog.logout_button.isHidden()
+    dialog._fetched(None, "Googleのログインの有効期限が切れました。もう一度ログインしてください。", dialog.day.date().toString("yyyy-MM-dd"))
+    assert dialog.pages.currentWidget() is dialog.login_page
+    assert "有効期限" in dialog.login_error.text()
     dialog.close()
