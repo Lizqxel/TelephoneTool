@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PySide6.QtCore import Qt, QTimer, QEvent, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QPoint, QMetaObject
 from PySide6.QtGui import QFont, QIcon, QUndoStack, QUndoCommand, QKeySequence
 
-from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME
+from version import VERSION, GITHUB_OWNER, GITHUB_REPO, APP_NAME, is_newer_version
 
 from ui.settings_dialog import SettingsDialog
 from services.area_search import search_service_area
@@ -3528,7 +3528,7 @@ ND：{nd}
             latest_version = latest_release["tag_name"].lstrip("v")
             current_version = VERSION
             
-            if latest_version > current_version:
+            if is_newer_version(latest_version, current_version):
                 # 新しいバージョンが利用可能
                 msg = f"新しいバージョン v{latest_version} が利用可能です。\n"
                 msg += f"現在のバージョン: v{current_version}\n\n"

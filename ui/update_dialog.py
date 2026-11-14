@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QCheckBox, QSpinBox, QTableWidget, QTableWidgetItem, QMessageBox,
                               QProgressDialog, QHeaderView, QGroupBox)
 from PySide6.QtCore import Qt, QTimer
-from version import VERSION, GITHUB_OWNER, GITHUB_REPO
+from version import VERSION, GITHUB_OWNER, GITHUB_REPO, is_newer_version
 
 class UpdateDialog(QDialog):
     """アップデート設定ダイアログ"""
@@ -124,7 +124,7 @@ class UpdateDialog(QDialog):
             latest_version = latest_release["tag_name"].lstrip("v")
             current_version = VERSION
             
-            if latest_version > current_version:
+            if is_newer_version(latest_version, current_version):
                 # 新しいバージョンが利用可能
                 msg = f"新しいバージョン v{latest_version} が利用可能です。\n"
                 msg += f"現在のバージョン: v{current_version}\n\n"
