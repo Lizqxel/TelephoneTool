@@ -7,12 +7,13 @@ import threading
 
 from PySide6.QtCore import QDate, QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
-from PySide6.QtWidgets import (QComboBox, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
-                               QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QLabel,
+                               QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from services.team_statistics import LABELS, GoogleLogin, fetch_day, normalize
+from services.team_statistics import LABELS, GoogleLogin, LoginCancelled, fetch_day, normalize
 
 REFRESH_MS = 5 * 60 * 1000
+AFTER_SEND_MS = 90 * 1000  # シートへの反映（1分ごと）を待ってから読み直す
 ALL_UNITS = "全員"
 WEEKDAYS = "月火水木金土日"
 HEADER_ROWS = 2
@@ -28,21 +29,28 @@ TOTAL = "#d9d9d9"
 
 class _Relay(QObject):
     """バックグラウンドの処理結果を画面のスレッドへ戻す。"""
-    login_done = Signal(str, str)
+    login_done = Signal(int, str, str)  # 何回目のログインか、メール、エラー
+    login_url = Signal(int, str)
     fetch_done = Signal(object, str, str)
 
 
 class TeamStatisticsDialog(QDialog):
-    def __init__(self, login=None, own_name="", parent=None, fetch=fetch_day):
+    def __init__(self, login=None, own_name="", parent=None, fetch=fetch_day, controller=None):
         super().__init__(parent)
         self.login = login or GoogleLogin()
+        self.controller = controller  # 自分の集計（CallStatisticsController）。送信ボタンで使う
+        self.waiting_send = False
         self.own_name = normalize(own_name)
         self.fetch_function = fetch
         self.data = None
         self.busy = False
         self.logging_in = False
+        self.login_attempt = 0
+        self.login_cancel = None
+        self.login_url = ""
         self.relay = _Relay(self)
         self.relay.login_done.connect(self._login_done)
+        self.relay.login_url.connect(self._login_url_ready)
         self.relay.fetch_done.connect(self._fetched)
         self.setWindowTitle("全員の通話集計（スプレッドシート）")
         self.resize(1200, 720)
@@ -55,6 +63,8 @@ class TeamStatisticsDialog(QDialog):
         self.unit = QComboBox()
         self.unit.addItem(ALL_UNITS)
         self.refresh_button = QPushButton("更新")
+        self.send_button = QPushButton("自分の集計を送信")
+        self.send_button.setToolTip("毎時00分の自動送信を待たずに、CTIから自分の当日分を集計してシートへ送ります。")
         self.account = QLabel()
         self.logout_button = QPushButton("ログアウト")
         top.addWidget(QLabel("日付"))
@@ -62,6 +72,8 @@ class TeamStatisticsDialog(QDialog):
         top.addWidget(QLabel("GPユニット"))
         top.addWidget(self.unit)
         top.addWidget(self.refresh_button)
+        top.addSpacing(16)
+        top.addWidget(self.send_button)
         top.addStretch()
         top.addWidget(self.account)
         top.addWidget(self.logout_button)
@@ -92,16 +104,29 @@ class TeamStatisticsDialog(QDialog):
             "QPushButton { font-size:18px; font-weight:bold; color:#ffffff; background:#1a73e8; border:none; border-radius:8px; padding:12px 40px; }"
             "QPushButton:hover { background:#1765cc; }"
             "QPushButton:disabled { background:#9aa0a6; color:#f1f3f4; }")
+        # ログイン待ちの間だけ出す：違うアカウントのブラウザで開いた場合のやり直し用
+        self.cancel_login_button = QPushButton("キャンセル")
+        self.copy_url_button = QPushButton("ログイン用のURLをコピー")
+        for button in (self.cancel_login_button, self.copy_url_button):
+            button.setMinimumHeight(36)
+            button.setStyleSheet("QPushButton { font-size:14px; padding:6px 18px; }")
+        waiting_buttons = QHBoxLayout()
+        waiting_buttons.addStretch()
+        waiting_buttons.addWidget(self.cancel_login_button)
+        waiting_buttons.addSpacing(12)
+        waiting_buttons.addWidget(self.copy_url_button)
+        waiting_buttons.addStretch()
         self.login_error = QLabel()
         self.login_error.setAlignment(Qt.AlignCenter)
         self.login_error.setWordWrap(True)
         self.login_error.setTextFormat(Qt.PlainText)
-        self.login_error.setStyleSheet("font-size:14px; color:#d93025; font-weight:bold;")
         login_layout.addWidget(self.login_title)
         login_layout.addSpacing(12)
         login_layout.addWidget(self.login_detail)
         login_layout.addSpacing(20)
         login_layout.addWidget(self.login_button, 0, Qt.AlignHCenter)
+        login_layout.addSpacing(10)
+        login_layout.addLayout(waiting_buttons)
         login_layout.addSpacing(12)
         login_layout.addWidget(self.login_error)
         login_layout.addStretch(3)
@@ -133,8 +158,18 @@ class TeamStatisticsDialog(QDialog):
         self.timer = QTimer(self)
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.fetch)
+        self.after_send_timer = QTimer(self)
+        self.after_send_timer.setSingleShot(True)
+        self.after_send_timer.setInterval(AFTER_SEND_MS)
+        self.after_send_timer.timeout.connect(self.fetch)
+        self.send_button.clicked.connect(self.send_own)
+        if controller is not None:
+            controller.changed.connect(self._controller_changed)
+        self._controller_changed()
         self.refresh_button.clicked.connect(self.fetch)
         self.login_button.clicked.connect(self.start_login)
+        self.cancel_login_button.clicked.connect(lambda: self.cancel_login())
+        self.copy_url_button.clicked.connect(self.copy_login_url)
         self.logout_button.clicked.connect(self.logout)
         self.day.dateChanged.connect(self.fetch)
         self.unit.currentIndexChanged.connect(self.render)
@@ -149,6 +184,9 @@ class TeamStatisticsDialog(QDialog):
         self.refresh_button.setEnabled(logged_in and not self.busy)
         self.logout_button.setVisible(logged_in)
         self.account.setText(f"ログイン中：{self.login.email or 'Googleアカウント'}" if logged_in else "")
+        self.cancel_login_button.setVisible(self.logging_in)
+        self.copy_url_button.setVisible(self.logging_in)
+        self.copy_url_button.setEnabled(bool(self.login_url))
         if logged_in:
             return
         if not self.login.client:
@@ -163,7 +201,9 @@ class TeamStatisticsDialog(QDialog):
             self.login_title.setText("ブラウザでログインしてください")
             self.login_detail.setText(
                 "開いたブラウザで、シートを開ける社内のGoogleアカウントを選んでログインし、「許可」を押してください。\n"
-                "「ログインが完了しました」と出たら、この画面に戻ってください（5分以内）。")
+                "「ログインが完了しました」と出たら、この画面に戻ってください（5分以内）。\n\n"
+                "違うアカウントのブラウザで開いてしまった場合は、「キャンセル」してやり直すか、\n"
+                "「ログイン用のURLをコピー」を押して、社内アカウントでログインしているブラウザのアドレス欄に貼り付けてください。")
             self.login_button.setText("ログイン待ち…")
             self.login_button.setEnabled(False)
         else:
@@ -177,21 +217,57 @@ class TeamStatisticsDialog(QDialog):
             self.login_button.setText("Googleでログイン")
             self.login_button.setEnabled(True)
 
+    def show_login_message(self, text, error=True):
+        color = "#d93025" if error else "#5f6368"
+        self.login_error.setStyleSheet(f"font-size:14px; color:{color}; font-weight:bold;")
+        self.login_error.setText(text)
+
     def start_login(self):
         if self.logging_in or self.login.logged_in or not self.login.client:
             return
+        self.login_attempt += 1
+        attempt = self.login_attempt
+        cancel = threading.Event()
+        self.login_cancel = cancel
+        self.login_url = ""
         self.logging_in = True
-        self.login_error.setText("")
+        self.show_login_message("")
         self.status.setText("")
         self.update_login_state()
 
         def work():
             try:
-                self.relay.login_done.emit(self.login.login(), "")
+                email = self.login.login(cancel=cancel, on_url=lambda url: self.relay.login_url.emit(attempt, url))
+                self.relay.login_done.emit(attempt, email, "")
+            except LoginCancelled as exc:
+                self.relay.login_done.emit(attempt, "", f"CANCELLED:{exc}")
             except Exception as exc:
-                self.relay.login_done.emit("", str(exc) or exc.__class__.__name__)
+                self.relay.login_done.emit(attempt, "", str(exc) or exc.__class__.__name__)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def cancel_login(self, silent=False):
+        """ログイン待ちをやめる。待っている処理は0.5秒以内に止まり、その結果は無視する。"""
+        if not self.logging_in:
+            return
+        if self.login_cancel is not None:
+            self.login_cancel.set()
+        self.login_attempt += 1
+        self.logging_in = False
+        self.login_url = ""
+        self.update_login_state()
+        if not silent:
+            self.show_login_message("ログインを中止しました。もう一度「Googleでログイン」を押すと、アカウントを選び直せます。", error=False)
+
+    def _login_url_ready(self, attempt, url):
+        if attempt == self.login_attempt:
+            self.login_url = url
+            self.update_login_state()
+
+    def copy_login_url(self):
+        if self.login_url:
+            QApplication.clipboard().setText(self.login_url)
+            self.show_login_message("URLをコピーしました。社内アカウントでログインしているブラウザのアドレス欄に貼り付けてください。", error=False)
 
     def logout(self):
         self.login.logout()
@@ -200,14 +276,44 @@ class TeamStatisticsDialog(QDialog):
         self.status.setText("ログアウトしました。")
         self.update_login_state()
 
-    def _login_done(self, email, error):
+    def _login_done(self, attempt, email, error):
+        if attempt != self.login_attempt:
+            return  # キャンセル済みの古いログインの結果
         self.logging_in = False
+        self.login_url = ""
         self.update_login_state()
+        if error.startswith("CANCELLED:"):
+            self.show_login_message(error.split(":", 1)[1] + "もう一度「Googleでログイン」を押すと、アカウントを選び直せます。", error=False)
+            return
         if error:
-            self.login_error.setText(f"ログインできませんでした：{error}\nもう一度ボタンを押してやり直してください。")
+            self.show_login_message(f"ログインできませんでした：{error}\nもう一度ボタンを押してやり直してください。")
             return
         self.status.setText(f"{email or 'Googleアカウント'} でログインしました。")
         self.fetch()
+
+    # ----- 自分の集計の送信 -----
+    def send_own(self):
+        if self.controller is None or self.controller.busy:
+            return
+        self.waiting_send = True
+        self.status.setText("自分の集計をCTIから取得して、シートへ送っています…")
+        self.controller.collect()
+        self._controller_changed()
+
+    def _controller_changed(self):
+        controller = self.controller
+        busy = controller is not None and controller.busy
+        self.send_button.setVisible(controller is not None)
+        self.send_button.setEnabled(controller is not None and not busy)
+        self.send_button.setText("送信中…" if busy else "自分の集計を送信")
+        if not self.waiting_send or busy:
+            return
+        self.waiting_send = False
+        message = controller.status
+        if "シート送信済み" in message:
+            self.after_send_timer.start()
+            message += "　→ 1〜2分後に自動で読み直します。"
+        self.status.setText(message)
 
     # ----- 読み取り -----
     def fetch(self):
@@ -237,7 +343,7 @@ class TeamStatisticsDialog(QDialog):
             # ログインの期限切れ・取り消し。保存したログイン情報を消して、ログイン案内に戻す。
             self.login.logout()
             self.update_login_state()
-            self.login_error.setText(error)
+            self.show_login_message(error)
             return
         if error:
             self.status.setText(f"シートを読み取れませんでした：{error}" + ("（前回の表示を残しています）" if self.data else ""))
@@ -341,4 +447,5 @@ class TeamStatisticsDialog(QDialog):
 
     def hideEvent(self, event):
         self.timer.stop()
+        self.cancel_login(silent=True)  # 画面を閉じたらログイン待ちもやめる
         super().hideEvent(event)
