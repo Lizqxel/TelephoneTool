@@ -21,8 +21,10 @@ DEVELOPER_EMAIL = "your.email@example.com"
 LICENSE = "MIT License"
 
 # GitHub関連の情報
+# アップデートは exe だけを置く公開の配布用リポジトリから取る
+# （ソースのリポジトリを非公開にしても、ツール内のアップデートが止まらないように）
 GITHUB_OWNER = "Lizqxel"
-GITHUB_REPO = "TelephoneTool"
+GITHUB_REPO = "TelephoneTool-release"
 
 # アップデートチェックの間隔（秒）
 UPDATE_CHECK_INTERVAL = 86400  # 24時間
