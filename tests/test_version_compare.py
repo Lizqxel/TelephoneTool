@@ -31,3 +31,9 @@ def test_current_version_reaches_users_on_the_old_string_comparison():
     # 3.9.4 以前の配布版は「文字の並び」で比べる。その判定でも新しいと見なされる番号でないと更新が届かない。
     assert VERSION > "3.9.4"
     assert is_newer_version(VERSION, "3.9.4")
+
+
+def test_updates_come_from_the_public_distribution_repository():
+    # ソースのリポジトリは非公開にするので、アップデートは exe だけを置く公開リポジトリから取る
+    from version import GITHUB_OWNER, GITHUB_REPO
+    assert (GITHUB_OWNER, GITHUB_REPO) == ("Lizqxel", "TelephoneTool-release")
