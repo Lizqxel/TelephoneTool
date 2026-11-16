@@ -7,8 +7,9 @@ import threading
 
 from PySide6.QtCore import QDate, QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
-from PySide6.QtWidgets import (QApplication, QComboBox, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QLabel,
-                               QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDateEdit, QDialog, QFrame, QGridLayout, QHBoxLayout,
+                               QHeaderView, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from services.team_statistics import LABELS, GoogleLogin, LoginCancelled, fetch_day, normalize
 
@@ -17,6 +18,10 @@ AFTER_SEND_MS = 90 * 1000  # シートへの反映（1分ごと）を待って�
 ALL_UNITS = "全員"
 WEEKDAYS = "月火水木金土日"
 HEADER_ROWS = 2
+NAME_COLUMNS = 3  # 名前・部署・GPユニット（左に固定する列）
+NAME_WIDTHS = (96, 84, 96)
+DATA_WIDTH = 52
+ROW_HEIGHT = 24
 # スプレッドシート「コール集計打ち込み用」の配色
 BLACK = "#000000"
 HEADER_TEXT = "#ffffff"
@@ -25,6 +30,37 @@ OWN_TEXT = "#ffd966"
 CREAM = "#fff2cc"
 WHITE = "#ffffff"
 TOTAL = "#d9d9d9"
+
+
+class _Pane(QTableWidget):
+    """固定表示のための表の一部分（左上・見出し・名前・数字の4つ）。"""
+
+    def __init__(self, scroll_bars=False):
+        super().__init__(0, 0)
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setSelectionMode(QTableWidget.NoSelection)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.horizontalHeader().hide()
+        self.verticalHeader().hide()
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.horizontalHeader().setDefaultSectionSize(DATA_WIDTH)
+        self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        self.setVerticalScrollMode(QTableWidget.ScrollPerPixel)
+        self.setStyleSheet("QTableWidget { gridline-color: #8c8c8c; }")
+        if not scroll_bars:
+            self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_target = None
+
+    def wheelEvent(self, event):
+        # 見出し・名前の上でホイールを回したときは、数字の部分を動かす（位置は数字の部分に合わせて追従する）
+        if self.scroll_target is not None:
+            self.scroll_target.wheelEvent(event)
+        else:
+            super().wheelEvent(event)
 
 
 class _Relay(QObject):
@@ -40,6 +76,7 @@ class TeamStatisticsDialog(QDialog):
         self.login = login or GoogleLogin()
         self.controller = controller  # 自分の集計（CallStatisticsController）。送信ボタンで使う
         self.waiting_send = False
+        self.verify_after_send = False
         self.own_name = normalize(own_name)
         self.fetch_function = fetch
         self.data = None
@@ -58,6 +95,7 @@ class TeamStatisticsDialog(QDialog):
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
         self.day = QDateEdit(QDate.currentDate())
+        self._auto_day = QDate.currentDate()  # 自動で入れた日付（利用者が変えていなければ日付が変わったら今日へ進める）
         self.day.setCalendarPopup(True)
         self.day.setDisplayFormat("yyyy/MM/dd")
         self.unit = QComboBox()
@@ -138,15 +176,38 @@ class TeamStatisticsDialog(QDialog):
         self.banner.setStyleSheet(f"background:{BLACK}; color:{TITLE_TEXT}; font-weight:bold; font-size:15px; padding:4px 8px;")
         self.banner.hide()
         table_layout.addWidget(self.banner)
-        self.table = QTableWidget(0, 0)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionMode(QTableWidget.NoSelection)
-        self.table.setFocusPolicy(Qt.NoFocus)
-        self.table.horizontalHeader().hide()
-        self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(24)
-        self.table.setStyleSheet("QTableWidget { gridline-color: #8c8c8c; }")
-        table_layout.addWidget(self.table, 1)
+        # スプレッドシートの「固定」と同じく、見出し2行と名前の3列はスクロールしても動かない
+        self.corner, self.top, self.left = _Pane(), _Pane(), _Pane()
+        self.body = _Pane(scroll_bars=True)
+        grid_widget = QWidget()
+        grid = QGridLayout(grid_widget)
+        grid.setSpacing(0)
+        grid.setContentsMargins(0, 0, 0, 0)
+        # 数字の部分のスクロールバーの分だけ、見出しの右と名前の下に詰め物を置いて端をそろえる
+        self.top_filler, self.left_filler = QWidget(), QWidget()
+        self.top_filler.setStyleSheet(f"background:{BLACK};")
+        self.top_filler.setFixedWidth(0)
+        self.left_filler.setFixedHeight(0)
+        grid.addWidget(self.corner, 0, 0)
+        grid.addWidget(self.top, 0, 1)
+        grid.addWidget(self.top_filler, 0, 2)
+        grid.addWidget(self.left, 1, 0)
+        grid.addWidget(self.left_filler, 2, 0)
+        grid.addWidget(self.body, 1, 1, 2, 2)
+        for pane in (self.corner, self.top):
+            pane.setFixedHeight(HEADER_ROWS * ROW_HEIGHT + 1)
+        for pane in (self.corner, self.left):
+            pane.setFixedWidth(sum(NAME_WIDTHS) + 1)
+        # 動かすのは数字の部分だけにし、見出し・名前はその位置に一方向で合わせる
+        # （双方向にすると、範囲の短い側に引き戻されて端まで届かなくなる）
+        body_h, body_v = self.body.horizontalScrollBar(), self.body.verticalScrollBar()
+        body_h.valueChanged.connect(self.top.horizontalScrollBar().setValue)
+        body_v.valueChanged.connect(self.left.verticalScrollBar().setValue)
+        for pane in (self.corner, self.top, self.left):
+            pane.scroll_target = self.body
+        body_h.rangeChanged.connect(lambda *_: self._align_edges())
+        body_v.rangeChanged.connect(lambda *_: self._align_edges())
+        table_layout.addWidget(grid_widget, 1)
         self.pages.addWidget(self.login_page)
         self.pages.addWidget(self.table_page)
         layout.addWidget(self.pages, 1)
@@ -161,7 +222,7 @@ class TeamStatisticsDialog(QDialog):
         self.after_send_timer = QTimer(self)
         self.after_send_timer.setSingleShot(True)
         self.after_send_timer.setInterval(AFTER_SEND_MS)
-        self.after_send_timer.timeout.connect(self.fetch)
+        self.after_send_timer.timeout.connect(self._fetch_after_send)
         self.send_button.clicked.connect(self.send_own)
         if controller is not None:
             controller.changed.connect(self._controller_changed)
@@ -298,6 +359,10 @@ class TeamStatisticsDialog(QDialog):
         self.waiting_send = True
         self.status.setText("自分の集計をCTIから取得して、シートへ送っています…")
         self.controller.collect()
+        if not self.controller.busy:
+            # 終了処理中などで集計が始まらなかった。待ち状態を残すと、後の毎時集計の結果を取り違える。
+            self.waiting_send = False
+            self.status.setText("今は送信できません。TelephoneToolを開き直してから、もう一度押してください。")
         self._controller_changed()
 
     def _controller_changed(self):
@@ -312,11 +377,45 @@ class TeamStatisticsDialog(QDialog):
         message = controller.status
         if "シート送信済み" in message:
             self.after_send_timer.start()
-            message += "　→ 1〜2分後に自動で読み直します。"
+            message += "　→ 1〜2分後に自動で読み直して、反映を確かめます。"
         self.status.setText(message)
 
+    def _fetch_after_send(self):
+        self.verify_after_send = True
+        self.fetch()
+
+    def verify_own(self, data):
+        """送った自分の数字がシートに入ったかを確かめる（フォームは書き込み結果を返さないため）。"""
+        controller = self.controller
+        if controller is None or not self.own_name or data.day != QDate.currentDate().toString("yyyy-MM-dd"):
+            return ""
+        staff = controller.store.staff()
+        if not staff:
+            return ""
+        local = {r["hour"]: r["total_calls"] for r in controller.store.display_hours(staff[0]["staff_id"], data.day)
+                 if r.get("total_calls") is not None}
+        member = next((m for m in data.members if normalize(m.name) == self.own_name), None)
+        if member is None:
+            return f"⚠ シートの表に自分の名前（{staff[0]['staff_name']}）が見つからないため、書き込めていません。シートの名前と一致しているか確認してください。"
+        missing = [h for h in data.hours if h in local and member.hours.get(h, (None,))[0] != local[h]]
+        if missing:
+            hours = "・".join(f"{h}時台" for h in missing)
+            return f"⚠ 送ったコール数がシートに反映されていません（{hours}）。設定の「共有トークン」が正しいか確認してください。"
+        return "シートへの反映を確認しました。"
+
     # ----- 読み取り -----
+    def _roll_date(self):
+        """開いたまま日付が変わったら、利用者が日付を変えていない限り今日へ進める。進めたら True。"""
+        today = QDate.currentDate()
+        if self._auto_day != today and self.day.date() == self._auto_day:
+            self._auto_day = today
+            self.day.setDate(today)  # dateChanged から読み直しが走る
+            return True
+        return False
+
     def fetch(self):
+        if self._roll_date():
+            return
         if self.busy or not self.login.logged_in:
             self.update_login_state()  # 未ログインなら大きなログイン案内を表示する
             return
@@ -357,17 +456,51 @@ class TeamStatisticsDialog(QDialog):
         self.unit.setCurrentIndex(max(0, self.unit.findText(current)))
         self.unit.blockSignals(False)
         from datetime import datetime
-        self.status.setText(f"{datetime.now():%H:%M} 更新：{data.sheet}　{len(data.members)}人")
+        message = f"{datetime.now():%H:%M} 更新：{data.sheet}　{len(data.members)}人"
+        if self.verify_after_send:
+            self.verify_after_send = False
+            result = self.verify_own(data)
+            message += f"　{result}" if result else ""
+        self.status.setText(message)
         self.render()
 
     # ----- 表示（スプレッドシートの見た目に合わせる） -----
+    def _place(self, row, column):
+        """表全体の行・列を、4つの部分のどれの何行何列目かに直す。"""
+        if row < HEADER_ROWS:
+            pane = self.corner if column < NAME_COLUMNS else self.top
+        else:
+            pane = self.left if column < NAME_COLUMNS else self.body
+        return (pane, row if row < HEADER_ROWS else row - HEADER_ROWS,
+                column if column < NAME_COLUMNS else column - NAME_COLUMNS)
+
+    def cell(self, row, column):
+        pane, r, c = self._place(row, column)
+        return pane.item(r, c)
+
+    def span(self, row, column):
+        pane, r, c = self._place(row, column)
+        return pane.rowSpan(r, c), pane.columnSpan(r, c)
+
+    def row_count(self):
+        return HEADER_ROWS + self.left.rowCount() if self.left.rowCount() else 0
+
+    def _align_edges(self):
+        v, h = self.body.verticalScrollBar(), self.body.horizontalScrollBar()
+        self.top_filler.setFixedWidth(v.sizeHint().width() if v.maximum() > 0 else 0)
+        self.left_filler.setFixedHeight(h.sizeHint().height() if h.maximum() > 0 else 0)
+        self.top.horizontalScrollBar().setValue(h.value())
+        self.left.verticalScrollBar().setValue(v.value())
+
     def render(self):
-        self.table.clear()
-        self.table.clearSpans()
+        for pane in (self.corner, self.top, self.left, self.body):
+            pane.clear()
+            pane.clearSpans()
         if not self.data:
             self.banner.hide()
-            self.table.setRowCount(0)
-            self.table.setColumnCount(0)
+            for pane in (self.corner, self.top, self.left, self.body):
+                pane.setRowCount(0)
+                pane.setColumnCount(0)
             return
         date = self.day.date()
         self.banner.setText(f"【{date.month()}/{date.day()}（{WEEKDAYS[date.dayOfWeek() - 1]}）】")
@@ -375,8 +508,14 @@ class TeamStatisticsDialog(QDialog):
         unit = self.unit.currentText()
         members = [m for m in self.data.members if unit in (ALL_UNITS, "") or m.unit == unit]
         groups = [("日計", None), *[(f"{h}時台", h) for h in self.data.hours]]
-        self.table.setColumnCount(3 + 3 * len(groups))
-        self.table.setRowCount(HEADER_ROWS + len(members) + 1)
+        data_columns = 3 * len(groups)
+        for pane, rows, columns in ((self.corner, HEADER_ROWS, NAME_COLUMNS), (self.top, HEADER_ROWS, data_columns),
+                                    (self.left, len(members) + 1, NAME_COLUMNS), (self.body, len(members) + 1, data_columns)):
+            pane.setRowCount(rows)
+            pane.setColumnCount(columns)
+        for pane in (self.corner, self.left):
+            for column, width in enumerate(NAME_WIDTHS):
+                pane.setColumnWidth(column, width)
 
         def values(member, hour):
             return member.total if hour is None else member.hours.get(hour, (None, None, None))
@@ -387,10 +526,15 @@ class TeamStatisticsDialog(QDialog):
             item.setBackground(QBrush(QColor(background)))
             item.setForeground(QBrush(QColor(foreground)))
             if bold:
-                font = QFont(self.table.font())
+                font = QFont(self.body.font())
                 font.setBold(True)
                 item.setFont(font)
-            self.table.setItem(row, column, item)
+            pane, r, c = self._place(row, column)
+            pane.setItem(r, c, item)
+
+        def span(row, column, rows, columns):
+            pane, r, c = self._place(row, column)
+            pane.setSpan(r, c, rows, columns)
 
         def group_color(index):
             # 日計は薄い黄色、時台は白と薄い黄色を交互に（シートと同じ並び）
@@ -398,7 +542,7 @@ class TeamStatisticsDialog(QDialog):
 
         # 見出し2行：1行目「名前／日計／10時台…」、2行目「部署／GPユニット／コール・対話・トス」
         put(0, 0, "名前", BLACK, HEADER_TEXT, True)
-        self.table.setSpan(0, 0, 2, 1)
+        span(0, 0, 2, 1)
         put(0, 1, "", BLACK)
         put(0, 2, "", BLACK)
         put(1, 1, "部署", BLACK, HEADER_TEXT, True)
@@ -406,7 +550,7 @@ class TeamStatisticsDialog(QDialog):
         for index, (title, _) in enumerate(groups):
             start = 3 + 3 * index
             put(0, start, title, BLACK, HEADER_TEXT, True)
-            self.table.setSpan(0, start, 1, 3)
+            span(0, start, 1, 3)
             for k, label in enumerate(LABELS):
                 put(1, start + k, label, BLACK, HEADER_TEXT, True)
 
@@ -432,12 +576,7 @@ class TeamStatisticsDialog(QDialog):
                 known = [values(m, hour)[k] for m in members if values(m, hour)[k] is not None]
                 put(row, 3 + 3 * index + k, str(sum(known)) if known else "", TOTAL, bold=True, align=right)
 
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Fixed)
-        header.setDefaultSectionSize(52)
-        self.table.setColumnWidth(0, 96)
-        self.table.setColumnWidth(1, 84)
-        self.table.setColumnWidth(2, 96)
+        QTimer.singleShot(0, self._align_edges)
 
     def showEvent(self, event):
         super().showEvent(event)

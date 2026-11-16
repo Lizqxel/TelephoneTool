@@ -66,7 +66,7 @@ def test_shutdown_cancels_running_collection_without_destroying_thread(tmp_path,
         def __init__(self, cancel):
             self.cancel = cancel
 
-        def collect(self, unit, full=True):
+        def collect(self, unit):
             entered.set()
             self.cancel.wait(2)
             raise RuntimeError("cancelled")
@@ -140,7 +140,7 @@ def test_hourly_run_sends_saved_hours_and_reports_sheet_result(tmp_path, monkeyp
         def __init__(self, cancel):
             pass
 
-        def collect(self, unit, full=True):
+        def collect(self, unit):
             return result
 
     class Sender:
@@ -158,7 +158,7 @@ def test_hourly_run_sends_saved_hours_and_reports_sheet_result(tmp_path, monkeyp
     assert "シートに枠が無い時間帯：12時" in controller.status
 
 
-def test_counter_only_run_does_not_send_and_queues_a_full_run(tmp_path, monkeypatch):
+def test_collection_requested_while_running_is_queued_and_runs_after(tmp_path, monkeypatch):
     import threading
     from test_call_statistics import counter_snapshot
     from ui import call_statistics_dialog as module
@@ -170,23 +170,22 @@ def test_counter_only_run_does_not_send_and_queues_a_full_run(tmp_path, monkeypa
         def __init__(self, cancel):
             pass
 
-        def collect(self, unit, full=True):
-            calls.append(full)
-            if not full:
+        def collect(self, unit):
+            calls.append("collect")
+            if len(calls) == 1:
                 release.wait(2)
             return counter_snapshot(f"2026-11-13T12:0{len(calls)}:02", len(calls))
 
-    class Sender:
-        def send(self, *args):
-            calls.append("sent")
-            return {"ok": True}
+        def clear_history(self):
+            pass
 
     monkeypatch.setattr(module, "CtiStatisticsCollector", Collector)
-    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=Sender)
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=lambda: None)
     controller.set_automatic(False)
-    controller.collect(full=False)
+    controller.collect()
     first = controller.worker
-    controller.collect(full=True)  # 実行中に毎時の集計が重なった
+    assert controller.busy  # 集計を始めた時点で「集計中」になっている
+    controller.collect()  # 実行中に重なった
     release.set()
     assert first.wait(3000)
     for _ in range(50):
@@ -195,4 +194,31 @@ def test_counter_only_run_does_not_send_and_queues_a_full_run(tmp_path, monkeypa
             break
     assert controller.worker is not None and controller.worker.wait(3000)
     app.processEvents()
-    assert calls[:2] == [False, True]
+    assert calls == ["collect", "collect"]
+
+
+def test_status_change_is_announced_only_after_the_collection_is_running(tmp_path, monkeypatch):
+    import threading
+    from ui import call_statistics_dialog as module
+    app = QApplication.instance() or QApplication([])
+    release = threading.Event()
+
+    class Collector:
+        def __init__(self, cancel):
+            pass
+
+        def collect(self, unit):
+            release.wait(2)
+            raise RuntimeError("CTIがありません")
+
+    monkeypatch.setattr(module, "CtiStatisticsCollector", Collector)
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=lambda: None)
+    controller.set_automatic(False)
+    seen = []
+    controller.changed.connect(lambda: seen.append(controller.busy))
+    controller.collect()
+    worker = controller.worker
+    assert seen and seen[0] is True  # 最初の知らせの時点で busy
+    release.set()
+    assert worker.wait(3000)
+    app.processEvents()

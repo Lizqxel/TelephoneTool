@@ -256,8 +256,8 @@ class CtiStatisticsCollector:
             stable = grid["rows"]
         raise RuntimeError("表の更新が完了しませんでした。")
 
-    def collect(self, numeric_unit="seconds", full=True):
-        """上部カウンターは毎回、full のときは架電履歴と見込検索も取得する。
+    def collect(self, numeric_unit="seconds"):
+        """上部カウンターと、架電履歴・見込検索から当日分を取得する。
 
         履歴を取れない回（条件が合わない・エラー）もカウンターは返し、理由を note に入れる。
         """
@@ -279,8 +279,6 @@ class CtiStatisticsCollector:
         staff_name, staff_id = self.read_login_staff(cti, before["nodes"])
         base = dict(acquired_at=observed, staff_id=staff_id, staff_name=staff_name, session=session,
                     counters=counters, talk_seconds=None, history_rows=0)
-        if not full:
-            return StatisticsSnapshot(**base)
         try:
             rows = self.collect_history(cti, before, day, staff_name)
             ranks, rank_note = None, ""

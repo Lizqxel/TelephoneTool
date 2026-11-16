@@ -134,24 +134,23 @@ def test_dialog_looks_like_the_sheet_with_a_total_row_and_own_name_marked():
     dialog.day.setDate(QDate(2026, 11, 13))
     data = team.fetch_day(Session(sheet_grid()), "2026-11-13")
     dialog._fetched(data, "", "2026-11-13")
-    table = dialog.table
     assert dialog.banner.text() == "【11/13（金）】"
-    assert table.rowCount() == 2 + 2 + 1  # 見出し2行＋2人＋全体
+    assert dialog.row_count() == 2 + 2 + 1  # 見出し2行＋2人＋全体
     # 見出しはシートと同じ「名前／日計／10時台」と「部署／GPユニット／コール・対話・トス」
-    assert [table.item(0, c).text() for c in (0, 3, 6, 9)] == ["名前", "日計", "10時台", "11時台"]
-    assert [table.item(1, c).text() for c in (1, 2, 6, 7, 8)] == ["部署", "GPユニット", "コール", "対話", "トス"]
-    assert table.rowSpan(0, 0) == 2 and table.columnSpan(0, 3) == 3 and table.columnSpan(0, 6) == 3
-    assert table.item(2, 0).text() == "岩田悠河" and table.item(2, 3).text() == "20"
-    assert table.item(2, 0).background().color().name() == "#000000"
-    assert table.item(2, 0).foreground().color().name() == "#ffd966"  # 自分の名前
-    assert table.item(3, 0).foreground().color().name() == "#ffffff"
-    assert table.item(2, 1).background().color().name() == "#fff2cc"  # 部署は薄い黄色
-    assert table.item(2, 6).background().color().name() == "#ffffff"  # 10時台は白
-    assert table.item(2, 9).background().color().name() == "#fff2cc"  # 11時台は薄い黄色
-    assert table.item(3, 9).text() == ""  # 未入力は空欄
-    assert table.item(4, 0).text() == "全体（2人）" and table.item(4, 3).text() == "25"
+    assert [dialog.cell(0, c).text() for c in (0, 3, 6, 9)] == ["名前", "日計", "10時台", "11時台"]
+    assert [dialog.cell(1, c).text() for c in (1, 2, 6, 7, 8)] == ["部署", "GPユニット", "コール", "対話", "トス"]
+    assert dialog.span(0, 0) == (2, 1) and dialog.span(0, 3) == (1, 3) and dialog.span(0, 6) == (1, 3)
+    assert dialog.cell(2, 0).text() == "岩田悠河" and dialog.cell(2, 3).text() == "20"
+    assert dialog.cell(2, 0).background().color().name() == "#000000"
+    assert dialog.cell(2, 0).foreground().color().name() == "#ffd966"  # 自分の名前
+    assert dialog.cell(3, 0).foreground().color().name() == "#ffffff"
+    assert dialog.cell(2, 1).background().color().name() == "#fff2cc"  # 部署は薄い黄色
+    assert dialog.cell(2, 6).background().color().name() == "#ffffff"  # 10時台は白
+    assert dialog.cell(2, 9).background().color().name() == "#fff2cc"  # 11時台は薄い黄色
+    assert dialog.cell(3, 9).text() == ""  # 未入力は空欄
+    assert dialog.cell(4, 0).text() == "全体（2人）" and dialog.cell(4, 3).text() == "25"
     dialog.unit.setCurrentText("杉崎伸明")
-    assert table.rowCount() == 4 and table.item(2, 0).text() == "三浦甲斐"
+    assert dialog.row_count() == 4 and dialog.cell(2, 0).text() == "三浦甲斐"
     assert "ログイン中" in dialog.account.text()
     dialog.close()
 
@@ -162,7 +161,7 @@ def test_dialog_keeps_previous_table_when_a_refresh_fails():
     dialog.day.setDate(QDate(2026, 11, 13))
     dialog._fetched(team.fetch_day(Session(sheet_grid()), "2026-11-13"), "", "2026-11-13")
     dialog._fetched(None, "シートへ接続できませんでした", "2026-11-13")
-    assert dialog.table.rowCount() == 5
+    assert dialog.row_count() == 5
     assert "前回の表示を残しています" in dialog.status.text()
     dialog.close()
 
@@ -337,7 +336,7 @@ def test_send_button_collects_own_data_and_rereads_the_sheet_after_it_is_written
     assert "シートへ送っています" in dialog.status.text()
     controller.finish("16:31 集計済み：三浦 甲斐／本人の当日履歴 1件／シート送信済み")
     assert dialog.send_button.isEnabled()
-    assert "シート送信済み" in dialog.status.text() and "自動で読み直します" in dialog.status.text()
+    assert "シート送信済み" in dialog.status.text() and "自動で読み直して" in dialog.status.text()
     assert dialog.after_send_timer.isActive()
     dialog.close()
 
@@ -358,4 +357,99 @@ def test_send_button_is_hidden_without_a_controller():
     app = QApplication.instance() or QApplication([])
     dialog = TeamStatisticsDialog(login=FakeLogin())
     assert dialog.send_button.isHidden()
+    dialog.close()
+
+
+def test_names_and_headers_stay_put_while_the_numbers_scroll():
+    import time
+    app = QApplication.instance() or QApplication([])
+    grid = [["", "コール集計打ち込み（2026年11月）"], [], []]
+    people = [(f"担当{i:03}", "U", [i] * 3 + [1, 1, 0] * 11) for i in range(60)]
+    grid += block_rows(13, people, hours=range(10, 21))
+    login = FakeLogin()
+    login.session = lambda: Session(grid)  # 画面を開いたときの自動読み込みも同じ表を返す
+    dialog = TeamStatisticsDialog(login=login)
+    dialog.day.setDate(QDate(2026, 11, 13))
+    dialog.resize(700, 400)
+    dialog.show()
+    end = time.monotonic() + 2
+    while dialog.left.rowCount() == 0 and time.monotonic() < end:
+        app.processEvents()
+    end = time.monotonic() + 0.5
+    while time.monotonic() < end:
+        app.processEvents()
+    # 名前は左、見出しは上の部分にあり、数字の部分には入っていない
+    assert dialog.left.item(0, 0).text() == "担当000" and dialog.top.item(0, 0).text() == "日計"
+    assert dialog.body.columnCount() == 3 * 12 and dialog.left.columnCount() == 3
+    body_h, body_v = dialog.body.horizontalScrollBar(), dialog.body.verticalScrollBar()
+    assert body_h.maximum() > 0 and body_v.maximum() > 0
+    body_h.setValue(body_h.maximum())
+    body_v.setValue(body_v.maximum())
+    app.processEvents()
+    # 端まで送っても引き戻されない
+    assert body_h.value() == body_h.maximum() and body_v.value() == body_v.maximum()
+    # 横に送ると見出しだけが一緒に動き、縦に送ると名前だけが一緒に動く（端までそろう）
+    assert dialog.top.horizontalScrollBar().value() == body_h.value()
+    assert dialog.left.verticalScrollBar().value() == body_v.value()
+    assert dialog.corner.horizontalScrollBar().value() == 0 and dialog.corner.verticalScrollBar().value() == 0
+    dialog.close()
+
+
+class FakeStore:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def staff(self):
+        return [{"staff_id": "bb1", "staff_name": "岩田　悠河"}]
+
+    def display_hours(self, staff_id, day):
+        return [{"hour": h, "total_calls": c} for h, c in self.calls.items()]
+
+
+def verify_dialog(sheet_calls, local_calls, own="岩田 悠河"):
+    from datetime import date
+    today = date.today().isoformat()
+    members = [team.Member(name="岩田悠河", department="", unit="", total=(0, 0, 0),
+                           hours={10: (sheet_calls.get(10), 0, 0), 11: (sheet_calls.get(11), 0, 0)})]
+    controller = FakeController()
+    controller.store = FakeStore(local_calls)
+    dialog = TeamStatisticsDialog(login=FakeLogin(), own_name=own, controller=controller)
+    return dialog, team.TeamDay(sheet="s", day=today, hours=[10, 11], members=members)
+
+
+def test_after_send_check_confirms_or_warns_when_the_sheet_did_not_change():
+    app = QApplication.instance() or QApplication([])
+    dialog, data = verify_dialog({10: 5, 11: 3}, {10: 5, 11: 3})
+    assert dialog.verify_own(data) == "シートへの反映を確認しました。"
+    dialog, data = verify_dialog({10: 5, 11: None}, {10: 5, 11: 3})
+    assert "11時台" in dialog.verify_own(data) and "共有トークン" in dialog.verify_own(data)
+    dialog, data = verify_dialog({10: 5}, {10: 5}, own="知らない 人")
+    assert "見つからない" in dialog.verify_own(data)
+
+
+def test_send_that_could_not_start_does_not_leave_a_pending_wait():
+    app = QApplication.instance() or QApplication([])
+    controller = FakeController()
+    controller.collect = lambda: None  # 終了処理中などで始まらない
+    dialog = TeamStatisticsDialog(login=FakeLogin(), controller=controller)
+    dialog.send_own()
+    assert not dialog.waiting_send and "今は送信できません" in dialog.status.text()
+    controller.finish("12:00 集計済み：岩田 悠河／シート送信済み（反映は1〜2分後）")
+    assert not dialog.after_send_timer.isActive()  # 後の毎時集計を自分の送信と取り違えない
+    dialog.close()
+
+
+def test_date_moves_to_today_after_midnight_unless_the_user_changed_it():
+    app = QApplication.instance() or QApplication([])
+    dialog = TeamStatisticsDialog(login=FakeLogin(logged_in=False))
+    yesterday = QDate.currentDate().addDays(-1)
+    dialog._auto_day = yesterday
+    dialog.day.setDate(yesterday)
+    dialog.fetch()
+    assert dialog.day.date() == QDate.currentDate()
+    chosen = QDate.currentDate().addDays(-3)
+    dialog._auto_day = QDate.currentDate().addDays(-1)
+    dialog.day.setDate(chosen)  # 利用者が選んだ日付は動かさない
+    dialog.fetch()
+    assert dialog.day.date() == chosen
     dialog.close()
