@@ -157,19 +157,11 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=N
             "prospects": len(prospects), "unmatched_prospects": unmatched, "unknown_dialogue_results": unknown}
 
 
-def hourly_talk_seconds(rows, day, staff_name, numeric_unit="seconds"):
-    return hourly_history_totals(rows, day, staff_name, numeric_unit)["talk_seconds"]
-
-
 def format_duration(seconds):
     if seconds is None:
         return "未取得"
     total = round(seconds)
     return f"{total // 3600:02}:{total // 60 % 60:02}:{total % 60:02}"
-
-
-def next_half_hour(now):
-    return now.replace(minute=0 if now.minute < 30 else 30, second=0, microsecond=0) + timedelta(minutes=30)
 
 
 def next_hour(now):

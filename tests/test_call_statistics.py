@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from services.call_statistics import (JST, StatisticsSnapshot, StatisticsStore,
-                                      hourly_history_totals, hourly_talk_seconds, next_half_hour, next_hour,
+                                      hourly_history_totals, next_hour,
                                       parse_call_duration)
 from services.cti_accessibility import msaa_tables
 from services.cti_statistics_service import (CollectionSkipped, counter_context, history_total, parse_staff, read_counters,
@@ -16,13 +16,6 @@ def snapshot(when, total, seconds=60, session="cti-1"):
                               {"total_calls": total, "new_prospects": total // 5,
                                "ng_with_dialogue": total // 3, "ng_without_dialogue": 0},
                               {stamp.hour: seconds}, 1)
-
-
-def test_half_hour_scheduler_aligns_wall_clock_and_rolls_day():
-    assert next_half_hour(datetime(2026, 11, 13, 13, 9, tzinfo=JST)).hour == 13
-    assert next_half_hour(datetime(2026, 11, 13, 13, 9, tzinfo=JST)).minute == 30
-    assert next_half_hour(datetime(2026, 11, 13, 13, 30, tzinfo=JST)).hour == 14
-    assert next_half_hour(datetime(2026, 11, 13, 23, 59, tzinfo=JST)).date().isoformat() == "2026-11-14"
 
 
 def test_duration_formats_and_units():
@@ -39,7 +32,7 @@ def test_duration_formats_and_units():
 def test_history_hours_deduplicate_call_ids_but_not_unidentified_calls():
     base = {"対応スタッフ": "姓 名", "対応日時": "2026/11/13 13:20", "IP電話通話時間": "90", "通話ユニークID": "call-1"}
     second = {**base, "対応日時": "2026/11/13 14:00", "IP電話通話時間": "01:00", "通話ユニークID": ""}
-    totals = hourly_talk_seconds([base, base, second, second], "2026-11-13", "姓　名")
+    totals = hourly_history_totals([base, base, second, second], "2026-11-13", "姓　名")["talk_seconds"]
     assert totals[13] == 90
     assert totals[14] == 120
 
@@ -52,7 +45,7 @@ def test_history_excludes_other_staff_and_days_but_rejects_missing_columns():
     assert totals["counters"][13]["total_calls"] == 1
     assert sum(totals["counters"][h]["total_calls"] for h in range(24)) == 1
     with pytest.raises(ValueError):
-        hourly_talk_seconds([{"対応スタッフ": "姓　名"}], "2026-11-13", "姓　名")
+        hourly_history_totals([{"対応スタッフ": "姓　名"}], "2026-11-13", "姓　名")
 
 
 def test_first_snapshot_is_baseline_not_historical_counter_totals(tmp_path):

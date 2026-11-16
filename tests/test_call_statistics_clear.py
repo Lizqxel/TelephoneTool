@@ -25,7 +25,7 @@ def test_clear_runs_only_after_successful_collection_and_save(monkeypatch, failu
         def __init__(self, cancel):
             pass
 
-        def collect(self, unit, full=True):
+        def collect(self, unit):
             events.append("collect")
             if failure == "collect":
                 raise RuntimeError("collect failed")
@@ -45,7 +45,7 @@ def test_clear_runs_only_after_successful_collection_and_save(monkeypatch, failu
 
     monkeypatch.setattr(ui, "CtiStatisticsCollector", Collector)
     worker = ui.StatisticsWorker(Store(), "seconds")
-    worker.completed.connect(lambda snapshot, error, notice, full: completed.append((snapshot, error, notice)))
+    worker.completed.connect(lambda snapshot, error, notice: completed.append((snapshot, error, notice)))
     worker.run()
     if failure == "collect":
         assert events == ["collect"]
@@ -65,7 +65,7 @@ def test_clear_warning_keeps_successful_aggregation_visible(tmp_path):
     controller.set_automatic(False)
     result = history_snapshot("2026-11-13T16:40:00", [history_row()])
     controller.store.save(result)
-    controller._completed(result, "", "架電履歴のクリア未完了：CTIがありません", True)
+    controller._completed(result, "", "架電履歴のクリア未完了：CTIがありません")
     assert "集計済み" in controller.status
     assert "保存済み" in controller.status
     assert "クリア未完了" in controller.status
@@ -165,7 +165,7 @@ def test_history_is_not_cleared_when_this_run_did_not_collect_it(monkeypatch):
         def __init__(self, cancel):
             pass
 
-        def collect(self, unit, full=True):
+        def collect(self, unit):
             return counter_snapshot("2026-11-13T16:40:00", 1)  # 条件が合わずスキップした回
 
         def clear_history(self):

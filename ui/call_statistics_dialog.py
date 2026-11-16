@@ -19,25 +19,24 @@ from services.cti_statistics_service import CtiStatisticsCollector
 
 
 class StatisticsWorker(QThread):
-    completed = Signal(object, str, str, bool)
+    completed = Signal(object, str, str)  # 集計結果、エラー、クリア・送信のお知らせ
 
-    def __init__(self, store, numeric_unit, full=True, sender_factory=None, parent=None):
+    def __init__(self, store, numeric_unit, sender_factory=None, parent=None):
         super().__init__(parent)
         self.store = store
         self.numeric_unit = numeric_unit
-        self.full = full
         self.sender_factory = sender_factory or SheetSender.from_settings
         self.cancelled = threading.Event()
 
     def run(self):
         try:
             collector = CtiStatisticsCollector(self.cancelled)
-            snapshot = collector.collect(self.numeric_unit, full=self.full)
+            snapshot = collector.collect(self.numeric_unit)
             if self.cancelled.is_set():
                 return
             self.store.save(snapshot)
         except Exception as exc:
-            self.completed.emit(None, str(exc), "", self.full)
+            self.completed.emit(None, str(exc), "")
             return
         notices = []
         if snapshot.history_counters is not None:
@@ -46,9 +45,9 @@ class StatisticsWorker(QThread):
                 collector.clear_history()
             except Exception as exc:
                 notices.append(f"架電履歴のクリア未完了：{exc}")
-        if self.full and not self.cancelled.is_set():
+        if not self.cancelled.is_set():
             notices.append(self.send(snapshot))
-        self.completed.emit(snapshot, "", "／".join(n for n in notices if n), self.full)
+        self.completed.emit(snapshot, "", "／".join(n for n in notices if n))
 
     def send(self, snapshot):
         """保存済みの当日分をシートへ送る。失敗しても集計結果は保存済みで、次回の送信で回復する。"""
@@ -64,7 +63,8 @@ class StatisticsWorker(QThread):
             skipped = result.get("skipped") or []
             if skipped:
                 return "シート送信済み（シートに枠が無い時間帯：" + "・".join(f"{h}時" for h in skipped) + "）"
-            return "シート送信済み"
+            # フォームは書き込み結果を返さないので、反映までの時間と確かめ方も添える
+            return "シート送信済み（反映は1〜2分後。全員の集計で確認できます）"
         except Exception as exc:
             return f"シート送信失敗：{exc}"
 
@@ -83,7 +83,7 @@ class CallStatisticsController(QObject):
         self.worker = None
         self.dialog = None
         self.closing = False
-        self.pending_full = False
+        self.pending = False
         self.status = "初回の集計前です。"
         self.automatic = self.store.preference("automatic", "1") == "1"
         self.timer = QTimer(self)
@@ -126,29 +126,24 @@ class CallStatisticsController(QObject):
         self.status_changed.emit(message)
         self.changed.emit()
 
-    def collect(self, full=True):
+    def collect(self):
         if self.closing:
             return
         if self.busy:
             # 実行中に集計が重なった場合は、終わってから実行する。
-            self.pending_full = self.pending_full or full
+            self.pending = True
             return
-        if full:
-            self.set_status("CTIを集計しています…")
-        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), full, self.sender_factory, self)
-        self.worker = worker
+        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), self.sender_factory, self)
         worker.completed.connect(self._completed)
         worker.finished.connect(self._finished)
+        # 「集計中」になってから知らせる（先に知らせると、受け取った画面が集計中でないと誤解する）
+        self.worker = worker
         worker.start()
-        self.changed.emit()
+        self.set_status("CTIを集計しています…")
 
-    def _completed(self, snapshot, error, notice="", full=True):
+    def _completed(self, snapshot, error, notice=""):
         if error:
-            if full or not self.status.startswith("集計できませんでした"):
-                self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
-            return
-        if not full:
-            self.changed.emit()
+            self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
             return
         # クリアや送信だけ失敗した場合も、集計は保存済みであることを示す。
         saved = "（保存済み）" if any(word in notice for word in ("未完了", "失敗")) else ""
@@ -164,9 +159,9 @@ class CallStatisticsController(QObject):
         if worker:
             worker.deleteLater()
         self.changed.emit()
-        if self.pending_full and not self.closing:
-            self.pending_full = False
-            self.collect(full=True)
+        if self.pending and not self.closing:
+            self.pending = False
+            self.collect()
 
     def show(self, collect=False):
         if self.dialog is None:
@@ -187,10 +182,6 @@ class CallStatisticsController(QObject):
         return True
 
 
-def status_text(row):
-    return row["counter_status"]
-
-
 class CallStatisticsDialog(QDialog):
     HEADERS = ["時間帯", "コール", "対話", "トス", "応答時間", "新規見込", "対話NG", "取得状態"]
 
@@ -203,6 +194,7 @@ class CallStatisticsDialog(QDialog):
         layout = QVBoxLayout(self)
         top = QHBoxLayout()
         self.day = QDateEdit(QDate.currentDate())
+        self._auto_day = QDate.currentDate()  # 利用者が変えていなければ、日付が変わったら今日へ進める
         self.day.setCalendarPopup(True)
         self.day.setDisplayFormat("yyyy/MM/dd")
         self.staff = QComboBox()
@@ -262,6 +254,11 @@ class CallStatisticsDialog(QDialog):
         self.controller.set_status("通話時間の単位を変更しました。次の集計で当日の応答時間を再計算します。")
 
     def refresh(self):
+        today = QDate.currentDate()
+        if self._auto_day != today and self.day.date() == self._auto_day:
+            self._auto_day = today
+            self.day.setDate(today)  # dateChanged から refresh が呼ばれる
+            return
         controller = self.controller
         people = controller.store.staff()
         selected = self.staff.currentData()
@@ -293,7 +290,7 @@ class CallStatisticsDialog(QDialog):
                       *[number(row, k) for k in ("total_calls", "dialogues", "toss")],
                       format_duration(row["talk_seconds"]),
                       *[number(row, k) for k in ("new_prospects", "ng_with_dialogue")],
-                      status_text(row)]
+                      row["counter_status"]]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignCenter)

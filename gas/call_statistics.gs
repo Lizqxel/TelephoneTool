@@ -20,6 +20,7 @@ const SHEET_NAME_PREFIX = 'コール集計打ち込み用_';
 const LOOKUP_COLUMNS = 4; // 名前の列と日付見出しを探す範囲（A〜D列）
 const FORM_TITLE = 'TelephoneTool 通話集計（自動送信用・手入力しないでください）';
 const HANDLER = 'processSubmissions';
+const RETRY_MINUTES = 30; // シートを開けないなど一時的な失敗は、この時間まで1分ごとに再処理する
 const INTERVAL_MINUTES = 1; // 送信が無い回はシートを開かないので、短くしても負担は小さい
 
 /** 初回だけエディタから実行する。何度実行しても、フォームとトリガーは1つだけになる。 */
@@ -86,32 +87,52 @@ function processSubmissions() {
     if (!responses.length) return;
     const token = props.getProperty('TOKEN');
     const latest = {};
+    const done = []; // 処理を終えた回答（書き込めた・やり直しても無駄・古すぎる）。トークンを含むので消す
     responses.forEach(function (response) {
       const answers = {};
       response.getItemResponses().forEach(function (r) { answers[r.getItem().getTitle()] = String(r.getResponse()); });
       try {
         if (!token || answers.token !== token) throw new Error('認証に失敗しました（トークンが一致しません）');
         const body = JSON.parse(answers.data || '{}');
-        // 毎回その日の全時間帯が送られてくるので、同じ人・同じ日は最後の送信だけ書く。
+        // 毎回その日の全時間帯が送られてくるので、同じ人・同じ日は最後の送信だけ書く（古い分は同じ結果で片付ける）。
         const key = body.date + '|' + normalize(body.staffName);
         const sentAt = response.getTimestamp().getTime();
-        if (!latest[key] || latest[key].sentAt <= sentAt) latest[key] = { body: body, sentAt: sentAt };
+        const entry = latest[key] || (latest[key] = { body: body, sentAt: sentAt, responses: [] });
+        entry.responses.push(response);
+        if (entry.sentAt <= sentAt) {
+          entry.body = body;
+          entry.sentAt = sentAt;
+        }
       } catch (err) {
         console.error('通話集計の送信を読み取れません: ' + ((err && err.message) || err));
+        done.push(response);
       }
     });
     const book = { spreadsheet: null, sheets: {} };
     Object.keys(latest).forEach(function (key) {
-      const body = latest[key].body;
+      const entry = latest[key];
+      const body = entry.body;
       try {
         const result = writeStatistics(body, book);
         console.log(JSON.stringify({ staff: body.staffName, date: body.date, row: result.row, written: result.written, skipped: result.skipped }));
+        Array.prototype.push.apply(done, entry.responses);
       } catch (err) {
-        console.error('通話集計の書き込みに失敗（' + body.staffName + ' ' + body.date + '）: ' + ((err && err.message) || err));
+        const message = (err && err.message) || err;
+        const expired = Date.now() - entry.sentAt > RETRY_MINUTES * 60 * 1000;
+        if (err && err.permanent) {
+          // 名前が表に無いなど、やり直しても同じ結果になるもの
+          console.error('通話集計の書き込みに失敗（' + body.staffName + ' ' + body.date + '）: ' + message);
+          Array.prototype.push.apply(done, entry.responses);
+        } else if (expired) {
+          console.error('通話集計の書き込みを' + RETRY_MINUTES + '分やり直しても失敗したため破棄（' + body.staffName + ' ' + body.date + '）: ' + message);
+          Array.prototype.push.apply(done, entry.responses);
+        } else {
+          // シートを開けないなど一時的な失敗は、回答を残して次の回（1分後）にやり直す
+          console.warn('通話集計の書き込みを次の回にやり直します（' + body.staffName + ' ' + body.date + '）: ' + message);
+        }
       }
     });
-    // 失敗した分もTelephoneToolが次の時間に全時間帯を送り直すので、回答は残さない。
-    responses.forEach(function (response) {
+    done.forEach(function (response) {
       try {
         form.deleteResponse(response.getId());
       } catch (err) {
@@ -123,6 +144,13 @@ function processSubmissions() {
   }
 }
 
+/** やり直しても同じ結果になる失敗（表や名前が無いなど）。回答は残さず片付ける。 */
+function permanentError(message) {
+  const error = new Error(message);
+  error.permanent = true;
+  return error;
+}
+
 /** 全角・半角と空白の違いを無視して比べる（CTIの「岩田 悠河」とシートの「岩田悠河」を同一視）。 */
 function normalize(value) {
   return String(value === null || value === undefined ? '' : value).normalize('NFKC').replace(/\s+/g, '');
@@ -132,9 +160,18 @@ function normalize(value) {
 function monthSheet(book, year, month) {
   const sheetName = SHEET_NAME_PREFIX + month + '月';
   if (!book.sheets[sheetName]) {
-    if (!book.spreadsheet) book.spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    // 開けなかったら、同じ回の残りの人では開き直さない（1回で数十秒かかるため）。次の回にやり直す
+    if (book.openError) throw book.openError;
+    if (!book.spreadsheet) {
+      try {
+        book.spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+      } catch (err) {
+        book.openError = err;
+        throw err;
+      }
+    }
     const sheet = book.spreadsheet.getSheetByName(sheetName);
-    if (!sheet) throw new Error('シート「' + sheetName + '」がありません');
+    if (!sheet) throw permanentError('シート「' + sheetName + '」がありません');
     const lastRow = sheet.getLastRow();
     const lastColumn = sheet.getLastColumn();
     book.sheets[sheetName] = {
@@ -144,19 +181,19 @@ function monthSheet(book, year, month) {
   }
   const data = book.sheets[sheetName];
   if (!normalize(data.left[0].join('')).includes(year + '年' + month + '月')) {
-    throw new Error('シート「' + sheetName + '」が' + year + '年' + month + '月の表ではありません');
+    throw permanentError('シート「' + sheetName + '」が' + year + '年' + month + '月の表ではありません');
   }
   return data;
 }
 
 function writeStatistics(body, book) {
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(body.date || '');
-  if (!date) throw new Error('日付の形式が不正です');
+  if (!date) throw permanentError('日付の形式が不正です');
   const year = Number(date[1]);
   const month = Number(date[2]);
   const day = Number(date[3]);
   const staffName = normalize(body.staffName);
-  if (!staffName) throw new Error('名前がありません');
+  if (!staffName) throw permanentError('名前がありません');
   const data = monthSheet(book || { spreadsheet: null, sheets: {} }, year, month);
   const left = data.left;
 
@@ -166,7 +203,7 @@ function writeStatistics(body, book) {
   const blockIndex = left.findIndex(function (row) {
     return row.some(function (cell) { return normalize(cell).indexOf(marker) === 0; });
   });
-  if (blockIndex < 0) throw new Error(month + '/' + day + 'の表が見つかりません');
+  if (blockIndex < 0) throw permanentError(month + '/' + day + 'の表が見つかりません');
 
   if (!data.headers[blockIndex]) {
     data.headers[blockIndex] = data.sheet.getRange(blockIndex + 2, 1, 2, data.lastColumn).getDisplayValues();
@@ -174,14 +211,14 @@ function writeStatistics(body, book) {
   const hourRow = data.headers[blockIndex][0];
   const labelRow = data.headers[blockIndex][1];
   const nameColumn = hourRow.slice(0, LOOKUP_COLUMNS).findIndex(function (cell) { return normalize(cell) === '名前'; });
-  if (nameColumn < 0) throw new Error(month + '/' + day + 'の表に「名前」の列が見つかりません');
+  if (nameColumn < 0) throw permanentError(month + '/' + day + 'の表に「名前」の列が見つかりません');
 
   const matches = [];
   for (let r = blockIndex + 3; r < left.length && !isBlock(left[r]); r++) {
     if (normalize(left[r][nameColumn]) === staffName) matches.push(r);
   }
   if (matches.length !== 1) {
-    throw new Error(matches.length
+    throw permanentError(matches.length
       ? '「' + body.staffName + '」が' + month + '/' + day + 'の表に複数あります'
       : '「' + body.staffName + '」が' + month + '/' + day + 'の表の名前欄にありません');
   }

@@ -241,8 +241,10 @@ class UpdateDialog(QDialog):
             block_size = 8192
             downloaded = 0
             
-            # 新しいバージョンを保存
-            new_exe_path = f"TelephoneTool-{new_version}.exe"
+            # 新しいバージョンを今のexeと同じフォルダに保存する
+            # （作業フォルダがexeの場所と違う起動のしかたでも、更新用バッチが見つけられるように）
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False) else os.getcwd()
+            new_exe_path = os.path.join(exe_dir, f"TelephoneTool-{new_version}.exe")
             with open(new_exe_path, "wb") as f:
                 for data in response.iter_content(block_size):
                     downloaded += len(data)
@@ -273,7 +275,9 @@ class UpdateDialog(QDialog):
                 f.write("timeout /t 0.5 /nobreak > nul\n")
                 
                 # 新しいバージョンを配置
-                f.write(f'copy /Y "{new_exe_path}" "{new_exe_path}.tmp" > nul 2>&1\n')
+                # バッチはexeのフォルダへ移動してから動くので、ファイル名だけで指定する（フォルダ名の文字コードに左右されない）
+                new_exe_name = os.path.basename(new_exe_path)
+                f.write(f'copy /Y "{new_exe_name}" "{new_exe_name}.tmp" > nul 2>&1\n')
                 
                 # すべての古いバージョンを削除（現在実行中のファイルを除く）
                 f.write('for %%f in (TelephoneTool-*.exe) do (\n')
@@ -283,7 +287,7 @@ class UpdateDialog(QDialog):
                 f.write(')\n')
                 
                 # 一時ファイルを正しい名前に変更
-                f.write(f'move /Y "{new_exe_path}.tmp" "{new_exe_path}" > nul 2>&1\n')
+                f.write(f'move /Y "{new_exe_name}.tmp" "{new_exe_name}" > nul 2>&1\n')
                 
                 # バッチファイル自身を削除
                 f.write("timeout /t 0.5 /nobreak > nul\n")
