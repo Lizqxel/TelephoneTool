@@ -67,7 +67,7 @@ class StatisticsWorker(QThread):
             if skipped:
                 return "シート送信済み（シートに枠が無い時間帯：" + "・".join(f"{h}時" for h in skipped) + "）"
             # フォームは書き込み結果を返さないので、反映までの時間と確かめ方も添える
-            return "シート送信済み（反映は1〜2分後。全員の集計で確認できます）"
+            return "シート送信済み（GASの次回自動更新後に反映。全員の集計で確認できます）"
         except Exception as exc:
             return f"シート送信失敗：{exc}"
 

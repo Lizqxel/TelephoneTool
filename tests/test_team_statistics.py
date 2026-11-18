@@ -336,7 +336,7 @@ def test_send_button_collects_own_data_and_rereads_the_sheet_after_it_is_written
     assert "シートへ送っています" in dialog.status.text()
     controller.finish("16:31 集計済み：三浦 甲斐／本人の当日履歴 1件／シート送信済み")
     assert dialog.send_button.isEnabled()
-    assert "シート送信済み" in dialog.status.text() and "自動で読み直して" in dialog.status.text()
+    assert "シート送信済み" in dialog.status.text() and "GASの次回更新後" in dialog.status.text()
     assert dialog.after_send_timer.isActive()
     dialog.close()
 
@@ -434,7 +434,7 @@ def test_send_that_could_not_start_does_not_leave_a_pending_wait():
     dialog = TeamStatisticsDialog(login=FakeLogin(), controller=controller)
     dialog.send_own()
     assert not dialog.waiting_send and "今は送信できません" in dialog.status.text()
-    controller.finish("12:00 集計済み：岩田 悠河／シート送信済み（反映は1〜2分後）")
+    controller.finish("12:00 集計済み：岩田 悠河／シート送信済み（GASの次回自動更新後に反映）")
     assert not dialog.after_send_timer.isActive()  # 後の毎時集計を自分の送信と取り違えない
     dialog.close()
 

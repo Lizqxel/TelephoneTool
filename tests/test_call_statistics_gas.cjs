@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../gas/call_statistics.gs'), 'utf8');
+const integration = fs.readFileSync(path.join(__dirname, '../gas/auto_refresh_integration.gs'), 'utf8');
+const legacySource = fs.readFileSync(path.join(__dirname, '../gas/reference/legacy_receiver.gs.txt'), 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 
 class Sheet {
@@ -15,6 +17,7 @@ class Sheet {
   insertRowsAfter(after, count) { this.maxRows += count; }
   setFrozenRows(count) { this.frozen = count; }
   hideSheet() { this.hidden = true; }
+  isSheetHidden() { return this.hidden; }
   getRange(row, column, height, width) {
     const sheet = this;
     return {
@@ -35,7 +38,7 @@ class Sheet {
   }
 }
 
-function environment() {
+function environment(script = source) {
   const legacy = new Sheet('コール集計打ち込み用_11月', [
     ['', '2026年11月'], ['', '【11/13（金）】'],
     ['', '名前', '', '', '日計', '', '', '10時台', '', '', '11時台', '', ''],
@@ -48,18 +51,37 @@ function environment() {
     assert(!sheets.has(name), 'duplicate sheet creation');
     const sheet = new Sheet(name); sheets.set(name, sheet); return sheet;
   }};
-  const form = {responses: [], deleted: [], getResponses() { return this.responses; }, deleteResponse(id) { this.deleted.push(id); }};
+  const form = {responses: [], deleted: [], getResponses() { return this.responses; }, deleteResponse(id) { this.deleted.push(id); this.responses = this.responses.filter(response => response.getId() !== id); }};
+  for (const name of ['setCollectEmail', 'setLimitOneResponsePerUser', 'setAllowResponseEdits', 'setShowLinkToRespondAgain', 'setRequireLogin', 'setAcceptingResponses']) form[name] = () => {};
+  form.getItems = () => [{asTextItem: () => ({createResponse: () => ({})})}, {asParagraphTextItem: () => ({createResponse: () => ({})})}];
+  form.createResponse = () => ({withItemResponse() { return this; }, toPrefilledUrl() { return 'https://example.invalid?entry.1=TOKENVALUE&entry.2=DATAVALUE'; }});
+  form.getPublishedUrl = () => 'https://example.invalid/viewform';
+  form.requiresLogin = () => false;
   const state = {locked: false, canLock: true};
+  const logs = [];
+  const properties = {TOKEN: 'test-token', FORM_ID: 'form'};
+  const triggers = [{getHandlerFunction: () => 'processSubmissions'}];
+  const createdTriggers = [];
+  const scriptApp = {
+    getScriptId: () => 'receiver-test-project',
+    getProjectTriggers: () => triggers,
+    newTrigger(name) {
+      const trigger = {name, minutes: null};
+      return {timeBased() { return this; }, everyMinutes(minutes) { trigger.minutes = minutes; return this; },
+        create() { createdTriggers.push(trigger); triggers.push({getHandlerFunction: () => name}); }};
+    }
+  };
   const context = vm.createContext({
-    console: {log() {}, warn() {}, error() {}},
+    console: {log(message) { logs.push(String(message)); }, warn(message) { logs.push(String(message)); }, error(message) { logs.push(String(message)); }},
     SpreadsheetApp: {openById: () => spreadsheet},
-    PropertiesService: {getScriptProperties: () => ({getProperty: key => ({TOKEN: 'test-token', FORM_ID: 'form'})[key]})},
+    PropertiesService: {getScriptProperties: () => ({getProperty: key => properties[key], setProperty(key, value) { properties[key] = value; }})},
     FormApp: {openById: () => form},
+    ScriptApp: scriptApp,
     LockService: {getScriptLock: () => ({tryLock() { if (!state.canLock) return false; state.locked = true; return true; }, waitLock() { state.locked = true; }, releaseLock() { state.locked = false; }})},
     Utilities: {formatDate: () => '2026-11'}
   });
-  vm.runInContext(source, context);
-  return {context, sheets, legacy, spreadsheet, form, state};
+  vm.runInContext(script, context);
+  return {context, sheets, legacy, spreadsheet, form, state, logs, properties, triggers, createdTriggers};
 }
 
 function payload(stamp = '2026-11-13T10:45:02+09:00') {
@@ -236,4 +258,136 @@ test('concurrent processing returns without changing data', () => {
   env.context.processSubmissions();
   assert.equal(dataSheet(env), undefined);
   assert.deepEqual(env.form.deleted, []);
+});
+
+test('dashboard autoRefresh preserves its original stages and never opens the form', () => {
+  const events = [];
+  const context = vm.createContext({console, FormApp: {openById() { throw new Error('dashboard must not open forms'); }},
+    processSubmissions() { throw new Error('dashboard must not consume responses'); },
+    autoRefreshBase_() { events.push('dashboard'); }, rebuildClosedMonths_() { events.push('closed'); }, aclRefresh_() { events.push('acl'); }});
+  vm.runInContext(integration, context);
+  context.autoRefresh();
+  assert.deepEqual(events, ['dashboard', 'closed', 'acl']);
+});
+
+test('dashboard keeps original error handling for historical rebuild', () => {
+  const events = [];
+  const context = vm.createContext({console: {log() {}}, autoRefreshBase_() { events.push('dashboard'); },
+    rebuildClosedMonths_() { throw new Error('rebuild failed'); }, aclRefresh_() { events.push('acl'); }});
+  vm.runInContext(integration, context);
+  context.autoRefresh();
+  assert.deepEqual(events, ['dashboard', 'acl']);
+});
+
+test('receiver setup reuses its existing trigger and never deletes dashboard triggers', () => {
+  const env = environment();
+  env.triggers.push({getHandlerFunction: () => 'autoRefresh'});
+  const info = env.context.setup();
+  assert.equal(info.tokenEntry, 'entry.1');
+  assert.equal(info.dataEntry, 'entry.2');
+  assert.equal(dataSheet(env).hidden, true);
+  assert.equal(env.createdTriggers.length, 0);
+  assert.equal(env.triggers.length, 2);
+  assert.equal(env.properties.FORM_ID, 'form');
+});
+
+test('receiver setup creates only one missing processSubmissions trigger at one minute', () => {
+  const env = environment();
+  env.triggers.splice(0);
+  env.triggers.push({getHandlerFunction: () => 'autoRefresh'});
+  env.context.ensureStatisticsReceiverTrigger();
+  env.context.ensureStatisticsReceiverTrigger();
+  assert.deepEqual(env.createdTriggers, [{name: 'processSubmissions', minutes: 1}]);
+  assert.equal(env.triggers[0].getHandlerFunction(), 'autoRefresh');
+});
+
+test('30 minute trigger can retry a submission after 45 minutes', () => {
+  const env = environment();
+  env.context.setupStatisticsData();
+  dataSheet(env).failWrites = true;
+  env.form.responses = [response('delayed', payload(), new Date(Date.now() - 45 * 60000).toISOString())];
+  env.context.processSubmissions();
+  assert.deepEqual(env.form.deleted, []);
+  dataSheet(env).failWrites = false;
+  env.context.processSubmissions();
+  assert.deepEqual(env.form.deleted, ['delayed']);
+});
+
+test('dashboard export compiles, preserves APIs, and contains no receiver or FormApp', () => {
+  const combined = fs.readFileSync(path.join(__dirname, '../gas/dashboard_with_call_statistics.gs.txt'), 'utf8');
+  new vm.Script(combined);
+  assert.equal((combined.match(/^function autoRefresh\(/gm) || []).length, 1);
+  for (const name of ['doGet', 'getCallHours', 'autoRefreshBase_', 'rebuildClosedMonths_', 'aclRefresh_']) assert(combined.includes(`function ${name}(`), name);
+  assert(!combined.includes('FormApp'));
+  assert(!combined.includes('function processSubmissions('));
+  const fullContext = vm.createContext({console});
+  vm.runInContext(combined, fullContext);
+  const events = [];
+  for (const name of ['autoRefreshBase_', 'rebuildClosedMonths_', 'aclRefresh_']) fullContext[name] = () => events.push(name);
+  fullContext.processSubmissions = () => { throw new Error('must not consume forms'); };
+  fullContext.autoRefresh();
+  assert.deepEqual(events, ['autoRefreshBase_', 'rebuildClosedMonths_', 'aclRefresh_']);
+});
+
+test('reproduces the legacy receiver discarding dialogue time before the second script can read it', () => {
+  const old = environment(legacySource);
+  old.form.responses = [response('already-consumed', payload())];
+  old.context.processSubmissions();
+  assert.equal(old.legacy.rows[4][7], 4);
+  assert.equal(dataSheet(old), undefined);
+  assert.deepEqual(old.form.deleted, ['already-consumed']);
+  const newer = environment();
+  newer.context.FormApp.openById = () => old.form;
+  newer.context.processSubmissions();
+  assert.equal(dataSheet(newer), undefined);
+});
+
+test('updated receiver saves dialogue time before deleting the shared form response', () => {
+  const env = environment();
+  const remove = env.form.deleteResponse.bind(env.form);
+  env.form.deleteResponse = id => { assert.equal(dataSheet(env).rows[21][9], 90.5); remove(id); };
+  env.form.responses = [response('saved-first', payload())];
+  env.context.processSubmissions();
+  assert.equal(env.form.responses.length, 0);
+  const log = env.logs.map(line => { try { return JSON.parse(line); } catch { return null; } }).find(item => item && item.intervalCount);
+  assert.equal(log.intervalSheet, '通話集計データ_2026-11');
+  assert.equal(log.intervalCount, 22);
+});
+
+for (const key of ['TOKEN', 'FORM_ID']) test(`missing ${key} never consumes or deletes responses`, () => {
+  const env = environment();
+  delete env.properties[key];
+  env.form.responses = [response('keep', payload())];
+  assert.throws(() => env.context.processSubmissions(), new RegExp(key));
+  assert.equal(env.form.responses.length, 1);
+  assert.deepEqual(env.form.deleted, []);
+  assert.equal(env.state.locked, false);
+});
+
+test('receiver diagnostics report configuration and positive dialogue time without mutation or secrets', () => {
+  const env = environment();
+  env.form.responses = [response('v2', payload()), response('v1', {date: '2026-11-13', staffName: '姓 名', hours: []})];
+  const result = env.context.diagnoseStatisticsReceiver();
+  assert.equal(result.pendingResponses, 2);
+  assert.equal(result.v2Responses, 1);
+  assert.equal(result.responsesWithDialogueSeconds, 1);
+  assert.equal(result.dataSheet.exists, false);
+  assert.equal(env.sheets.size, 1);
+  assert.deepEqual(env.form.deleted, []);
+  assert(!env.logs.join('\n').includes('test-token'));
+  assert(!env.logs.join('\n').includes('姓 名'));
+});
+
+test('paste-ready txt exports match their sources exactly and remain separated', () => {
+  const receiver = fs.readFileSync(path.join(__dirname, '../gas/exports/01_receiver_save.gs.txt'), 'utf8');
+  const dashboard = fs.readFileSync(path.join(__dirname, '../gas/exports/02_dashboard.gs.txt'), 'utf8');
+  const compat = fs.readFileSync(path.join(__dirname, '../gas/dashboard_with_call_statistics.gs.txt'), 'utf8');
+  assert.equal(receiver.trimEnd(), source.trimEnd());
+  assert.equal(dashboard, compat);
+  new vm.Script(receiver);
+  new vm.Script(dashboard);
+  assert(receiver.includes('function processSubmissions('));
+  assert(!receiver.includes('function autoRefresh('));
+  assert(dashboard.includes('function autoRefresh('));
+  assert(!dashboard.includes('function processSubmissions('));
 });

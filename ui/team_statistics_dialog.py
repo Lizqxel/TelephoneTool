@@ -15,7 +15,7 @@ from services.team_statistics import LABELS, GoogleLogin, LoginCancelled, fetch_
 from ui.team_statistics_analysis import TeamStatisticsAnalysis
 
 REFRESH_MS = 5 * 60 * 1000
-AFTER_SEND_MS = 90 * 1000  # シートへの反映（1分ごと）を待ってから読み直す
+AFTER_SEND_MS = 90 * 1000  # 送信後に一度確認する。未反映ならGASの次回autoRefresh後に更新する。
 ALL_UNITS = "全員"
 WEEKDAYS = "月火水木金土日"
 HEADER_ROWS = 2
@@ -217,7 +217,7 @@ class TeamStatisticsDialog(QDialog):
         self.pages.addWidget(self.table_page)
         layout.addWidget(self.pages, 1)
         note = QLabel("スプレッドシート「コール集計打ち込み用」の内容を表示しています（読み取りのみ）。"
-                      "各自のTelephoneToolが30分ごとに送った値が、1〜2分ほどで反映されます。")
+                      "各自のTelephoneToolが30分ごとに送った値は、GASの次回自動更新後に反映されます。")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -382,7 +382,7 @@ class TeamStatisticsDialog(QDialog):
         message = controller.status
         if "シート送信済み" in message:
             self.after_send_timer.start()
-            message += "　→ 1〜2分後に自動で読み直して、反映を確かめます。"
+            message += "　→ 自動で読み直します。反映待ちの場合はGASの次回更新後に「更新」を押してください。"
         self.status.setText(message)
 
     def _fetch_after_send(self):

@@ -3,7 +3,8 @@
  *
  * 会社の設定でウェブアプリを「全員」に公開できないため、ログイン不要の送信用Googleフォームで受け取る。
  * このスプレッドシートは開くだけで数十秒〜100秒近くかかるため、送信のたびには開かず、
- * 1分ごとの時間トリガーで、届いた送信をまとめて1回開いて書き込む（送信が無い回は開かない）。
+ * 別プロジェクトの受信用GASが、届いた送信をまとめて1回開いて書き込む（送信が無い回は開かない）。
+ * ダッシュボードのautoRefreshはフォームを読まない。フォームの受信担当はこのGASだけにする。
  * TelephoneTool は30分ごとに「本人・当日」の取得済み全時間帯を送る。
  * 旧来の1時間集計表へはコール・対話・トスを反映し、30分集計・対話時間は
  * 非表示の「通話集計データ_YYYY-MM」へ保存する。対話時間は秒数。
@@ -12,9 +13,11 @@
  *
  * 初回の設定：
  *   1. プロジェクトの設定 → スクリプト プロパティに TOKEN（TelephoneToolの共有トークンと同じ値）を登録する。
- *   2. エディタで setup を実行して権限を承認する。送信用フォームと1分ごとのトリガーが作られ、
+ *   2. エディタで setup を実行して権限を承認する。送信用フォームと非表示シートを準備し、
  *      TelephoneTool に設定する formResponseUrl・tokenEntry・dataEntry が実行ログに出る。
- * 書き込み結果やエラーは「実行数」の画面（processSubmissions のログ）で確認できる。
+ *   3. 受信用プロジェクトの既存processSubmissionsトリガー（1分おき）を維持する。
+ * setupは同じ所有者の受信用トリガーがなければ追加する。ダッシュボードのトリガーは変更しない。
+ * 書き込み結果やエラーは受信用プロジェクトの「実行数」（processSubmissions）で確認する。
  */
 
 const SPREADSHEET_ID = '1Asghaq_Hp3tqWQpirbBoBnQpXsKuWiTi33Hzfq-0qRU';
@@ -22,12 +25,11 @@ const SHEET_NAME_PREFIX = 'コール集計打ち込み用_';
 const LOOKUP_COLUMNS = 4; // 名前の列と日付見出しを探す範囲（A〜D列）
 const FORM_TITLE = 'TelephoneTool 通話集計（自動送信用・手入力しないでください）';
 const HANDLER = 'processSubmissions';
-const RETRY_MINUTES = 30; // シートを開けないなど一時的な失敗は、この時間まで1分ごとに再処理する
-const INTERVAL_MINUTES = 1; // 送信が無い回はシートを開かないので、短くしても負担は小さい
+const RETRY_MINUTES = 180; // 一時的な失敗を次の受信処理で再試行できるよう3時間保持
 const STAT_DATA_PREFIX = '通話集計データ_';
 const STAT_DATA_HEADERS = ['日付', 'スタッフID', '氏名', '部署', 'GPユニット', '開始分', 'コール数', '対話数', 'トス数', '対話時間（秒）', '取得日時'];
 
-/** 初回だけエディタから実行する。何度実行しても、フォームとトリガーは1つだけになる。 */
+/** 受信用プロジェクトで実行する。既存のフォーム・トリガーは再利用する。 */
 function setup() {
   const props = PropertiesService.getScriptProperties();
   const formId = props.getProperty('FORM_ID');
@@ -46,12 +48,6 @@ function setup() {
   form.setRequireLogin(false);
   if (typeof form.setPublished === 'function') form.setPublished(true);
   form.setAcceptingResponses(true);
-
-  // 以前の版のフォーム送信トリガー（onStatisticsSubmit）も含め、作り直す。
-  ScriptApp.getProjectTriggers()
-    .filter(function (t) { return ['onStatisticsSubmit', HANDLER].indexOf(t.getHandlerFunction()) >= 0; })
-    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger(HANDLER).timeBased().everyMinutes(INTERVAL_MINUTES).create();
 
   const items = form.getItems();
   const prefilled = form.createResponse()
@@ -78,7 +74,52 @@ function setup() {
   };
   console.log('TelephoneTool設定: ' + JSON.stringify(info));
   setupStatisticsData();
+  ensureStatisticsReceiverTrigger();
   return info;
+}
+
+/** 受信用トリガーがすでにあれば再利用する。別の処理のトリガーには触れない。 */
+function ensureStatisticsReceiverTrigger() {
+  if (!ScriptApp.getProjectTriggers().some(function (trigger) { return trigger.getHandlerFunction() === HANDLER; })) {
+    ScriptApp.newTrigger(HANDLER).timeBased().everyMinutes(1).create();
+  }
+}
+
+/** 読み取り専用の接続診断。共有トークンや回答本文は出力・削除しない。 */
+function diagnoseStatisticsReceiver() {
+  const props = PropertiesService.getScriptProperties();
+  const formId = props.getProperty('FORM_ID');
+  const result = {
+    scriptId: ScriptApp.getScriptId(),
+    formConfigured: Boolean(formId),
+    tokenConfigured: Boolean(props.getProperty('TOKEN')),
+    triggerFunctions: ScriptApp.getProjectTriggers().map(function (trigger) { return trigger.getHandlerFunction(); }),
+    pendingResponses: 0, v2Responses: 0, responsesWithIntervals: 0, responsesWithDialogueSeconds: 0,
+  };
+  if (formId) {
+    const form = FormApp.openById(formId);
+    result.formResponseUrl = form.getPublishedUrl().replace(/\/viewform.*$/, '/formResponse');
+    const responses = form.getResponses();
+    result.pendingResponses = responses.length;
+    responses.forEach(function (response) {
+      try {
+        const data = response.getItemResponses().find(function (answer) { return answer.getItem().getTitle() === 'data'; });
+        const body = JSON.parse(data ? String(data.getResponse()) : '{}');
+        if (body.schemaVersion === 2) result.v2Responses++;
+        if (Array.isArray(body.intervals) && body.intervals.length) {
+          result.responsesWithIntervals++;
+          if (body.intervals.some(function (item) { return item && typeof item.dialogueSeconds === 'number' && item.dialogueSeconds > 0; })) result.responsesWithDialogueSeconds++;
+        }
+      } catch (err) { /* 不正な回答本文をログへ出さず、診断対象から除外する。 */ }
+    });
+  }
+  const name = STAT_DATA_PREFIX + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
+  result.spreadsheetId = SPREADSHEET_ID;
+  result.dataSheet = { name: name, exists: Boolean(sheet), rows: sheet ? Math.max(0, sheet.getLastRow() - 1) : 0,
+                       hidden: sheet ? sheet.isSheetHidden() : null };
+  console.log(JSON.stringify(result));
+  return result;
 }
 
 /** 管理者が初回に実行する。翌月以降のシートは受信時に自動作成する。 */
@@ -95,16 +136,19 @@ function setupStatisticsData() {
   }
 }
 
-/** 1分ごとの時間トリガー。届いた送信をまとめてシートへ書き込み、処理した回答（トークンを含む）は消す。 */
+/** 受信用GASの時間トリガーから呼ぶ。保存できた回答（トークンを含む）は消す。 */
 function processSubmissions() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return; // 前回の処理がまだ続いている
   try {
     const props = PropertiesService.getScriptProperties();
-    const form = FormApp.openById(props.getProperty('FORM_ID'));
+    const formId = props.getProperty('FORM_ID');
+    const token = props.getProperty('TOKEN');
+    if (!formId) throw new Error('受信用GASのFORM_IDが未設定です。既存のフォームIDを確認してください。');
+    if (!token) throw new Error('受信用GASのTOKENが未設定です。フォーム回答は処理していません。');
+    const form = FormApp.openById(formId);
     const responses = form.getResponses();
     if (!responses.length) return;
-    const token = props.getProperty('TOKEN');
     const latest = {};
     const done = []; // 処理を終えた回答（書き込めた・やり直しても無駄・古すぎる）。トークンを含むので消す
     responses.forEach(function (response) {
@@ -137,7 +181,10 @@ function processSubmissions() {
       const body = entry.body;
       try {
         const result = writeStatistics(body, book);
-        console.log(JSON.stringify({ staff: body.staffName, date: body.date, row: result.row, written: result.written, skipped: result.skipped }));
+        console.log(JSON.stringify({ staff: body.staffName, date: body.date, schemaVersion: body.schemaVersion || 1,
+                                    row: result.row, written: result.written, skipped: result.skipped,
+                                    intervalSheet: result.intervalSheet || null, intervalCount: result.intervalCount || 0,
+                                    stale: Boolean(result.stale) }));
         Array.prototype.push.apply(done, entry.responses);
       } catch (err) {
         const message = (err && err.message) || err;
@@ -150,7 +197,7 @@ function processSubmissions() {
           console.error('通話集計の書き込みを' + RETRY_MINUTES + '分やり直しても失敗したため破棄（' + body.staffName + ' ' + body.date + '）: ' + message);
           Array.prototype.push.apply(done, entry.responses);
         } else {
-          // シートを開けないなど一時的な失敗は、回答を残して次の回（1分後）にやり直す
+          // シートを開けないなど一時的な失敗は、回答を残して次の受信処理でやり直す
           console.warn('通話集計の書き込みを次の回にやり直します（' + body.staffName + ' ' + body.date + '）: ' + message);
         }
       }
@@ -277,7 +324,9 @@ function writeStatistics(body, book) {
     // 名前・部署・ユニットは既存の当日表と対応づける。
     writeStatisticsData(store, body, left[matches[0]][nameColumn + 1] || '', left[matches[0]][nameColumn + 2] || '');
   }
-  return { ok: true, sheet: data.name, row: sheetRow, written: written, skipped: skipped };
+  return { ok: true, sheet: data.name, row: sheetRow, written: written, skipped: skipped,
+           intervalSheet: store ? STAT_DATA_PREFIX + body.date.slice(0, 7) : null,
+           intervalCount: store ? body.intervals.length : 0 };
 }
 
 /** 型・範囲・重複・取得日時をすべて確認してから書き込む。旧形式も受け付ける。 */
