@@ -105,6 +105,11 @@ if (process.argv[2] === '--payload') {
   const env = environment();
   env.context.validateStatistics(JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));
 }
+if (process.argv[2] === '--roundtrip') {
+  const env = environment();
+  env.context.writeStatistics(JSON.parse(fs.readFileSync(process.argv[3], 'utf8')));
+  fs.writeFileSync(process.argv[4], JSON.stringify(dataSheet(env).rows));
+}
 
 test('creates monthly hidden sheet, stores seconds and metadata, preserves daily formulas', () => {
   const env = environment();

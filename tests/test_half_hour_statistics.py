@@ -125,8 +125,15 @@ def test_real_sender_payload_passes_gas_validation(tmp_path):
     assert payload["intervals"][26]["dialogueSeconds"] == 90.5
     path = tmp_path / "payload.json"
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    checked = subprocess.run(["node", "tests/test_call_statistics_gas.cjs", "--payload", str(path)], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    stored_path = tmp_path / "gas_sheet_values.json"
+    checked = subprocess.run(["node", "tests/test_call_statistics_gas.cjs", "--roundtrip", str(path), str(stored_path)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert checked.returncode == 0, checked.stdout + checked.stderr
+    # Pythonの実ペイロード→GASの保存処理→Sheets API相当の未整形値→アプリの読み取り。
+    stored = json.loads(stored_path.read_text(encoding="utf-8"))
+    people = team.parse_intervals(stored, "2026-11-13")
+    assert len(people) == 1 and len(people[0].intervals) == 28
+    assert people[0].intervals[0] == (0, 0, 0, 0)
+    assert people[0].intervals[780] == (1, 1, 0, 90.5)
 
 
 def test_collector_produces_half_hours_from_the_same_history(monkeypatch):
@@ -198,6 +205,30 @@ def hidden_row(**values):
            "calls": 3, "dialogues": 2, "toss": 1, "seconds": 90.5, "stamp": "2026-11-13T10:30:02+09:00"}
     row.update(values)
     return list(row.values())
+
+
+@pytest.mark.parametrize("minute", [0, 0.0, "0", 30, 30.0, "30", 600, 600.0])
+def test_unformatted_numeric_zero_and_integer_floats_are_valid_minutes(minute):
+    rows = [team.INTERVAL_HEADERS, hidden_row(minute=minute, calls=0, dialogues=0, toss=0, seconds=0)]
+    people = team.parse_intervals(rows, "2026-11-13")
+    assert people[0].intervals[int(minute)] == (0, 0, 0, 0)
+
+
+@pytest.mark.parametrize("value", [False, True, 0.5, float("nan"), float("inf"), "", None])
+def test_invalid_numeric_minutes_remain_rejected(value):
+    assert team.number(value) is None
+
+
+def test_complete_prefix_from_midnight_is_read_as_observed_zeros_and_real_talk_time():
+    rows = [team.INTERVAL_HEADERS]
+    for minute in range(0, 1080, 30):
+        rows.append(hidden_row(minute=minute, calls=2 if minute == 930 else 0,
+                               dialogues=1 if minute == 930 else 0, toss=0,
+                               seconds=180 if minute == 930 else 0, stamp="2026-11-13T17:30:02+09:00"))
+    people = team.parse_intervals(rows, "2026-11-13")
+    assert len(people[0].intervals) == 36
+    assert ranking(people, 930).seconds == 180
+    assert ranking(people, 0).people == 1
 
 
 def test_fetches_hidden_sheet_and_keeps_unsent_roster_members_unknown():

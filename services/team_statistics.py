@@ -60,10 +60,17 @@ class _QuietHandler(wsgiref.simple_server.WSGIRequestHandler):
 
 
 def normalize(value):
-    return "".join(unicodedata.normalize("NFKC", str(value or "")).split())
+    # UNFORMATTED_VALUEの開始分・件数0は空欄ではない。
+    return "".join(unicodedata.normalize("NFKC", str("" if value is None else value)).split())
 
 
 def number(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
     text = normalize(value).replace(",", "")
     return int(text) if re.fullmatch(r"-?\d+", text) else None
 
@@ -261,7 +268,7 @@ def parse_intervals(rows, day):
     if rows[0] != INTERVAL_HEADERS:
         raise RuntimeError("30分集計シートの見出しが一致しません。GASのバージョンを確認してください。")
     people = {}
-    for row in rows[1:]:
+    for sheet_row, row in enumerate(rows[1:], start=2):
         if _cell(row, 0) != day:
             continue
         staff_id = str(_cell(row, 1))
@@ -275,7 +282,7 @@ def parse_intervals(rows, day):
         except ValueError as exc:
             raise RuntimeError("30分集計シートの取得日時が不正です。") from exc
         if not staff_id or not name or minute not in range(0, 1440, 30):
-            raise RuntimeError("30分集計シートのスタッフまたは時間帯が不正です。")
+            raise RuntimeError(f"30分集計シートのスタッフまたは時間帯が不正です（{sheet_row}行目）。")
         acquired = parsed.astimezone(JST)
         if minute > acquired.hour * 60 + acquired.minute:
             raise RuntimeError("30分集計シートに取得日時より後の時間帯があります。")
@@ -417,7 +424,7 @@ def fetch_day(session, day):
         if not data.interval_members:
             data.interval_error = "この日の30分集計はまだありません。各PCから集計を送信してください。"
     except Exception as exc:
-        logging.getLogger(__name__).warning("全員の通話集計: 30分データ取得失敗 error_type=%s", type(exc).__name__)
+        logging.getLogger(__name__).warning("全員の通話集計: 30分データ取得失敗 error_type=%s detail=%s", type(exc).__name__, str(exc))
         data.interval_error = f"30分集計を取得できませんでした：{exc}"
     try:
         left = read("A1:D")
