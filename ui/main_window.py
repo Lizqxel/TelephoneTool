@@ -1704,6 +1704,10 @@ ND：{nd}
             return
         if self.current_product == "jcom":
             self.cancel_jcom_search()
+        if (self.current_product == "self_collabo_unlisted") != (product == "self_collabo_unlisted"):
+            # 非掲載とそれ以外では住所・郵便番号の反映方法が違うので、
+            # 次のCTI画面監視で顧客情報を取り直して新しい商材の形に揃える。
+            self._cti_values_at_last_fetch = None
         self.current_product = product
         self._persist_selected_product(product)
         self.jcom_generation += 1
@@ -2835,6 +2839,11 @@ ND：{nd}
         try:
             # 直近のCTIデータを保持（法人モードの営コメで管理番号を使う）
             self.last_cti_data = data
+            # CTI画面切替の監視が「顧客が切り替わったか」を判定するための基準値
+            self._cti_values_at_last_fetch = (
+                (data.customer_name or "").strip(),
+                (data.address or "").strip(),
+            )
             self.undo_stack.beginMacro("CTI反映")
             # 顧客名
             if data.customer_name:
@@ -4525,34 +4534,37 @@ ND：{nd}
 
     @Slot(str, str)
     def _handle_cti_screen_values(self, customer_name, address):
-        """CTIとUIの顧客情報が異なる場合だけ顧客情報を取得する。"""
+        """CTIの顧客表示が前回の取得時から切り替わった時だけ顧客情報を取得する。
+
+        UIの値とは比べない。比べると、非掲載商材で郵便番号から住所を組み立てた時や
+        住所・名前を手で直した時に「CTIと違う」と判定され、0.5秒ごとの監視で
+        入力内容がCTIの値に戻されてしまう。
+        """
         try:
-            if not customer_name.strip() and not address.strip():
+            customer_name = (customer_name or "").strip()
+            address = (address or "").strip()
+            if not customer_name and not address:
                 return
 
-            expected_name = convert_to_full_width(
-                customer_name.replace(' ', '　')
-            ).strip()
-
-            if self._is_unlisted_self_collabo():
-                expected_address = self._prefecture_only(address).strip()
+            last_values = getattr(self, '_cti_values_at_last_fetch', None)
+            if last_values is None:
+                cti_changed = True
             else:
-                expected_address = address.replace('－', '-')
-                expected_address = expected_address.replace('ー', '-')
-                expected_address = expected_address.replace('−', '-')
-                expected_address = expected_address.replace(' ', '　')
-                expected_address = convert_to_full_width(expected_address).strip()
+                last_name, last_address = last_values
+                # 画面切替の途中で片方が一瞬空になることがあるので、空の値は変化として扱わない
+                cti_changed = (
+                    (bool(customer_name) and customer_name != last_name)
+                    or (bool(address) and address != last_address)
+                )
 
-            current_name = self.list_name_input.text().strip()
-            current_address = self.address_input.text().strip()
-
-            ui_is_empty = not current_name and not current_address
-            name_changed = bool(customer_name.strip()) and current_name != expected_name
-            address_changed = bool(address.strip()) and current_address != expected_address
-            if not ui_is_empty and not name_changed and not address_changed:
+            ui_is_empty = (
+                not self.list_name_input.text().strip()
+                and not self.address_input.text().strip()
+            )
+            if not ui_is_empty and not cti_changed:
                 return
 
-            logging.info("CTIの顧客名または住所がUI保持値と異なるため、顧客情報を取得します")
+            logging.info("CTIの顧客表示が前回の取得時から変わったため、顧客情報を取得します")
             self.fetch_cti_data()
         except Exception as e:
             logging.error(f"CTI画面切替時の顧客情報取得中にエラーが発生: {str(e)}")
