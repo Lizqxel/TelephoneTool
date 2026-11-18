@@ -10,6 +10,7 @@ google_oauth_client.json（gitignore済み・ビルド時にexeへ同梱）か s
 import base64
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -231,6 +232,75 @@ class TeamDay:
     day: str
     hours: list
     members: list
+    interval_members: list = field(default_factory=list)
+    interval_error: str = ""
+
+
+@dataclass
+class IntervalMember:
+    staff_id: str
+    name: str
+    department: str
+    unit: str
+    intervals: dict = field(default_factory=dict)  # 開始分 -> (コール, 対話, トス, 対話秒数)
+    observed_at: str = ""
+
+
+INTERVAL_HEADERS = ["日付", "スタッフID", "氏名", "部署", "GPユニット", "開始分", "コール数", "対話数", "トス数", "対話時間（秒）", "取得日時"]
+
+
+def parse_intervals(rows, day):
+    """非表示シートの数値を読む。空欄は0と区別し、重複キーや不正な値は採用しない。"""
+    import math
+    from datetime import datetime
+    from services.call_statistics import JST
+
+    if not rows:
+        return []
+    if rows[0] != INTERVAL_HEADERS:
+        raise RuntimeError("30分集計シートの見出しが一致しません。GASのバージョンを確認してください。")
+    people = {}
+    for row in rows[1:]:
+        if _cell(row, 0) != day:
+            continue
+        staff_id = str(_cell(row, 1))
+        name = str(_cell(row, 2))
+        minute = number(_cell(row, 5))
+        stamp = str(_cell(row, 10))
+        try:
+            parsed = datetime.fromisoformat(stamp)
+            if parsed.tzinfo is None or parsed.astimezone(JST).date().isoformat() != day:
+                raise ValueError()
+        except ValueError as exc:
+            raise RuntimeError("30分集計シートの取得日時が不正です。") from exc
+        if not staff_id or not name or minute not in range(0, 1440, 30):
+            raise RuntimeError("30分集計シートのスタッフまたは時間帯が不正です。")
+        acquired = parsed.astimezone(JST)
+        if minute > acquired.hour * 60 + acquired.minute:
+            raise RuntimeError("30分集計シートに取得日時より後の時間帯があります。")
+        values = []
+        for index in range(6, 10):
+            cell = _cell(row, index)
+            if cell in ("", None):
+                values.append(None)
+                continue
+            try:
+                value = float(cell)
+                if isinstance(cell, bool) or not math.isfinite(value) or value < 0 or (index < 9 and not value.is_integer()):
+                    raise ValueError()
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("30分集計シートの件数または時間が不正です。") from exc
+            values.append(int(value) if index < 9 else value)
+        if ((values[0] is not None and values[1] is not None and values[1] > values[0])
+                or (values[1] is None and values[3] is not None)):
+            raise RuntimeError("30分集計シートの対話数・対話時間が矛盾しています。")
+        member = people.setdefault(staff_id, IntervalMember(staff_id, name, str(_cell(row, 3)), str(_cell(row, 4))))
+        if minute in member.intervals:
+            raise RuntimeError("30分集計シートに同じスタッフ・時間帯が重複しています。")
+        member.intervals[minute] = tuple(values)
+        if not member.observed_at or parsed > datetime.fromisoformat(member.observed_at):
+            member.observed_at = stamp
+    return list(people.values())
 
 
 def _cell(row, index):
@@ -283,6 +353,38 @@ def parse_block(rows):
     return hours, members
 
 
+def _sheet_read_error(response, sheet, range_name):
+    """Googleのエラー項目だけを記録する（ヘッダーや認証情報は記録しない）。"""
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    error = body.get("error", {}) if isinstance(body, dict) else {}
+    error = error if isinstance(error, dict) else {}
+    status = str(error.get("status") or "")
+    message = str(error.get("message") or "")
+    reasons = set()
+    for key in ("errors", "details"):
+        items = error.get(key)
+        if isinstance(items, list):
+            reasons.update(str(item["reason"]) for item in items if isinstance(item, dict) and item.get("reason"))
+    logging.getLogger(__name__).warning(
+        "全員の通話集計: シート読み取り失敗 HTTP=%s sheet=%s range=%s status=%s reasons=%s message=%s",
+        response.status_code, sheet, range_name, status, ",".join(sorted(reasons)), message,
+    )
+    if reasons & {"SERVICE_DISABLED", "accessNotConfigured", "apiNotEnabled"}:
+        return RuntimeError("Googleログインに使用しているプロジェクトでGoogle Sheets APIが無効です。管理者にAPIの有効化を依頼してください。")
+    if reasons & {"ACCESS_TOKEN_SCOPE_INSUFFICIENT", "insufficientPermissions"}:
+        return RuntimeError("Googleログインでシート読み取りの許可が不足しています。ログアウトし、再ログイン時にシートの読み取りを許可してください。")
+    if response.status_code == 401:
+        return RuntimeError("Googleの認証が無効です。もう一度ログインしてください。")
+    if response.status_code == 403:
+        return RuntimeError("シートを読めません（HTTP 403）。閲覧権限またはGoogle側の利用制限を確認してください。詳細はapp.logに記録しました。")
+    if response.status_code == 400 and "Unable to parse range" in message:
+        return RuntimeError(f"シート「{sheet}」がありません。")
+    return RuntimeError(f"シートを読み取れませんでした（HTTP {response.status_code}）。詳細はapp.logに記録しました。")
+
+
 def fetch_day(session, day):
     """day は 'YYYY-MM-DD'。シートの該当日の表を2回の読み取りで取得する。"""
     year, month, date = (int(x) for x in day.split("-"))
@@ -294,13 +396,13 @@ def fetch_day(session, day):
                                    params={"ranges": f"'{sheet}'!{range_name}", "valueRenderOption": "FORMATTED_VALUE"},
                                    timeout=60)
         except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "全員の通話集計: シート接続失敗 sheet=%s range=%s error_type=%s",
+                sheet, range_name, exc.__class__.__name__,
+            )
             raise RuntimeError(f"シートへ接続できませんでした（{exc.__class__.__name__}）") from exc
-        if response.status_code in (401, 403):
-            raise RuntimeError("このGoogleアカウントではシートを読めません。シートを開ける社内アカウントでログインしてください。")
-        if response.status_code == 400 and "Unable to parse range" in response.text:
-            raise RuntimeError(f"シート「{sheet}」がありません。")
         if response.status_code != 200:
-            raise RuntimeError(f"シートを読み取れませんでした（HTTP {response.status_code}）")
+            raise _sheet_read_error(response, sheet, range_name)
         ranges = response.json().get("valueRanges") or [{}]
         return ranges[0].get("values", [])
 
@@ -310,4 +412,23 @@ def fetch_day(session, day):
     block, end = find_block(left, month, date)
     # block・end は0始まりの行番号。見出し（時台）の行から、次の日付の見出しの直前までを行ごと読む。
     hours, members = parse_block(read(f"{block + 2}:{max(end, block + 3)}"))
-    return TeamDay(sheet=sheet, day=day, hours=hours, members=members)
+    data = TeamDay(sheet=sheet, day=day, hours=hours, members=members)
+    hidden = f"通話集計データ_{year:04}-{month:02}"
+    try:
+        response = session.get(f"{API}/{SPREADSHEET_ID}/values:batchGet",
+                               params={"ranges": f"'{hidden}'!A1:K", "valueRenderOption": "UNFORMATTED_VALUE"}, timeout=60)
+        if response.status_code != 200:
+            raise _sheet_read_error(response, hidden, "A1:K")
+        values = (response.json().get("valueRanges") or [{}])[0].get("values", [])
+        data.interval_members = parse_intervals(values, day)
+        if not data.interval_members:
+            data.interval_error = "この日の30分集計はまだありません。各PCから集計を送信してください。"
+    except Exception as exc:
+        logging.getLogger(__name__).warning("全員の通話集計: 30分データ取得失敗 error_type=%s", type(exc).__name__)
+        data.interval_error = f"30分集計を取得できませんでした：{exc}"
+    # 未送信の人も対象人数に含め、取得済みの人だけで全員分と誤認させない。
+    sent_names = {normalize(member.name) for member in data.interval_members}
+    for member in members:
+        if normalize(member.name) not in sent_names:
+            data.interval_members.append(IntervalMember("", member.name, member.department, member.unit))
+    return data

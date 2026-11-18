@@ -4,7 +4,9 @@
  * 会社の設定でウェブアプリを「全員」に公開できないため、ログイン不要の送信用Googleフォームで受け取る。
  * このスプレッドシートは開くだけで数十秒〜100秒近くかかるため、送信のたびには開かず、
  * 1分ごとの時間トリガーで、届いた送信をまとめて1回開いて書き込む（送信が無い回は開かない）。
- * TelephoneTool は毎時「本人・当日」の全時間帯を送るので、同じ人・同じ日は最新の送信だけを書けばよい。
+ * TelephoneTool は30分ごとに「本人・当日」の取得済み全時間帯を送る。
+ * 旧来の1時間集計表へはコール・対話・トスを反映し、30分集計・対話時間は
+ * 非表示の「通話集計データ_YYYY-MM」へ保存する。対話時間は秒数。
  * 書き込むのは 日付の表 × 名前の行 × 「H時台」の3列（コール／対話／トス）だけで、
  * 名前・部署・GPユニット・日計の列や表の構成には触れない。何度書いても重複しない。
  *
@@ -22,6 +24,8 @@ const FORM_TITLE = 'TelephoneTool 通話集計（自動送信用・手入力し�
 const HANDLER = 'processSubmissions';
 const RETRY_MINUTES = 30; // シートを開けないなど一時的な失敗は、この時間まで1分ごとに再処理する
 const INTERVAL_MINUTES = 1; // 送信が無い回はシートを開かないので、短くしても負担は小さい
+const STAT_DATA_PREFIX = '通話集計データ_';
+const STAT_DATA_HEADERS = ['日付', 'スタッフID', '氏名', '部署', 'GPユニット', '開始分', 'コール数', '対話数', 'トス数', '対話時間（秒）', '取得日時'];
 
 /** 初回だけエディタから実行する。何度実行しても、フォームとトリガーは1つだけになる。 */
 function setup() {
@@ -30,7 +34,7 @@ function setup() {
   let form = formId ? FormApp.openById(formId) : null;
   if (!form) {
     form = FormApp.create(FORM_TITLE);
-    form.setDescription('TelephoneTool が1時間ごとに通話集計を送るためのフォームです。手で回答しないでください。');
+    form.setDescription('TelephoneTool が30分ごとに通話集計を送るためのフォームです。手で回答しないでください。');
     form.addTextItem().setTitle('token').setRequired(true);
     form.addParagraphTextItem().setTitle('data').setRequired(true);
     props.setProperty('FORM_ID', form.getId());
@@ -73,7 +77,22 @@ function setup() {
     tokenRegistered: Boolean(props.getProperty('TOKEN')),
   };
   console.log('TelephoneTool設定: ' + JSON.stringify(info));
+  setupStatisticsData();
   return info;
+}
+
+/** 管理者が初回に実行する。翌月以降のシートは受信時に自動作成する。 */
+function setupStatisticsData() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const book = { spreadsheet: SpreadsheetApp.openById(SPREADSHEET_ID), sheets: {} };
+    const ym = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM');
+    statisticsDataSheet(book, ym);
+    console.log('30分集計用の非表示シートを準備しました: ' + STAT_DATA_PREFIX + ym);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** 1分ごとの時間トリガー。届いた送信をまとめてシートへ書き込み、処理した回答（トークンを含む）は消す。 */
@@ -94,14 +113,18 @@ function processSubmissions() {
       try {
         if (!token || answers.token !== token) throw new Error('認証に失敗しました（トークンが一致しません）');
         const body = JSON.parse(answers.data || '{}');
+        validateStatistics(body);
         // 毎回その日の全時間帯が送られてくるので、同じ人・同じ日は最後の送信だけ書く（古い分は同じ結果で片付ける）。
-        const key = body.date + '|' + normalize(body.staffName);
+        // 旧クライアントの送信で、新形式の30分データを取りこぼさない。
+        const key = body.date + '|' + normalize(body.staffName) + '|' + (body.schemaVersion === 2 ? 'v2' : 'v1');
         const sentAt = response.getTimestamp().getTime();
-        const entry = latest[key] || (latest[key] = { body: body, sentAt: sentAt, responses: [] });
+        const sourceAt = body.schemaVersion === 2 ? Date.parse(body.observedAt) : sentAt;
+        const entry = latest[key] || (latest[key] = { body: body, sentAt: sentAt, sourceAt: sourceAt, responses: [] });
         entry.responses.push(response);
-        if (entry.sentAt <= sentAt) {
+        if (entry.sourceAt < sourceAt || (entry.sourceAt === sourceAt && entry.sentAt <= sentAt)) {
           entry.body = body;
           entry.sentAt = sentAt;
+          entry.sourceAt = sourceAt;
         }
       } catch (err) {
         console.error('通話集計の送信を読み取れません: ' + ((err && err.message) || err));
@@ -187,6 +210,8 @@ function monthSheet(book, year, month) {
 }
 
 function writeStatistics(body, book) {
+  validateStatistics(body); // 検証に失敗した送信は、どのセルにも書かない。
+  book = book || { spreadsheet: null, sheets: {} };
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(body.date || '');
   if (!date) throw permanentError('日付の形式が不正です');
   const year = Number(date[1]);
@@ -194,7 +219,7 @@ function writeStatistics(body, book) {
   const day = Number(date[3]);
   const staffName = normalize(body.staffName);
   if (!staffName) throw permanentError('名前がありません');
-  const data = monthSheet(book || { spreadsheet: null, sheets: {} }, year, month);
+  const data = monthSheet(book, year, month);
   const left = data.left;
 
   // 「【11/1（日）】」のような日付の見出し行を探す。「【11/1(」は「【11/10(」に一致しない。
@@ -223,6 +248,12 @@ function writeStatistics(body, book) {
       : '「' + body.staffName + '」が' + month + '/' + day + 'の表の名前欄にありません');
   }
   const sheetRow = matches[0] + 1;
+  const store = body.schemaVersion === 2 ? statisticsDataSheet(book, body.date.slice(0, 7)) : null;
+  const firstKey = body.date + '|' + body.staffId + '|0';
+  if (store && store.index[firstKey] !== undefined &&
+      Date.parse(store.rows[store.index[firstKey]][10]) > Date.parse(body.observedAt)) {
+    return { ok: true, sheet: data.name, row: sheetRow, written: [], skipped: [], stale: true };
+  }
 
   const written = [];
   const skipped = [];
@@ -242,5 +273,101 @@ function writeStatistics(body, book) {
     range.setValues([next]);
     written.push(item.hour);
   });
+  if (store) {
+    // 名前・部署・ユニットは既存の当日表と対応づける。
+    writeStatisticsData(store, body, left[matches[0]][nameColumn + 1] || '', left[matches[0]][nameColumn + 2] || '');
+  }
   return { ok: true, sheet: data.name, row: sheetRow, written: written, skipped: skipped };
+}
+
+/** 型・範囲・重複・取得日時をすべて確認してから書き込む。旧形式も受け付ける。 */
+function validateStatistics(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw permanentError('送信データが不正です');
+  const date = typeof body.date === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(body.date);
+  if (!date || Number(date[2]) < 1 || Number(date[2]) > 12 || Number(date[3]) < 1 ||
+      Number(date[3]) > new Date(Date.UTC(Number(date[1]), Number(date[2]), 0)).getUTCDate()) throw permanentError('日付の形式が不正です');
+  if (typeof body.staffName !== 'string' || !normalize(body.staffName) || /[\r\n\t]/.test(body.staffName)) throw permanentError('名前が不正です');
+  if (!Array.isArray(body.hours) || body.hours.length > 24) throw permanentError('1時間集計の形式が不正です');
+  const validNumber = function (value, integer) {
+    return value === null || (typeof value === 'number' && isFinite(value) && value >= 0 && (!integer || Number.isInteger(value)));
+  };
+  const seen = {};
+  body.hours.forEach(function (item) {
+    if (!item || !Number.isInteger(item.hour) || item.hour < 0 || item.hour > 23 || seen[item.hour]) throw permanentError('時間帯が不正または重複しています');
+    seen[item.hour] = true;
+    ['calls', 'dialogues', 'toss'].forEach(function (key) {
+      if (!validNumber(item[key], true)) throw permanentError('1時間集計の件数が不正です');
+    });
+  });
+  if (body.schemaVersion === undefined) return;
+  if (body.schemaVersion !== 2) throw permanentError('対応していない送信バージョンです');
+  if (typeof body.staffId !== 'string' || !body.staffId.trim() || body.staffId.length > 128 || /[|=\r\n\t]/.test(body.staffId)) throw permanentError('スタッフIDが不正です');
+  if (typeof body.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.test(body.observedAt) || !isFinite(Date.parse(body.observedAt))) throw permanentError('取得日時が不正です');
+  const jst = new Date(Date.parse(body.observedAt) + 9 * 60 * 60 * 1000);
+  if (jst.toISOString().slice(0, 10) !== body.date) throw permanentError('取得日時と対象日が一致しません');
+  const length = Math.floor((jst.getUTCHours() * 60 + jst.getUTCMinutes()) / 30) + 1;
+  if (!Array.isArray(body.intervals) || body.intervals.length !== length) throw permanentError('取得済みの全30分枠が必要です');
+  const minutes = {};
+  body.intervals.forEach(function (item) {
+    if (!item || !Number.isInteger(item.startMinute) || item.startMinute < 0 || item.startMinute >= length * 30 || item.startMinute % 30 || minutes[item.startMinute]) throw permanentError('30分枠が不正または重複しています');
+    minutes[item.startMinute] = true;
+    ['calls', 'dialogues', 'toss'].forEach(function (key) {
+      if (!validNumber(item[key], true)) throw permanentError('30分集計の件数が不正です');
+    });
+    if (!validNumber(item.dialogueSeconds, false) || (item.dialogues === null && item.dialogueSeconds !== null)) throw permanentError('対話時間が不正です');
+    if (item.calls !== null && item.dialogues !== null && item.dialogues > item.calls) throw permanentError('対話数がコール数を超えています');
+  });
+}
+
+/** 月別に保存するため、読み取り時に過去の全期間を走査しない。 */
+function statisticsDataSheet(book, ym) {
+  const name = STAT_DATA_PREFIX + ym;
+  book.statistics = book.statistics || {};
+  if (book.statistics[name]) return book.statistics[name];
+  let sh = book.spreadsheet.getSheetByName(name);
+  if (!sh) sh = book.spreadsheet.insertSheet(name);
+  if (!sh.getLastRow()) {
+    sh.getRange(1, 1, 1, STAT_DATA_HEADERS.length).setValues([STAT_DATA_HEADERS]);
+    sh.setFrozenRows(1);
+  }
+  const values = sh.getRange(1, 1, sh.getLastRow(), STAT_DATA_HEADERS.length).getValues();
+  if (JSON.stringify(values[0]) !== JSON.stringify(STAT_DATA_HEADERS)) throw new Error('30分集計シートの見出しが一致しません: ' + name);
+  sh.hideSheet();
+  const rows = values.slice(1), index = Object.create(null);
+  rows.forEach(function (row, i) {
+    const key = row[0] + '|' + row[1] + '|' + row[5];
+    if (index[key] !== undefined) throw new Error('30分集計シートに重複行があります: ' + name);
+    index[key] = i;
+  });
+  return book.statistics[name] = { sheet: sh, rows: rows, index: index };
+}
+
+/** 加算せず置換する。途中で失敗しても、同じ送信の再処理で復旧する。 */
+function writeStatisticsData(store, body, department, unit) {
+  const changed = [];
+  body.intervals.forEach(function (item) {
+    const key = body.date + '|' + body.staffId + '|' + item.startMinute;
+    let index = store.index[key];
+    if (index === undefined) { index = store.rows.length; store.index[key] = index; store.rows.push([]); }
+    store.rows[index] = [body.date, body.staffId, body.staffName, department, unit, item.startMinute,
+                         item.calls, item.dialogues, item.toss, item.dialogueSeconds, body.observedAt]
+      .map(function (value) { return value === null ? '' : value; });
+    changed.push(index);
+  });
+  changed.sort(function (a, b) { return a - b; });
+  if (store.sheet.getMaxRows() < store.rows.length + 1) store.sheet.insertRowsAfter(store.sheet.getMaxRows(), store.rows.length + 1 - store.sheet.getMaxRows());
+  // 連続する行をまとめて書く。他の人の行は変更しない。
+  for (let i = 0; i < changed.length;) {
+    const start = changed[i];
+    let end = start;
+    while (++i < changed.length && changed[i] === end + 1) end = changed[i];
+    const count = end - start + 1;
+    store.sheet.getRange(start + 2, 1, count, 5).setNumberFormat('@');
+    store.sheet.getRange(start + 2, 11, count, 1).setNumberFormat('@');
+    // シートへ式として解釈される文字列は、文字列指定の先頭記号を付ける。
+    const values = store.rows.slice(start, end + 1).map(function (row) {
+      return row.map(function (value) { return typeof value === 'string' && /^[=+@-]/.test(value) ? "'" + value : value; });
+    });
+    store.sheet.getRange(start + 2, 1, count, STAT_DATA_HEADERS.length).setValues(values);
+  }
 }

@@ -288,6 +288,7 @@ class CtiStatisticsCollector:
             else:
                 ranks = {}
             totals = hourly_history_totals(rows, day, staff_name, numeric_unit, ranks)
+            halves = hourly_history_totals(rows, day, staff_name, numeric_unit, ranks, interval_minutes=30)
         except CollectionCancelled:
             raise
         except CollectionSkipped as exc:
@@ -303,7 +304,9 @@ class CtiStatisticsCollector:
             rank_note = (rank_note + " " if rank_note else "") + f"対話の有無が分からない架電結果があるため、その時間帯の対話は未判定です（{listed}）。"
         own_rows = sum(totals["counters"][h]["total_calls"] for h in range(24))
         return StatisticsSnapshot(**{**base, "talk_seconds": totals["talk_seconds"], "history_rows": own_rows},
-                                  history_counters=totals["counters"], first_history_hour=totals["first_hour"], note=rank_note)
+                                  history_counters=totals["counters"], first_history_hour=totals["first_hour"], note=rank_note,
+                                  intervals={minute: {**counts, "dialogue_seconds": halves["dialogue_seconds"][minute]}
+                                             for minute, counts in halves["counters"].items()})
 
     def read_login_staff(self, cti, nodes):
         """ステータスバーのログイン名。MSAAは最小化中も読めるので優先し、読めなければUI Automationで読む。"""
