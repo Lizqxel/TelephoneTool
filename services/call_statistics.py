@@ -94,14 +94,19 @@ def may_be_new_prospect(row):
     return outcome == "見込" and detail not in ("継続", "継続見込")
 
 
-def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=None):
+def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=None, *, interval_minutes=60):
     """本人・当日の行だけを時間帯別に集計する。他スタッフ・他日の行は除外する。
 
     ranks は見込検索の {管理番号: ランク}。None なら見込の行がある時間帯のトスは未取得。
     同じ管理番号の見込はその日の最初の時間帯に1件だけ数える。
     """
-    totals = {hour: 0.0 for hour in range(24)}
-    counters = {hour: {key: 0 for key in HISTORY_COUNTERS} for hour in range(24)}
+    if interval_minutes not in (30, 60):
+        raise ValueError("集計間隔は30分または60分です。")
+    keys = range(24) if interval_minutes == 60 else range(0, 1440, 30)
+    totals = {key: 0.0 for key in keys}
+    dialogue_seconds = {key: 0.0 for key in keys}
+    counters = {key: {name: 0 for name in HISTORY_COUNTERS} for key in keys}
+    bucket = lambda when: when.hour if interval_minutes == 60 else when.hour * 60 + when.minute // 30 * 30
     first_hour = None
     seen = {}
     prospects = {}
@@ -127,25 +132,30 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=N
                     raise ValueError("同じ通話IDの値が異なるため、再取得してください。")
                 continue
             seen[unique] = identity
-        first_hour = when.hour if first_hour is None else min(first_hour, when.hour)
-        totals[when.hour] += seconds
-        counters[when.hour]["total_calls"] += 1
+        slot = bucket(when)
+        first_hour = slot if first_hour is None else min(first_hour, slot)
+        totals[slot] += seconds
+        counters[slot]["total_calls"] += 1
         dialogues = dialogue_count(row)
+        if dialogues is None:
+            dialogue_seconds[slot] = None
+        elif dialogues and dialogue_seconds[slot] is not None:
+            dialogue_seconds[slot] += seconds
         if dialogues is None:
             label = "／".join(v for v in (row.get("架電結果"), row.get("架電結果詳細")) if v and v.strip() not in ("", "-"))
             unknown[label] = unknown.get(label, 0) + 1
         for key, value in (*outcome_counts.items(), ("dialogues", dialogues)):
-            if value is None or counters[when.hour][key] is None:
-                counters[when.hour][key] = None
+            if value is None or counters[slot][key] is None:
+                counters[slot][key] = None
             else:
-                counters[when.hour][key] += value
+                counters[slot][key] += value
         if may_be_new_prospect(row):
             number = str(row.get("管理番号") or "").strip() or f"unidentified-{len(prospects)}"
             if number not in prospects or when < prospects[number]:
                 prospects[number] = when
     unmatched = 0
     for number, when in prospects.items():
-        hour = counters[when.hour]
+        hour = counters[bucket(when)]
         if ranks is None:
             hour["toss"] = None
         elif number not in ranks:
@@ -153,7 +163,7 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=N
             unmatched += 1
         elif normalize_name(ranks[number]) == TOSS_RANK and hour["toss"] is not None:
             hour["toss"] += 1
-    return {"talk_seconds": totals, "counters": counters, "first_hour": first_hour,
+    return {"talk_seconds": totals, "dialogue_seconds": dialogue_seconds, "counters": counters, "first_hour": first_hour,
             "prospects": len(prospects), "unmatched_prospects": unmatched, "unknown_dialogue_results": unknown}
 
 
@@ -168,6 +178,10 @@ def next_hour(now):
     return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
 
+def next_half_hour(now):
+    return now.replace(minute=now.minute // 30 * 30, second=0, microsecond=0) + timedelta(minutes=30)
+
+
 @dataclass(frozen=True)
 class StatisticsSnapshot:
     acquired_at: datetime
@@ -180,6 +194,7 @@ class StatisticsSnapshot:
     history_counters: dict | None = None
     first_history_hour: int | None = None
     note: str = ""
+    intervals: dict | None = None
 
 
 class StatisticsStore:
@@ -212,6 +227,11 @@ class StatisticsStore:
                     total_calls INTEGER, new_prospects INTEGER,
                     ng_with_dialogue INTEGER, ng_without_dialogue INTEGER,
                     PRIMARY KEY(staff_id,day,hour));
+                CREATE TABLE IF NOT EXISTS half_hourly (
+                    staff_id TEXT NOT NULL, day TEXT NOT NULL, start_minute INTEGER NOT NULL,
+                    total_calls INTEGER, dialogues INTEGER, toss INTEGER, dialogue_seconds REAL,
+                    observed_at TEXT NOT NULL,
+                    PRIMARY KEY(staff_id,day,start_minute));
             """)
             # 既存DB（有効コール・トス追加前）にも列を足す。保存済みの値は残す。
             for table, column in (("snapshots", "valid_calls"), ("hourly", "valid_calls"),
@@ -245,6 +265,13 @@ class StatisticsStore:
             previous = db.execute("SELECT * FROM snapshots WHERE staff_id=? AND day=?", (snapshot.staff_id, day)).fetchone()
             if previous and stamp <= datetime.fromisoformat(previous["observed_at"]):
                 raise ValueError("前回より古い集計結果は保存できません。")
+            if snapshot.intervals is not None:
+                for minute, values in snapshot.intervals.items():
+                    if minute > stamp.hour * 60 + stamp.minute:
+                        continue
+                    db.execute("INSERT OR REPLACE INTO half_hourly VALUES (?,?,?,?,?,?,?,?)",
+                               (snapshot.staff_id, day, minute, values.get("total_calls"), values.get("dialogues"),
+                                values.get("toss"), values.get("dialogue_seconds"), stamp.isoformat()))
             for hour in range(24):
                 db.execute("INSERT OR IGNORE INTO hourly(staff_id,day,hour) VALUES (?,?,?)", (snapshot.staff_id, day, hour))
                 # Future hours are unknown, rather than observed zeros.
@@ -300,6 +327,12 @@ class StatisticsStore:
     def staff(self):
         with self.connect() as db:
             return [dict(r) for r in db.execute("SELECT staff_id,staff_name,MAX(observed_at) AS last_seen FROM snapshots GROUP BY staff_id ORDER BY last_seen DESC")]
+
+    def intervals(self, staff_id, day):
+        """30分集計は履歴を再取得できた分だけ返す。旧1時間データから推測しない。"""
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT * FROM half_hourly WHERE staff_id=? AND day=? ORDER BY start_minute", (staff_id, day))]
 
     def hours(self, staff_id, day):
         with self.connect() as db:

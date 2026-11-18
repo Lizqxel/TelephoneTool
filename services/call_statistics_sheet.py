@@ -1,7 +1,7 @@
 """時間帯別の通話集計をスプレッドシートへ送る（送信用Googleフォーム経由）。
 
 会社の設定でGASのウェブアプリを「全員」に公開できないため、ログイン不要の送信用フォームへ送り、
-1分ごとの時間トリガー（gas/call_statistics.gs）がまとめてシートの 日付×名前×時間帯 のセルを上書きする。
+別プロジェクトの受信用GAS（gas/call_statistics.gs）が、1分ごとのトリガーでシートへ保存する。
 毎回「本人・当日」の全時間帯を送るので、同じ内容を何度送っても重複せず、失敗しても次回の送信で回復する。
 認証トークンは既存の googleFormPosting.tokenValue を使い、各PCで追加の設定を不要にする。
 """
@@ -53,6 +53,11 @@ def sheet_hours(rows):
     return result
 
 
+def sheet_intervals(rows):
+    return [{"startMinute": row["start_minute"], "calls": row["total_calls"], "dialogues": row["dialogues"],
+             "toss": row["toss"], "dialogueSeconds": row["dialogue_seconds"]} for row in rows]
+
+
 class SheetSender:
     def __init__(self, form, token, timeout=30, post=None):
         self.form = form
@@ -70,8 +75,10 @@ class SheetSender:
             raise RuntimeError("共有トークンが未設定です。設定画面で転記用のトークンを入力すると送信します。")
         return cls(form, token)
 
-    def send(self, day, staff_id, staff_name, hours):
+    def send(self, day, staff_id, staff_name, hours, *, intervals=None, observed_at=None):
         payload = {"date": day, "staffId": staff_id, "staffName": staff_name, "hours": hours}
+        if intervals is not None:
+            payload.update(schemaVersion=2, intervals=intervals, observedAt=observed_at)
         body = {self.form["tokenEntry"]: self.token,
                 self.form["dataEntry"]: json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
         try:

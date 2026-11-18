@@ -74,7 +74,7 @@ def test_reads_the_requested_day_without_mixing_up_11_1_and_11_10():
     assert [m.name for m in data.members] == ["岩田悠河", "三浦甲斐"]
     assert data.members[0].total == (20, 6, 1) and data.members[0].hours[11] == (8, 2, 0)
     assert data.members[1].unit == "杉崎伸明" and data.members[1].hours[11] == (None, None, None)
-    assert session.ranges[0] == "'コール集計打ち込み用_11月'!A1:D"
+    assert "'コール集計打ち込み用_11月'!A1:D" in session.ranges
     assert data_for(session, "2026-11-01").members[0].name == "岩田祐樹"
     assert data_for(session, "2026-11-10").members[0].total == (9, 9, 9)
 
@@ -336,7 +336,7 @@ def test_send_button_collects_own_data_and_rereads_the_sheet_after_it_is_written
     assert "シートへ送っています" in dialog.status.text()
     controller.finish("16:31 集計済み：三浦 甲斐／本人の当日履歴 1件／シート送信済み")
     assert dialog.send_button.isEnabled()
-    assert "シート送信済み" in dialog.status.text() and "自動で読み直して" in dialog.status.text()
+    assert "シート送信済み" in dialog.status.text() and "GASの次回更新後" in dialog.status.text()
     assert dialog.after_send_timer.isActive()
     dialog.close()
 
@@ -434,7 +434,7 @@ def test_send_that_could_not_start_does_not_leave_a_pending_wait():
     dialog = TeamStatisticsDialog(login=FakeLogin(), controller=controller)
     dialog.send_own()
     assert not dialog.waiting_send and "今は送信できません" in dialog.status.text()
-    controller.finish("12:00 集計済み：岩田 悠河／シート送信済み（反映は1〜2分後）")
+    controller.finish("12:00 集計済み：岩田 悠河／シート送信済み（GASの次回自動更新後に反映）")
     assert not dialog.after_send_timer.isActive()  # 後の毎時集計を自分の送信と取り違えない
     dialog.close()
 

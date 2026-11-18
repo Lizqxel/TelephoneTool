@@ -1,0 +1,2255 @@
+const SHEET_ROSTER = '名簿';
+const SHEET_RESULT = '実績反映';
+const TZ = 'Asia/Tokyo';
+const DEPT_NONE = '未設定';
+const BREAK_DEFAULT = 15; // 休憩の時台（部署ごとの設定がないとき。CC第二は全員15〜16時）
+const SHEET_SNAPSHOT = 'ダッシュボード保存';
+const CACHE_SECONDS = 21600; // 集計結果の保存時間（6時間）
+
+function doGet(e) {
+  const who = aclUser_();
+  if (e && e.parameter && e.parameter.api) {
+    if (!who.ok) return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'アクセス権がありません' })).setMimeType(ContentService.MimeType.JSON);
+    return api_(e.parameter.api, e.parameter.args);
+  }
+  if (!who.ok) return aclDenied_(who);
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('CC第二ダッシュボード')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// CCALL（3事業部まとめ）からの読み出し用。読むだけの関数に限る
+const API_ALLOW = ['getAllMetrics', 'getClosedMonth', 'getRanking', 'getBreakdown', 'getCallHours', 'getHireData', 'getDeptList', 'getMgmtRanking', 'getCloseRate'];
+function api_(fn, args) {
+  let out;
+  try {
+    if (API_ALLOW.indexOf(fn) < 0 || typeof globalThis[fn] !== 'function') throw new Error('使えない関数です: ' + fn);
+    out = { ok: true, data: globalThis[fn].apply(null, JSON.parse(args || '[]')) };
+  } catch (e) {
+    out = { ok: false, error: String((e && e.message) || e) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ALL画面のデータ。dateStr は yyyy-MM-dd（省略時は今日）
+function getAllMetrics(dateStr, force, dept, filt) {
+  const target = dateStr ? new Date(dateStr + 'T00:00:00+09:00') : new Date();
+  const ym = Utilities.formatDate(target, TZ, 'yyyy/MM');
+  const month = Number(Utilities.formatDate(target, TZ, 'M'));
+  const day = Number(Utilities.formatDate(target, TZ, 'd'));
+  const data = monthFor_(ym, month, force, dept, filt);
+  const today = data.days[day] || newBucket_();
+  const cum = newBucket_();
+  const prices = getPriceMap_();
+  for (let d = 1; d < day; d++) mergeBucket_(cum, data.days[d]);
+  const trend = [];
+  for (let d = 1; d <= day; d++) {
+    const b = finish_(data.days[d], prices);
+    trend.push({ d: d, count: b.count, points: b.points.all, hours: b.hours.all, gross: b.gross.all });
+  }
+  return {
+    filterOptions: filterOptions_(ym), filter: filt || {},
+    date: Utilities.formatDate(target, TZ, 'yyyy-MM-dd'),
+    month: month,
+    day: day,
+    roster: data.roster,
+    updatedAt: data.updatedAt,
+    ageMin: Math.floor((Date.now() - data.savedAt) / 60000),
+    groupNames: data.groupNames,
+    trend: trend,
+    today: finish_(today, prices),
+    cum: finish_(cum, prices),
+    planMonth: Object.keys(data.days).reduce(function (a, k) { return a + (((data.days[k] || {}).hours || {}).plan || 0); }, 0),
+    partners: ptSummary_(ym, day, dept, false)
+  };
+}
+
+// 確定済みの月の集計。ymDash は yyyy-MM。月全体を cum に入れて返す
+function closedMonthBase_(ymDash, force, dept, filt) {
+  const p = ymDash.split('-');
+  const year = Number(p[0]);
+  const month = Number(p[1]);
+  const lastDay = new Date(year, month, 0).getDate();
+  const data = monthFor_(p[0] + '/' + p[1], month, force, dept, filt);
+  const prices = getPriceMap_();
+  const total = newBucket_();
+  const trend = [];
+  for (let d = 1; d <= lastDay; d++) {
+    mergeBucket_(total, data.days[d]);
+    const b = finish_(data.days[d], prices);
+    trend.push({ d: d, count: b.count, points: b.points.all, hours: b.hours.all, gross: b.gross.all });
+  }
+  return {
+    filterOptions: filterOptions_(p[0] + '/' + p[1]), filter: filt || {},
+    closed: true,
+    date: ymDash + '-' + ('0' + lastDay).slice(-2),
+    month: month,
+    day: lastDay,
+    roster: data.roster,
+    updatedAt: data.updatedAt,
+    ageMin: Math.floor((Date.now() - data.savedAt) / 60000),
+    groupNames: data.groupNames,
+    trend: trend,
+    today: finish_(newBucket_(), prices),
+    cum: finish_(total, prices),
+    partners: ptSummary_(p[0] + '/' + p[1], lastDay, dept, true)
+  };
+}
+
+// 月分の日別集計を保存する（force=trueで最新を読み直す）
+function getMonthData_(ym, month, force, dept) {
+  const cache = CacheService.getScriptCache();
+  const id = monthId_(ym, dept);
+  // 複数人が続けて更新しても再集計は3分に1回まで
+  if (force && cache.get('built_' + ym)) force = false;
+  if (!force) {
+    const hit = cache.get(id);
+    if (hit) return JSON.parse(hit);
+    const saved = readSnapshot_(id);
+    if (saved) {
+      cache.put(id, saved, CACHE_SECONDS);
+      return JSON.parse(saved);
+    }
+  }
+  // 集計は同時に1つだけ。実行中なら保存済みの結果を返す
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) {
+    const current = cache.get(id) || readSnapshot_(id);
+    if (current) return JSON.parse(current);
+    lock.waitLock(170000);
+    const done = cache.get(id);
+    if (done) {
+      lock.releaseLock();
+      return JSON.parse(done);
+    }
+  }
+  let all;
+  try {
+    all = buildMonth_(ym, month);
+    cache.putAll(all, CACHE_SECONDS);
+    cache.put('built_' + ym, '1', 180);
+  } finally {
+    lock.releaseLock();
+  }
+  // シートへの書き込みは重いため30分に1回まで
+  if (!cache.get('snap2_' + ym)) {
+    cache.put('snap2_' + ym, '1', 1800);
+    writeSnapshot_(ym, all);
+  }
+  return JSON.parse(all[id]);
+}
+
+function monthId_(ym, dept) {
+  return 'm2_' + ym + '|' + (dept || '');
+}
+
+// ALLと全部署の月次集計をまとめて作る
+function buildMonth_(ym, month) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const names = getRosterNames_(ss, ym);
+  const sets = { '': {} };
+  getDeptList().forEach(function (n) { sets[n] = {}; });
+  Object.keys(names).forEach(function (n) { sets[names[n]] = sets[names[n]] || {}; });
+  Object.keys(sets).forEach(function (k) {
+    for (let d = 1; d <= 31; d++) sets[k][d] = newBucket_();
+  });
+  // 絞り込み用に個人×日の集計も作る
+  const ppDays = {};
+  const pp = function (d, n) { const o = ppDays[d] || (ppDays[d] = {}); return o[n] || (o[n] = newBucket_()); };
+  const pick = function (d, name) { return [sets[''][d], sets[names[name]][d], pp(d, name)]; };
+  // 管理会計用：当月は前日終わりまで（シフトの未来分を含めない）
+  const closed = ym < Utilities.formatDate(new Date(), TZ, 'yyyy/MM');
+  const limit = closed ? 31 : Number(Utilities.formatDate(new Date(), TZ, 'd')) - 1;
+  const people = {}, days = {};
+  const person = function (n) { return people[n] || (people[n] = newBucket_()); };
+  addShiftHours_(ss, month, names, function (d, n) {
+    if (d > limit) return pick(d, n);
+    const k = n + '|' + d;
+    if (!days[k]) days[k] = { hours: { all: 0, shotEmp: 0, shotPart: 0, stockEmp: 0, stockPart: 0, gyomu: 0, gyomuShot: 0, gyomuStock: 0 } };
+    return pick(d, n).concat([person(n), days[k]]);
+  }, getRosterTypes_(ss, ym));
+  addResults_(ss, ym, names, function (d, n) {
+    return d > limit ? pick(d, n) : pick(d, n).concat([person(n)]);
+  });
+  // シートの再計算中は数式列が空で返ることがあるので、保存せず知らせる
+  let countAll = 0, pointAll = 0;
+  for (let d = 1; d <= 31; d++) {
+    countAll += sets[''][d].count.all;
+    pointAll += sets[''][d].points.all;
+  }
+  let hoursDone = 0;
+  for (let d = 1; d <= limit; d++) hoursDone += sets[''][d].hours.all;
+  if ((countAll > 0 && pointAll === 0) || (hoursDone > 0 && countAll === 0)) throw new Error('シートの再計算中です。少し待ってから更新してください。');
+  const meta = {
+    updatedAt: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'),
+    savedAt: Date.now(),
+    groupNames: getGroupNames_()
+  };
+  const late = readLateHours_(ss, month);
+  const lateByName = {};
+  if (late) Object.keys(days).forEach(function (k) {
+    const n = k.split('|')[0];
+    lateByName[n] = (lateByName[n] || 0) + Math.min(days[k].hours.all, late[k] || 0);
+  });
+  const out = {};
+  const pdDays = {};
+  for (let d = 1; d <= 31; d++) {
+    const b = sets[''][d];
+    pdDays[d] = { count: b.groups, points: b.gp || {}, products: b.products };
+  }
+  for (let d = 1; d <= 31; d++) out[monthId_(ym, '#pp|' + d)] = JSON.stringify(ppDays[d] || {});
+  out[monthId_(ym, PD_ID)] = JSON.stringify({ readAt: meta.updatedAt, days: pdDays });
+  out[monthId_(ym, MG_ID)] = JSON.stringify({
+    upto: closed ? 0 : limit,
+    lateOk: !!late,
+    readAt: meta.updatedAt,
+    rows: Object.keys(people).map(function (n) {
+      const b = people[n];
+      return { name: n, hours: b.hours.all, late: lateByName[n] || 0, points: b.points.all, count: b.count.all, products: b.products };
+    })
+  });
+  Object.keys(sets).forEach(function (k) {
+    const roster = Object.keys(names).filter(function (n) { return !k || names[n] === k; }).length;
+    out[monthId_(ym, k)] = JSON.stringify({
+      roster: roster,
+      updatedAt: meta.updatedAt,
+      savedAt: meta.savedAt,
+      groupNames: meta.groupNames,
+      days: sets[k]
+    });
+  });
+  return out;
+}
+
+// 集計結果は非表示シートにも保存し、一時保存が消えてもすぐ表示できるようにする
+function readSnapshot_(id) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_SNAPSHOT);
+  if (!sh || sh.getLastRow() < 1) return null;
+  const rows = sh.getRange(1, 1, sh.getLastRow(), 2).getValues();
+  const row = rows.filter(function (r) { return r[0] === id; })[0];
+  return row ? String(row[1]) : null;
+}
+
+function writeSnapshot_(ym, all) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_SNAPSHOT);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_SNAPSHOT);
+    sh.hideSheet();
+  }
+  const prefix = 'm2_' + ym + '|';
+  const old = sh.getLastRow() ? sh.getRange(1, 1, sh.getLastRow(), 2).getValues() : [];
+  const rows = old.filter(function (r) { return String(r[0]).indexOf('m2_') === 0 && String(r[0]).indexOf(prefix) !== 0; });
+  Object.keys(all).forEach(function (k) { if (k.indexOf('#pp|') < 0) rows.push([k, all[k]]); });
+  sh.clearContents();
+  sh.getRange(1, 1, rows.length, 2).setValues(rows);
+}
+
+// 名簿にある部署名（初出順）
+function getDeptList() {
+  return cached_('dl1', 600, readDeptList_);
+}
+
+function readDeptList_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_ROSTER);
+  const seen = {};
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 7).getValues().forEach(function (r) {
+    if (r[0] && r[1]) seen[r[6] || DEPT_NONE] = true;
+  });
+  return Object.keys(seen);
+}
+
+function mergeBucket_(to, from) {
+  ['hours', 'points', 'count'].forEach(function (g) {
+    Object.keys(to[g]).forEach(function (k) { to[g][k] += (from[g][k] || 0); });
+  });
+  Object.keys(from.groups).forEach(function (k) {
+    to.groups[k] = (to.groups[k] || 0) + from.groups[k];
+  });
+  Object.keys(from.products).forEach(function (k) {
+    to.products[k] = (to.products[k] || 0) + from.products[k];
+  });
+}
+
+function newBucket_() {
+  return {
+    hours: { all: 0, shotEmp: 0, shotPart: 0, stockEmp: 0, stockPart: 0, plan: 0, gyomu: 0, gyomuShot: 0, gyomuStock: 0 },
+    points: { all: 0, shot: 0, stock: 0, gyomu: 0 },
+    count: { all: 0, shot: 0, stock: 0 },
+    groups: {},
+    products: {}
+  };
+}
+
+function getRosterNames_(ss, ym) {
+  const sh = ss.getSheetByName(SHEET_ROSTER);
+  const vals = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 7).getValues();
+  const names = {};
+  vals.forEach(function (r) {
+    if (r[0] && r[1] && monthKey_(r[0]) === ym) names[r[1]] = r[6] || DEPT_NONE;
+  });
+  return names;
+}
+
+function monthKey_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy/MM');
+  return String(v).slice(0, 7);
+}
+
+// その月のシフトのシート（社員の「N月シフト」と、あれば「N月シフト業務委託」）
+function shiftSheets_(ss, month) {
+  return [month + '月シフト', month + '月シフト業務委託'].map(function (n) { return ss.getSheetByName(n); }).filter(function (x) { return x; });
+}
+
+// 業務委託の人：「N月シフト業務委託」に載っている人と、名簿の雇用形態（D列）が「業務委託」の人（その月）
+function gyomuSet_(ss, month) {
+  const set = {};
+  const g = ss.getSheetByName(month + '月シフト業務委託');
+  if (g && g.getLastRow() > 12) g.getRange(13, 2, g.getLastRow() - 12, 1).getValues().forEach(function (r) { if (r[0]) set[r[0]] = true; });
+  const ro = ss.getSheetByName(SHEET_ROSTER);
+  if (ro && ro.getLastRow() > 1) ro.getRange(2, 1, ro.getLastRow() - 1, 4).getValues().forEach(function (r) {
+    if (r[1] && String(r[3]).trim() === '業務委託' && r[0] instanceof Date && r[0].getMonth() + 1 === month) set[r[1]] = true;
+  });
+  return set;
+}
+
+function addShiftHours_(ss, month, names, pick, types) {
+  if (!ss.getSheetByName(month + '月シフト')) throw new Error(month + '月シフトのシートがありません');
+  // 社員の「N月シフト」と、あれば「N月シフト業務委託」の両方を読む（どちらも13行目から）
+  const vals = [];
+  shiftSheets_(ss, month).forEach(function (sh) {
+    const rows = sh.getLastRow() - 12;
+    const isG = /業務委託$/.test(sh.getName());
+    if (rows >= 1) sh.getRange(13, 2, rows, 39).getValues().forEach(function (r) { r.gyomu = isG; vals.push(r); });
+  });
+  const gy = gyomuSet_(ss, month);
+  vals.forEach(function (r) {
+    const item = String(r[4]);
+    if (!names[r[0]]) return;
+    // 月初予定の行は稼働時間に入れず、月初予定（plan）として日ごとに足す
+    if (item.indexOf('月初予定') >= 0) {
+      for (let d = 1; d <= 31; d++) {
+        const h = Number(r[7 + d]);
+        if (!h) continue;
+        pick(d, r[0]).forEach(function (b) { b.hours.plan = (b.hours.plan || 0) + h; });
+      }
+      return;
+    }
+    // 名簿のショット/ストックを優先する（シフトの商材と違っても名簿に合わせる）
+    const base = classify_(item);
+    const type = base && types[r[0]] ? types[r[0]] : base;
+    const isPart = String(r[2]) === 'アルバイト・パート';
+    for (let d = 1; d <= 31; d++) {
+      const h = Number(r[7 + d]);
+      if (!h) continue;
+      pick(d, r[0]).forEach(function (b) {
+        b.hours.all += h;
+        // 業務委託の人はショット/ストックの社員・アルバイトに入れず、業務委託にまとめる
+        if (r.gyomu || gy[r[0]]) {
+          b.hours.gyomu += h;
+          if (type === 'shot') b.hours.gyomuShot += h;
+          if (type === 'stock') b.hours.gyomuStock += h;
+          return;
+        }
+        if (type === 'shot') b.hours[isPart ? 'shotPart' : 'shotEmp'] += h;
+        if (type === 'stock') b.hours[isPart ? 'stockPart' : 'stockEmp'] += h;
+      });
+    }
+  });
+}
+
+// シフトの商材名をショット／ストックに分ける
+function classify_(item) {
+  if (/ストック|くらサポ|光コラボ/.test(item)) return 'stock';
+  if (/ショット|東邦ガス|フレッツ/.test(item)) return 'shot';
+  return 'other';
+}
+
+function addResults_(ss, ym, names, pick) {
+  const sh = ss.getSheetByName(SHEET_RESULT);
+  const n = sh.getLastRow() - 1;
+  const read = function (c, w) { return sh.getRange(2, c, n, w).getValues(); };
+  const blockA = read(3, 13), blockB = read(19, 7), blockC = read(29, 3);
+  const col = function (c) {
+    const s = c <= 15 ? [blockA, 3] : (c <= 25 ? [blockB, 19] : [blockC, 29]);
+    return s[0].map(function (r) { return [r[c - s[1]]]; });
+  };
+  const dates = col(19), getters = col(3), clps = col(15), results = col(22);
+  // 実績反映：W=手動反映PT、X=獲得ポイント（獲得者）、Y=CLポイント（前確者）
+  const wp = col(24), xp = col(25), groups = col(30), cats = col(31);
+  const items = col(8), fulls = col(29);
+  const known = {};
+  getProductSettings().forEach(function (r) { known[r.name] = true; });
+  const gy = gyomuSet_(ss, Number(ym.slice(5)));
+  for (let i = 0; i < n; i++) {
+    const date = dates[i][0];
+    if (!(date instanceof Date) || monthKey_(date) !== ym) continue;
+    const day = Number(Utilities.formatDate(date, TZ, 'd'));
+    const cat = cats[i][0];
+    const key = cat === 'ショット' ? 'shot' : (cat === 'ストック' ? 'stock' : null);
+    const getter = getters[i][0];
+    if (names[getter]) {
+      const pkey = gy[getter] ? 'gyomu' : key;
+      const ok = results[i][0] === '後確OK';
+      const g = groups[i][0] || '未分類';
+      const p = known[fulls[i][0]] ? fulls[i][0] : (known[items[i][0]] ? items[i][0] : '');
+      pick(day, getter).forEach(function (b) {
+        addPoint_(b, pkey, wp[i][0]);
+        addGroupPoint_(b, g, wp[i][0]);
+        if (!ok) return;
+        b.count.all++;
+        if (key) b.count[key]++;
+        b.groups[g] = (b.groups[g] || 0) + 1;
+        if (p) b.products[p] = (b.products[p] || 0) + 1;
+      });
+    }
+    const clp = clps[i][0];
+    if (names[clp]) pick(day, clp).forEach(function (b) {
+      addPoint_(b, gy[clp] ? 'gyomu' : key, xp[i][0]);
+      addGroupPoint_(b, groups[i][0] || '未分類', xp[i][0]);
+    });
+  }
+}
+
+function addPoint_(b, key, v) {
+  const p = Number(v);
+  if (!(p > 0)) return;
+  b.points.all += p;
+  if (key) b.points[key] += p;
+}
+
+function finish_(b, prices) {
+  const shotH = b.hours.shotEmp + b.hours.shotPart;
+  const stockH = b.hours.stockEmp + b.hours.stockPart;
+  b.gross = { all: 0, shot: 0, stock: 0 };
+  b.unpriced = [];
+  Object.keys(b.products).forEach(function (name) {
+    const info = prices[name];
+    if (!info) return;
+    if (info.et === '') b.unpriced.push(name);
+    const yen = b.products[name] * Number(info.et);
+    b.gross.all += yen;
+    if (info.type === 'ショット') b.gross.shot += yen;
+    if (info.type === 'ストック') b.gross.stock += yen;
+  });
+  b.grossPerHour = {
+    all: b.hours.all ? b.gross.all / b.hours.all : 0,
+    shot: (shotH + (b.hours.gyomuShot || 0)) ? b.gross.shot / (shotH + (b.hours.gyomuShot || 0)) : 0,
+    stock: (stockH + (b.hours.gyomuStock || 0)) ? b.gross.stock / (stockH + (b.hours.gyomuStock || 0)) : 0
+  };
+  b.productivity = {
+    all: b.hours.all ? b.points.all / b.hours.all : 0,
+    shot: shotH ? b.points.shot / shotH : 0,
+    stock: stockH ? b.points.stock / stockH : 0,
+    gyomu: b.hours.gyomu ? (b.points.gyomu || 0) / b.hours.gyomu : 0
+  };
+  return b;
+}
+
+// 設定画面：商材内訳シートの商材とET単価
+const SHEET_PRODUCT = '商材内訳';
+const PRODUCT_HEADER_ROW = 3;
+const ET_COLUMN = 4; // D列
+
+function getProductSettings() {
+  return cached_('ps1', 600, readProductSettings_);
+}
+
+function readProductSettings_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PRODUCT);
+  const rows = sh.getLastRow() - PRODUCT_HEADER_ROW;
+  if (rows < 1) return [];
+  return sh.getRange(PRODUCT_HEADER_ROW + 1, 1, rows, ET_COLUMN).getValues()
+    .filter(function (r) { return r[0] !== ''; })
+    .map(function (r) { return { name: String(r[0]), group: String(r[1]), type: String(r[2]), et: r[3] }; });
+}
+
+// prices は { 商材名: ET単価 }。数字以外は保存しない
+function saveEtPrices(prices) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PRODUCT);
+  const rows = sh.getLastRow() - PRODUCT_HEADER_ROW;
+  const names = sh.getRange(PRODUCT_HEADER_ROW + 1, 1, rows, 1).getValues();
+  const current = sh.getRange(PRODUCT_HEADER_ROW + 1, ET_COLUMN, rows, 1).getValues();
+  const next = names.map(function (r, i) {
+    if (!Object.prototype.hasOwnProperty.call(prices, r[0])) return [current[i][0]];
+    const v = prices[r[0]];
+    if (v === '' || v === null) return [''];
+    const n = Number(v);
+    if (isNaN(n) || n < 0) throw new Error(r[0] + ' のET単価が数字ではありません');
+    return [n];
+  });
+  sh.getRange(PRODUCT_HEADER_ROW, ET_COLUMN).setValue('ET単価');
+  sh.getRange(PRODUCT_HEADER_ROW + 1, ET_COLUMN, rows, 1).setValues(next);
+  CacheService.getScriptCache().remove('ps1');
+  return getProductSettings();
+}
+
+// 仕分け名を商材内訳シートの並び順で返す
+function getGroupNames_() {
+  const seen = {};
+  return getProductSettings().map(function (r) { return r.group; }).filter(function (g) {
+    if (!g || seen[g]) return false;
+    seen[g] = true;
+    return true;
+  });
+}
+
+// 商材名ごとのET単価と区分（設定の変更をすぐ反映するため毎回読む）
+function getPriceMap_() {
+  const map = {};
+  getProductSettings().forEach(function (r) { map[r.name] = { et: r.et, type: r.type }; });
+  return map;
+}
+
+// ランキング画面：スプレッドのランキング表をそのまま読む
+const RANK_FIRST_ROW = 6;
+const RANK_COLS = 31; // B〜AF列（AC〜AF：ショット時間・ショットP・ストック時間・ストックP）
+
+function rankingBase_(ymDash, force) {
+  const p = ymDash.split('-');
+  const month = Number(p[1]);
+  const year = Number(p[0]);
+  const cur = readRanking_(year, month, force);
+  if (!cur) throw new Error(month + '月のランキングシートがありません');
+  const first = ymDash === '2026-09';
+  const prevMonth = month === 1 ? 12 : month - 1;
+  return {
+    month: month,
+    head: cur.head,
+    kinds: cur.kinds,
+    rows: cur.rows,
+    total: cur.total,
+    readAt: cur.readAt,
+    prevMonth: first ? null : prevMonth,
+    prev: first ? null : readRanking_(month === 1 ? year - 1 : year, prevMonth, force)
+  };
+}
+
+function readRanking_(year, month, force) {
+  const cache = CacheService.getScriptCache();
+  const key = 'rank2_' + year + '_' + month;
+  if (!force) {
+    const hit = cache.get(key);
+    if (hit) return JSON.parse(hit);
+  }
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('アポインターランキング_' + month + '月');
+  if (!sh) return null;
+  const names = sh.getRange(RANK_FIRST_ROW + 1, 4, Math.min(300, Math.max(sh.getLastRow() - RANK_FIRST_ROW, 1)), 1).getDisplayValues();
+  let last = -1;
+  names.forEach(function (r, i) { if (last < 0 && r[0] === '全体') last = i; });
+  if (last < 0) return null;
+  const vals = sh.getRange(RANK_FIRST_ROW, 2, last + 2, RANK_COLS).getDisplayValues();
+  const data = {
+    head: vals[0],
+    kinds: getRosterKinds_(year, month),
+    rows: vals.slice(1, last + 1).filter(function (r) { return r[2]; }),
+    total: vals[last + 1],
+    readAt: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm')
+  };
+  cache.put(key, JSON.stringify(data), 1800);
+  return data;
+}
+
+// 名簿の形態から社員／アルバイトを返す
+function getRosterKinds_(year, month) {
+  return cached_('rk1_' + year + '_' + month, 600, function () { return readRosterKinds_(year, month); });
+}
+
+function readRosterKinds_(year, month) {
+  const ym = year + '/' + ('0' + month).slice(-2);
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_ROSTER);
+  const kinds = {};
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 4).getValues().forEach(function (r) {
+    if (r[0] && r[1] && monthKey_(r[0]) === ym) kinds[r[1]] = r[3] === 'クルー' ? 'アルバイト' : String(r[3]);
+  });
+  return kinds;
+}
+
+// ===== 管理会計 =====
+const MG_ID = '#mg';
+const PD_ID = '#pd';
+const SHEET_COST = '管理会計設定';
+const SHEET_AP = 'AP人事制度';
+const LATE_HOUR = 16;   // この時刻以降は下限時給を適用
+const LATE_WAGE = 1500; // 16時以降の下限時給
+
+function ymOf_(year, month) {
+  return year + '/' + ('0' + month).slice(-2);
+}
+
+// 2026/09〜今月（新しい月が先頭）
+function costMonths_() {
+  const now = new Date();
+  const endY = Number(Utilities.formatDate(now, TZ, 'yyyy'));
+  const endM = Number(Utilities.formatDate(now, TZ, 'M'));
+  const out = [];
+  let y = 2026, m = 9;
+  while (y < endY || (y === endY && m <= endM)) {
+    out.unshift(ymOf_(y, m));
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+function readCostSheet_() {
+  return cached_('cs1', 600, readCostRows_);
+}
+
+function readCostRows_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_COST);
+  const map = {};
+  if (!sh || sh.getLastRow() < 2) return map;
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 3).getValues().forEach(function (r) {
+    if (r[0]) map[String(r[0])] = { sga: r[1], emp: r[2] };
+  });
+  return map;
+}
+
+function getCostSettings() {
+  const map = readCostSheet_();
+  return costMonths_().map(function (ym) {
+    const v = map[ym] || { sga: '', emp: '' };
+    return { ym: ym, sga: v.sga, emp: v.emp };
+  });
+}
+
+function getSettings() {
+  const ds = getDeptSeats_(), db = getDeptBreaks_();
+  return { partners: getPartners_(), products: getProductSettings(), cost: getCostSettings(), seats: getSeats_(), deptSeats: getDeptList().map(function (n) { return { name: n, seats: ds[n] || '', brk: db[n] === undefined ? BREAK_DEFAULT : db[n] }; }) };
+}
+
+function costNumber_(v, label) {
+  if (v === '' || v === null || v === undefined) return '';
+  const n = Number(v);
+  if (isNaN(n) || n < 0) throw new Error(label + ' が数字ではありません');
+  return n;
+}
+
+function costSheet_(ss) {
+  return ss.getSheetByName(SHEET_COST) || ss.insertSheet(SHEET_COST, ss.getNumSheets());
+}
+
+function saveCostSettings(rows) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const map = readCostRows_();
+  rows.forEach(function (r) {
+    map[r.ym] = {
+      sga: costNumber_(r.sga, r.ym + ' の販管費'),
+      emp: costNumber_(r.emp, r.ym + ' の社員時給')
+    };
+  });
+  const sh = costSheet_(ss);
+  const keys = Object.keys(map).sort();
+  sh.getRange(1, 1, sh.getMaxRows(), 6).clearContent();
+  sh.getRange(1, 1, 1, 3).setValues([['対象月', '販管費（円/時間）', '社員時給（円/時間）']]);
+  sh.getRange(2, 1, keys.length, 1).setNumberFormat('@');
+  sh.getRange(2, 1, keys.length, 3).setValues(keys.map(function (k) {
+    return [k, map[k].sga, map[k].emp];
+  }));
+  CacheService.getScriptCache().remove('cs1');
+}
+
+function saveSettingsAll(prices, cost, seats, deptSeats, partners) {
+  saveSeats_(seats);
+  if (partners) savePartners_(partners);
+  if (deptSeats) saveDeptSeats_(deptSeats);
+  saveCostSettings(cost);
+  // 商材内訳への書き込みは再計算が重いので変更時だけ行う
+  const changed = getProductSettings().some(function (p) {
+    return Object.prototype.hasOwnProperty.call(prices, p.name) && String(prices[p.name]) !== String(p.et);
+  });
+  if (changed) saveEtPrices(prices);
+  return getSettings();
+}
+
+// AP人事制度のグレード表 { G13: 2500, ... }
+function getGradeWages_() {
+  return cached_('gw1', 3600, readGradeWages_);
+}
+
+function readGradeWages_() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_AP);
+  const map = {};
+  sh.getRange(12, 7, 13, 4).getValues().forEach(function (r) {
+    const wage = Number(String(r[3]).replace(/[^0-9.]/g, ''));
+    if (/^G\d+$/.test(String(r[0])) && wage) map[r[0]] = wage;
+  });
+  return map;
+}
+
+function getRosterInfo_(ss, ym) {
+  return cached_('ri2_' + ym, 600, function () { return readRosterInfo_(ss, ym); });
+}
+
+function readRosterInfo_(ss, ym) {
+  const sh = ss.getSheetByName(SHEET_ROSTER);
+  const info = {};
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 11).getValues().forEach(function (r) {
+    if (!r[0] || !r[1] || monthKey_(r[0]) !== ym) return;
+    info[r[1]] = {
+      role: String(r[2]),
+      kind: r[3] === 'クルー' ? 'アルバイト' : String(r[3]),
+      dept: r[6] ? String(r[6]) : DEPT_NONE,
+      gp: String(r[7]),
+      prod: String(r[10]),
+      item: String(r[8]),
+      type: String(r[9])
+    };
+  });
+  return info;
+}
+
+function timeOf_(s) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(s).trim());
+  return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+}
+
+// シフトタイムラインの開始・終了から { '名前|日': 16時以降の時間 } を作る。読めなければ null
+function readLateHours_(ss, month) {
+  const sh = ss.getSheetByName(month + '月シフトタイムライン');
+  if (!sh) return null;
+  const v = cc3Timeline_(sh.getDataRange().getDisplayValues());
+  let head = -1;
+  for (let i = 0; i < Math.min(60, v.length); i++) {
+    if (v[i].indexOf('氏名') >= 0) { head = i; break; }
+  }
+  if (head < 0) return null;
+  const iName = v[head].indexOf('氏名');
+  const iIn = v[head].indexOf('入力');
+  const iWage = v[head].indexOf('基本時給');
+  const first = iWage >= 0 ? iWage + 1 : iIn + 2;
+  const late = {};
+  for (let i = head + 1; i < v.length - 1; i++) {
+    const r = v[i], e = v[i + 1];
+    if (r[iIn] !== '開始' || !r[iName]) continue;
+    for (let d = 1; d <= 31; d++) {
+      const s = timeOf_(r[first + d - 1]), t = timeOf_(e[first + d - 1]);
+      if (s === null || t === null) continue;
+      const h = t - Math.max(s, LATE_HOUR);
+      if (h > 0) late[r[iName] + '|' + d] = (late[r[iName] + '|' + d] || 0) + h;
+    }
+  }
+  return late;
+}
+
+// 単価に左右されない個人別の素データ（ALLと同じ集計で作られる）
+function mgmtRaw_(year, month, force) {
+  return getMonthData_(ymOf_(year, month), month, force, MG_ID);
+}
+
+function gradeMap_(rank) {
+  const map = {};
+  if (!rank) return map;
+  const iN = rank.head.indexOf('名前'), iG = rank.head.indexOf('現在グレード');
+  rank.rows.forEach(function (r) { map[r[iN]] = r[iG]; });
+  return map;
+}
+
+function mgmtMonth_(year, month, force) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ym = ymOf_(year, month);
+  const raw = mgmtRaw_(year, month, force);
+  const first = ym === '2026/09'; // 8月のグレードがないため9月は当月グレードで代用
+  const gy = month === 1 ? year - 1 : year, gm = month === 1 ? 12 : month - 1;
+  const grades = gradeMap_(first ? readRanking_(year, month, force) : readRanking_(gy, gm, force));
+  const wages = getGradeWages_();
+  const prices = getPriceMap_();
+  const info = getRosterInfo_(ss, ym);
+  const setting = readCostSheet_()[ym] || { sga: '', emp: '' };
+  const sga = Number(setting.sga) || 0, emp = Number(setting.emp) || 0;
+  const unpriced = {};
+  let noGrade = 0;
+  const rows = raw.rows.map(function (r) {
+    const p = info[r.name] || { role: '', kind: '', dept: DEPT_NONE, gp: '', prod: '' };
+    let gross = 0;
+    Object.keys(r.products).forEach(function (n) {
+      const q = prices[n];
+      if (!q) return;
+      if (q.et === '') unpriced[n] = 1;
+      gross += r.products[n] * Number(q.et);
+    });
+    const crew = /アルバイト/.test(p.kind || '');
+    const grade = crew ? (grades[r.name] || '') : '';
+    if (crew && !grade && r.hours) noGrade++;
+    const wage = crew ? (wages[grade] || wages.G1) : emp;
+    const labor = crew && wage < LATE_WAGE
+      ? (r.hours - r.late) * wage + r.late * LATE_WAGE
+      : r.hours * wage;
+    const sgaYen = r.hours * sga;
+    const cost = labor + sgaYen;
+    return {
+      name: r.name, dept: p.dept, gp: p.gp, prod: p.prod, kind: p.kind, role: p.role,
+      grade: grade, wage: wage, hours: r.hours, late: r.late, count: r.count, points: r.points,
+      gross: gross, gph: r.hours ? gross / r.hours : 0,
+      labor: labor, sga: sgaYen, cost: cost, profit: gross - cost
+    };
+  });
+  return {
+    rows: rows, upto: raw.upto, readAt: raw.readAt, lateOk: raw.lateOk, firstMonth: first, noGrade: noGrade,
+    missingSga: !sga, missingEmp: !emp, unpriced: Object.keys(unpriced).length
+  };
+}
+
+function mgmtBase_(ymDash, force) {
+  const p = ymDash.split('-');
+  const year = Number(p[0]), month = Number(p[1]);
+  const first = ymDash === '2026-09';
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const data = mgmtMonth_(year, month, force);
+  data.month = month;
+  data.prevMonth = first ? null : prevMonth;
+  data.prev = first ? null : mgmtMonth_(month === 1 ? year - 1 : year, prevMonth, false);
+  return data;
+}
+
+// ===== 商材内訳 =====
+function addGroupPoint_(b, g, v) {
+  if (typeof v !== 'number') return;
+  b.gp = b.gp || {};
+  b.gp[g] = (b.gp[g] || 0) + v;
+}
+
+// ymDash があれば確定月（月合計のみ）、なければ dateStr の当日と前日までを返す
+function getBreakdown(ymDash, dateStr, force, dept) {
+  const target = dateStr ? new Date(dateStr + 'T00:00:00+09:00') : new Date();
+  const closed = !!ymDash;
+  const p = closed ? ymDash.split('-') : null;
+  const year = closed ? Number(p[0]) : Number(Utilities.formatDate(target, TZ, 'yyyy'));
+  const month = closed ? Number(p[1]) : Number(Utilities.formatDate(target, TZ, 'M'));
+  const lastDay = new Date(year, month, 0).getDate();
+  const day = closed ? lastDay : Number(Utilities.formatDate(target, TZ, 'd'));
+  const ym = ymOf_(year, month);
+  let raw = getMonthData_(ym, month, force, dept || PD_ID);
+  // 部署は日別の集計をそのまま使う。ポイント内訳がない古い保存データなら作り直す
+  if (dept) {
+    const days = Object.keys(raw.days).map(function (k) { return raw.days[k]; });
+    const sold = days.some(function (b) { return Object.keys(b.groups).length > 0; });
+    if (sold && !days.some(function (b) { return b.gp; })) raw = getMonthData_(ym, month, true, dept);
+  }
+  const settings = getProductSettings();
+  const info = {}, ets = {};
+  settings.forEach(function (r) {
+    info[r.name] = r;
+    if (r.et === '') return;
+    ets[r.group] = ets[r.group] || {};
+    ets[r.group][Number(r.et)] = 1;
+  });
+  const rows = {};
+  const row = function (g) {
+    if (!rows[g]) {
+      const list = Object.keys(ets[g] || {}).map(Number).sort(function (a, b) { return a - b; });
+      rows[g] = {
+        name: g, etMin: list.length ? list[0] : null, etMax: list.length ? list[list.length - 1] : null,
+        today: { count: 0, points: 0, gross: 0 }, cum: { count: 0, points: 0, gross: 0 }
+      };
+    }
+    return rows[g];
+  };
+  const trend = [];
+  const unpriced = {};
+  for (let d = 1; d <= day; d++) {
+    const b = raw.days[d];
+    const x = dept ? { count: b.groups, points: b.gp || {}, products: b.products } : b;
+    const slot = !closed && d === day ? 'today' : 'cum';
+    Object.keys(x.count).forEach(function (g) { row(g)[slot].count += x.count[g]; });
+    Object.keys(x.points).forEach(function (g) { row(g)[slot].points += x.points[g]; });
+    Object.keys(x.products).forEach(function (n) {
+      const r = info[n];
+      if (!r) return;
+      if (r.et === '') unpriced[n] = 1;
+      row(r.group)[slot].gross += x.products[n] * Number(r.et);
+    });
+    trend.push({ d: d, c: x.count });
+  }
+  return {
+    closed: closed, date: Utilities.formatDate(target, TZ, 'yyyy-MM-dd'), month: month, day: day, days: lastDay,
+    readAt: raw.readAt || raw.updatedAt, unpriced: Object.keys(unpriced).length, trend: trend,
+    rows: Object.keys(rows).map(function (g) { return rows[g]; })
+  };
+}
+
+// シートを読まずに済むよう、小さな設定類は一時保存する
+function cached_(key, seconds, read) {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  const value = read();
+  cache.put(key, JSON.stringify(value), seconds);
+  return value;
+}
+
+// 時間トリガーで実行：誰かが開く前に当月の集計を作っておく（深夜1〜6時台は休止）
+function autoRefreshBase_() {
+  try { ptSyncSheet_(); } catch (e) { console.log(e); }
+  const now = new Date();
+  const hour = Number(Utilities.formatDate(now, TZ, 'H'));
+  if (hour >= 1 && hour < 7) return;
+  const year = Number(Utilities.formatDate(now, TZ, 'yyyy'));
+  const month = Number(Utilities.formatDate(now, TZ, 'M'));
+  try {
+    getMonthData_(ymOf_(year, month), month, true, '');
+    readRanking_(year, month, true);
+  } catch (e) {
+    // 再計算中などで失敗した時は前回の結果を残して次の回に任せる
+    console.log(e);
+  }
+}
+
+// 名簿のJ列（ショット/ストック）
+function getRosterTypes_(ss, ym) {
+  const sh = ss.getSheetByName(SHEET_ROSTER);
+  const types = {};
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 10).getValues().forEach(function (r) {
+    if (!r[0] || !r[1] || monthKey_(r[0]) !== ym) return;
+    if (r[9] === 'ショット') types[r[1]] = 'shot';
+    if (r[9] === 'ストック') types[r[1]] = 'stock';
+  });
+  return types;
+}
+
+// ===== コール集計（時間帯別の稼働と席稼働率） =====
+const SEAT_DEFAULT = 92;
+
+// 席数は管理会計設定シートのH2に保存（未入力は92席）
+function getSeats_() {
+  return cached_('st1', 600, function () {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_COST);
+    return (sh && Number(sh.getRange('H2').getValue())) || SEAT_DEFAULT;
+  });
+}
+
+function saveSeats_(value) {
+  const n = Number(value);
+  if (!n || n < 1 || n !== Math.floor(n)) throw new Error('席数は1以上の整数で入力してください');
+  if (n === getSeats_()) return;
+  const sh = costSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  sh.getRange('H1:H2').setValues([['席数'], [n]]);
+  CacheService.getScriptCache().remove('st1');
+}
+
+
+// CC第三の「月間シフト」形式（A列スタッフ・日付行・セルに「11:00〜20:00」）を
+// CC第一のタイムライン形式（氏名／入力=開始・終了の2行1組）に置き換える。CC第一形式ならそのまま返す
+function cc3Timeline_(v) {
+  const lim = Math.min(60, v.length);
+  for (let i = 0; i < lim; i++) if (v[i].indexOf('氏名') >= 0) return v;
+  let head = -1;
+  for (let i = 0; i < lim; i++) if (String(v[i][0]).trim() === 'スタッフ') { head = i; break; }
+  if (head < 0) return v;
+  const dayCol = {};
+  v[head].forEach(function (x, j) {
+    const d = Number(String(x).trim());
+    if (j > 0 && d >= 1 && d <= 31 && !dayCol[d]) dayCol[d] = j;
+  });
+  const hdr = ['氏名', '入力', ''];
+  for (let d = 1; d <= 31; d++) hdr.push(String(d));
+  const out = [hdr];
+  const re = /(\d{1,2}):(\d{2})\s*[〜~～\-–ー]\s*(\d{1,2}):(\d{2})/g;
+  for (let i = head + 1; i < v.length; i++) {
+    const name = String(v[i][0]).trim();
+    if (!name || name === '合計' || name === 'スタッフ') continue;
+    const ranges = {};
+    let maxK = 0;
+    for (let d = 1; d <= 31; d++) {
+      const c = dayCol[d];
+      if (!c) continue;
+      const txt = String(v[i][c] || '');
+      const list = [];
+      let mm;
+      re.lastIndex = 0;
+      while ((mm = re.exec(txt))) list.push([mm[1] + ':' + mm[2], mm[3] + ':' + mm[4]]);
+      ranges[d] = list;
+      if (list.length > maxK) maxK = list.length;
+    }
+    for (let k = 0; k < maxK; k++) {
+      const a = [name, '開始', ''], b = [name, '終了', ''];
+      for (let d = 1; d <= 31; d++) {
+        const x = (ranges[d] || [])[k];
+        a.push(x ? x[0] : '');
+        b.push(x ? x[1] : '');
+      }
+      out.push(a, b);
+    }
+  }
+  return out;
+}
+
+// 開始・終了から { 名前|日: [[開始, 終了], ...] } を作る。読めなければ null
+// シフトに商材の列がないとき（CC第三）用：名簿の商材（I列）を { 名前: 商材 } で返す（その月の最新年）
+function rosterItems_(ss, month) {
+  const sh = ss.getSheetByName(SHEET_ROSTER);
+  const vals = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 9).getValues();
+  const mm = '/' + ('0' + month).slice(-2);
+  let best = '';
+  vals.forEach(function (r) { const k = r[0] ? monthKey_(r[0]) : ''; if (k.slice(-3) === mm && k > best) best = k; });
+  const map = {};
+  vals.forEach(function (r) { if (r[0] && r[1] && monthKey_(r[0]) === best) map[String(r[1]).trim()] = String(r[8] || ''); });
+  return map;
+}
+
+function readShiftIntervals_(ss, month) {
+  const sh = ss.getSheetByName(month + '月シフトタイムライン');
+  if (!sh) return null;
+  const v = cc3Timeline_(sh.getDataRange().getDisplayValues());
+  let head = -1;
+  for (let i = 0; i < Math.min(60, v.length); i++) {
+    if (v[i].indexOf('氏名') >= 0) { head = i; break; }
+  }
+  if (head < 0) return null;
+  const iName = v[head].indexOf('氏名');
+  const iIn = v[head].indexOf('入力');
+  const iItem = v[head].indexOf('商材');
+  const iWage = v[head].indexOf('基本時給');
+  const first = iWage >= 0 ? iWage + 1 : iIn + 2;
+  const out = {};
+  const rItem = iItem >= 0 ? null : rosterItems_(ss, month);
+  for (let i = head + 1; i < v.length - 1; i++) {
+    const r = v[i], e = v[i + 1];
+    if (r[iIn] !== '開始' || !r[iName]) continue;
+    for (let d = 1; d <= 31; d++) {
+      const s = timeOf_(r[first + d - 1]), t = timeOf_(e[first + d - 1]);
+      if (s === null || t === null || t <= s) continue;
+      const k = r[iName] + '|' + d;
+      (out[k] = out[k] || []).push([s, t, iItem >= 0 ? r[iItem] : (rItem[r[iName]] || '')]);
+    }
+  }
+  return out;
+}
+
+// 同じ人が複数行にいても二重に数えないよう、重なる時間をまとめる
+function mergeIntervals_(list) {
+  const merged = [];
+  list.slice().sort(function (a, b) { return a[0] - b[0]; }).forEach(function (x) {
+    const last = merged[merged.length - 1];
+    if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
+    else merged.push([x[0], x[1]]);
+  });
+  return merged;
+}
+
+// 1日ずつ、人ごとの時間帯別の稼働とトスを持つ（絞り込みに使う）
+// 「19:29A」「17：47B」「17:21 B」などから時（0〜23）を取り出す。読めなければ null
+function tosHour_(v) {
+  const s = String(v || '').replace(/[０-９：]/g, function (c) { return c === '：' ? ':' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+  const m = /(\d{1,2})\s*[:.]/.exec(s) || /^\s*(\d{1,2})\s*$/.exec(s);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h <= 23 ? h : null;
+}
+
+function callMonth_(year, month, force) {
+  const cache = CacheService.getScriptCache();
+  const base = 'ch8_' + year + '_' + month;
+  if (!force) {
+    const meta = cache.get(base);
+    if (meta) {
+      const m = JSON.parse(meta);
+      const keys = [];
+      for (let d = 1; d <= 31; d++) keys.push(base + '_' + d);
+      const got = cache.getAll(keys);
+      if (Object.keys(got).length === m.n) {
+        m.days = {};
+        Object.keys(got).forEach(function (k) { m.days[Number(k.split('_').pop())] = JSON.parse(got[k]); });
+        return m;
+      }
+    }
+  }
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ym = ymOf_(year, month);
+  const data = { ok: true, tosOk: false, days: {}, readAt: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm') };
+  const day = function (d) { return data.days[d] || (data.days[d] = { people: {}, shiftBy: {}, tosTotal: 0, callTotal: 0 }); };
+  const per = function (b, n) { return b.people[n] || (b.people[n] = { h: {}, t: {}, ih: {}, it: {}, tl: 0, c: 0, k: 0 }); };
+  const add = function (o, x) {
+    for (let h = Math.floor(x[0]); h < x[1]; h++) {
+      const v = Math.min(x[1], h + 1) - Math.max(x[0], h);
+      if (v > 0) o[h] = Math.round(((o[h] || 0) + v) * 100) / 100;
+    }
+  };
+  const itemLabel = function (s) { return /除外/.test(s || '') ? 'その他（除外）' : (s || '未設定'); };
+  const iv = readShiftIntervals_(ss, month);
+  if (iv) {
+    Object.keys(iv).forEach(function (k) {
+      const p = k.split('|'), q = per(day(Number(p[1])), p[0]);
+      q.tl = 1;
+      mergeIntervals_(iv[k]).forEach(function (x) { add(q.h, x); });
+      const byItem = {};
+      iv[k].forEach(function (x) { const lab = itemLabel(x[2]); (byItem[lab] = byItem[lab] || []).push(x); });
+      Object.keys(byItem).forEach(function (lab) {
+        const o = q.ih[lab] || (q.ih[lab] = {});
+        mergeIntervals_(byItem[lab]).forEach(function (x) { add(o, x); });
+      });
+    });
+  } else data.ok = false;
+  shiftSheets_(ss, month).forEach(function (sh) {
+    if (sh.getLastRow() <= 12) return;
+    sh.getRange(13, 2, sh.getLastRow() - 12, 39).getValues().forEach(function (r) {
+      if (!r[0] || String(r[4]).indexOf('月初予定') >= 0) return;
+      for (let d = 1; d <= 31; d++) {
+        const h = Number(r[7 + d]);
+        if (!h) continue;
+        const b = day(d);
+        b.shiftBy[r[0]] = (b.shiftBy[r[0]] || 0) + h;
+      }
+    });
+  });
+  // コール集計打ち込み用：個人の行は時間帯別トス（その時間のタイムラインの商材に入れる）、合計行は日計
+  const inp = ss.getSheetByName('コール集計打ち込み用_' + month + '月');
+  data.tosOk = !!inp;
+  if (inp && inp.getLastRow() > 0) {
+    const num = function (s) { return Number(String(s).replace(/,/g, '')) || 0; };
+    let cur = 0;
+    inp.getRange(1, 2, inp.getLastRow(), 39).getDisplayValues().forEach(function (r) {
+      const m = /【(\d+)\/(\d+)/.exec(r[0]);
+      if (m) { cur = Number(m[2]); return; }
+      if (!cur) return;
+      const nm = String(r[0]).trim();
+      if (nm === '合計') {
+        const b = day(cur);
+        b.tosTotal = num(r[5]);
+        b.callTotal = num(r[3]);
+        cur = 0;
+        return;
+      }
+      if (!nm || nm === '名前') return;
+      const b = day(cur), list = (iv && iv[nm + '|' + cur]) || [];
+      // 個人の日計（コール・対話）
+      const dc = num(r[3]), dk = num(r[4]);
+      if (dc || dk) { const q0 = per(b, nm); q0.c += dc; q0.k += dk; }
+      for (let h = 10; h <= 20; h++) {
+        const n = num(r[8 + (h - 10) * 3]);
+        if (!n) continue;
+        const q = per(b, nm);
+        q.t[h] = (q.t[h] || 0) + n;
+        const hit = list.filter(function (x) { return x[0] <= h + 0.5 && h + 0.5 < x[1]; })[0] || list[0];
+        const lab = hit ? itemLabel(hit[2]) : '未設定';
+        const o = q.it[lab] || (q.it[lab] = {});
+        o[h] = (o[h] || 0) + n;
+      }
+    });
+  }
+  // 実績反映2：トス件数を時間帯別に（C=獲得者、Q=トス日、M=フリーボックス2「19:29A」の時、Z=トス月）
+  const r2 = ss.getSheetByName('実績反映2');
+  if (r2 && r2.getLastRow() > 1) {
+    const roster = getRosterNames_(ss, ym);
+    Object.keys(data.days).forEach(function (k) {
+      const b = data.days[k];
+      Object.keys(b.people).forEach(function (n) { b.people[n].t = {}; b.people[n].it = {}; });
+    });
+    data.tosSrc = '実績反映2';
+    data.tosNoTime = 0;
+    r2.getRange(2, 3, r2.getLastRow() - 1, 24).getValues().forEach(function (r) {
+      const nm = r[0], q = r[14];
+      if (!nm || !roster[nm] || monthKey_(r[23]) !== ym || !(q instanceof Date)) return;
+      const d = Number(Utilities.formatDate(q, TZ, 'd'));
+      const b = day(d);
+      b.tosR2 = (b.tosR2 || 0) + 1;
+      const h = tosHour_(r[10]);
+      if (h === null) { data.tosNoTime++; return; }
+      const p = per(b, nm);
+      p.t[h] = (p.t[h] || 0) + 1;
+      const list = (iv && iv[nm + '|' + d]) || [];
+      const hit = list.filter(function (x) { return x[0] <= h + 0.5 && h + 0.5 < x[1]; })[0] || list[0];
+      const lab = hit ? itemLabel(hit[2]) : '未設定';
+      const o = p.it[lab] || (p.it[lab] = {});
+      o[h] = (o[h] || 0) + 1;
+    });
+  }
+  const closed = ym < Utilities.formatDate(new Date(), TZ, 'yyyy/MM');
+  const ttl = closed ? CACHE_SECONDS : 600;
+  const out = {};
+  Object.keys(data.days).forEach(function (d) { out[base + '_' + d] = JSON.stringify(data.days[d]); });
+  cache.putAll(out, ttl);
+  cache.put(base, JSON.stringify({ ok: data.ok, tosOk: data.tosOk, tosSrc: data.tosSrc || '', tosNoTime: data.tosNoTime || 0, readAt: data.readAt, n: Object.keys(out).length }), ttl);
+  return data;
+}
+
+// mode: 'day'（対象日のみ）/ 'month'（入力がある日の合計）。filt: 名簿の区分で人を絞る
+// ===== 外部のコール数（当月合計）=====
+// 「コール取込設定」シート：A=月(yyyy/MM) B=コール数のURL（当月総コール数） C=対話数のURL（有効コール数）
+const SHEET_EXT_CALL = 'コール取込設定';
+function normName_(s) { return String(s || '').replace(/[\s\u3000]/g, ''); }
+function extCalls_(ym) {
+  const cache = CacheService.getScriptCache(), key = 'ext1_' + ym;
+  const hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  const res = { ok: false, p: {}, note: '' };
+  try {
+    const st = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EXT_CALL);
+    if (!st) { res.note = '「' + SHEET_EXT_CALL + '」シートがありません'; return res; }
+    const row = st.getDataRange().getValues().filter(function (r) { return monthKey_(r[0]) === ym || String(r[0]).trim() === ym; })[0];
+    if (!row) { res.note = ym + ' のURLが「' + SHEET_EXT_CALL + '」にありません'; return res; }
+    const read = function (url, col) {
+      const id = (String(url).match(/\/d\/([\w-]+)/) || [])[1];
+      if (!id) return null;
+      const gid = Number((String(url).match(/gid=(\d+)/) || [])[1] || 0);
+      const book = SpreadsheetApp.openById(id);
+      const sh = book.getSheets().filter(function (x) { return x.getSheetId() === gid; })[0] || book.getSheets()[0];
+      const v = sh.getDataRange().getValues();
+      const hd = v[0].map(String), ni = hd.indexOf('スタッフ氏名'), ci = hd.indexOf(col);
+      if (ni < 0 || ci < 0) throw new Error(sh.getName() + ' に「スタッフ氏名」「' + col + '」の列がありません');
+      const out = {};
+      v.slice(1).forEach(function (r) { const n = normName_(r[ni]); if (n) out[n] = (out[n] || 0) + (Number(r[ci]) || 0); });
+      return out;
+    };
+    const c = read(row[1], '当月総コール数') || {}, k = read(row[2], '有効コール数') || {};
+    Object.keys(c).concat(Object.keys(k)).forEach(function (n) { res.p[n] = { c: c[n] || 0, k: k[n] || 0 }; });
+    res.ok = true;
+    res.note = 'コール数・対話数は外部シートの当月合計（コール数＝当月総コール数、対話数＝有効コール数）';
+  } catch (e) { res.note = '外部のコール数を読めませんでした：' + e.message; }
+  cache.put(key, JSON.stringify(res), 600);
+  return res;
+}
+
+function getCallHours(dateStr, force, mode, filt, scope) {
+  scope = scope || {};
+  const scDept = scope.dept || '', scName = scope.name || '', scoped = !!(scDept || scName);
+  const target = dateStr ? new Date(dateStr + 'T00:00:00+09:00') : new Date();
+  const year = Number(Utilities.formatDate(target, TZ, 'yyyy'));
+  const month = Number(Utilities.formatDate(target, TZ, 'M'));
+  const d = Number(Utilities.formatDate(target, TZ, 'd'));
+  const ym = ymOf_(year, month);
+  const isMonth = mode === 'month';
+  const ext = isMonth ? extCalls_(Utilities.formatDate(dateStr ? new Date(dateStr + 'T00:00:00+09:00') : new Date(), TZ, 'yyyy/MM')) : null;
+  const m = callMonth_(year, month, force);
+  const info = getRosterInfo_(SpreadsheetApp.getActiveSpreadsheet(), ym);
+  const keys = ALL_FILTER_KEYS.filter(function (k) { return filt && filt[k]; });
+  const tenF = (filt && filt.ten) || '';
+  const hd = hireDates_();
+  const tenOf = function (n) { if (!hd) return tenureOf_('', year, month); const hh = hd[String(n).replace(/[\s　]/g, '')]; return hh ? tenureOf_(hh, year, month) : { m: 1, cat: '1か月目', hire: '' }; }; // 入社シートにいない人＝今月入社
+  const pass = function (n) {
+    if (tenF && tenOf(n).cat !== tenF) return false;
+    if (scName && n !== scName) return false;
+    if (scDept && (!info[n] || (info[n].dept || DEPT_NONE) !== scDept)) return false;
+    if (!keys.length) return true;
+    const p = info[n];
+    return !!p && keys.every(function (k) { return p[k] === filt[k]; });
+  };
+  const cat = function (n, k) { return (info[n] && info[n][k]) || '未設定'; };
+  const hasInput = function (b) { return b && ((b.callTotal || 0) > 0 || (b.tosTotal || 0) > 0); };
+  const inputDays = [], entered = [];
+  for (let i = 1; i <= 31; i++) { if (hasInput(m.days[i])) { inputDays.push(i); if (i <= d) entered.push(i); } }
+  const useEntered = isMonth && entered.length > 0;
+  const ppl = {}, allp = {}, usedDays = [];
+  let tg = null, tgOk = true, pt = null, ptOk = true;
+  try { tg = tgtMonth_(ym); } catch (e) { tgOk = false; }
+  try { pt = ptsMonth_(ym); } catch (e) { ptOk = false; }
+  // 部署ごとの休憩（その時台の稼働を除く）
+  const brk = getDeptBreaks_();
+  const cutBreak = function (q, n) {
+    let bh = brk[(info[n] && info[n].dept) || DEPT_NONE];
+    if (bh === undefined) bh = BREAK_DEFAULT; // 未設定の部署は15時台（CC第二は休憩統一）
+    if (bh === undefined || !q.h[bh]) return q;
+    const h = {}, ih = {};
+    Object.keys(q.h).forEach(function (k) { if (Number(k) !== bh) h[k] = q.h[k]; });
+    Object.keys(q.ih).forEach(function (lab) { const o = {}; Object.keys(q.ih[lab]).forEach(function (k) { if (Number(k) !== bh) o[k] = q.ih[lab][k]; }); ih[lab] = o; });
+    return { h: h, t: q.t, ih: ih, it: q.it, tl: q.tl, c: q.c, k: q.k };
+  };
+  const s = { hours: {}, tos: {}, dims: { prod: {}, kind: {}, type: {}, item: {} }, dimTos: { prod: {}, kind: {}, type: {}, item: {} }, people: {}, shift: 0, tosTotal: 0, missing: 0, days: 0, tgt: 0, tosR: 0, pa: 0, pc: 0 };
+  const plus = function (to, from) { Object.keys(from || {}).forEach(function (h) { to[h] = (to[h] || 0) + from[h]; }); };
+  const into = function (dim, c, from) { plus(dim[c] = dim[c] || {}, from); };
+  for (let i = isMonth ? 1 : d; i <= d; i++) {
+    const b = m.days[i];
+    if (!b) continue;
+    if (useEntered && entered.indexOf(i) < 0) continue;
+    usedDays.push(i);
+    const tgd = (tg && tg[i]) || {};
+    Object.keys(tgd).forEach(function (n) {
+      if (!info[n] || !pass(n)) return;
+      s.tosR += tgd[n].t; s.tgt += tgd[n].g;
+      const pr = ppl[n] || (ppl[n] = { name: n, h: 0, c: 0, k: 0, t: 0 });
+      pr.g = (pr.g || 0) + tgd[n].g; pr.ta = (pr.ta || 0) + tgd[n].t;
+    });
+    const ptd = (pt && pt[i]) || {};
+    Object.keys(ptd).forEach(function (n) {
+      if (!info[n] || !pass(n)) return;
+      s.pa += ptd[n].a; s.pc += ptd[n].c;
+      const pr = ppl[n] || (ppl[n] = { name: n, h: 0, c: 0, k: 0, t: 0 });
+      pr.pa = (pr.pa || 0) + ptd[n].a; pr.pc = (pr.pc || 0) + ptd[n].c;
+    });
+    let dayHours = 0;
+    Object.keys(b.people).forEach(function (n) {
+      const q1 = cutBreak(b.people[n], n), ap = allp[n] || (allp[n] = { h: 0, c: 0, k: 0, t: 0, l: 0 });
+      Object.keys(q1.h).forEach(function (hh) { ap.h += q1.h[hh]; if (Number(hh) >= 16) ap.l += q1.h[hh]; });
+      Object.keys(q1.t).forEach(function (hh) { ap.t += q1.t[hh]; });
+      ap.c += q1.c || 0; ap.k += q1.k || 0;
+      if (!pass(n)) return;
+      const q = cutBreak(b.people[n], n);
+      plus(s.hours, q.h);
+      plus(s.tos, q.t);
+      ['prod', 'kind', 'type'].forEach(function (k) { into(s.dims[k], cat(n, k), q.h); into(s.dimTos[k], cat(n, k), q.t); });
+      Object.keys(q.ih).forEach(function (lab) { into(s.dims.item, lab, q.ih[lab]); });
+      Object.keys(q.it).forEach(function (lab) { into(s.dimTos.item, lab, q.it[lab]); });
+      if (q.tl) s.people[n] = 1;
+      const pr = ppl[n] || (ppl[n] = { name: n, h: 0, c: 0, k: 0, t: 0 });
+      Object.keys(q.h).forEach(function (hh) { pr.h += q.h[hh]; });
+      Object.keys(q.t).forEach(function (hh) { pr.t += q.t[hh]; });
+      pr.c += q.c || 0;
+      pr.k += q.k || 0;
+      Object.keys(q.h).forEach(function (h) { dayHours += q.h[h]; });
+    });
+    Object.keys(b.shiftBy).forEach(function (n) {
+      if (!pass(n)) return;
+      s.shift += b.shiftBy[n];
+      if (!(b.people[n] && b.people[n].tl)) s.missing++;
+    });
+    s.tosTotal += (keys.length || scoped || tenF) ? 0 : (m.tosSrc ? (b.tosR2 || 0) : (b.tosTotal || 0));
+    if (dayHours > 0) s.days++;
+  }
+  if (keys.length || scoped || tenF) Object.keys(s.tos).forEach(function (h) { s.tosTotal += s.tos[h]; });
+  return {
+    date: Utilities.formatDate(target, TZ, 'yyyy-MM-dd'), month: month, day: d, year: year, mode: isMonth ? 'month' : 'day',
+    seats: scName ? 1 : scDept ? (getDeptSeats_()[scDept] || 0) : getSeats_(), seatDays: isMonth ? Math.max(1, useEntered ? entered.length : s.days) : 1,
+    entered: useEntered ? entered : [], inputDays: inputDays,
+    ok: m.ok, tosOk: m.tosOk, readAt: m.readAt, ext: ext ? { ok: ext.ok, note: ext.note } : null,
+    hours: s.hours, tos: s.tos, tosTotal: s.tosTotal, dims: s.dims, dimTos: s.dimTos,
+    people: Object.keys(s.people).length, shift: s.shift, missing: s.missing,
+    filterOptions: filterOptions_(ym), filter: filt || {}, filtered: keys.length > 0 || scoped || !!tenF,
+    scope: { dept: scDept, name: scName },
+    breaks: brk,
+    bench: scName ? callBench_(ym, month, info, allp, usedDays, scName) : null,
+    nameList: Object.keys(info).map(function (n) { return { n: n, dept: info[n].dept || DEPT_NONE }; }).sort(function (a, b) { return a.dept === b.dept ? a.n.localeCompare(b.n, 'ja') : a.dept.localeCompare(b.dept, 'ja'); }),
+    persons: Object.keys(ppl).map(function (n) {
+      const p = ppl[n], r = info[n] || {};
+      const e = ext && ext.ok ? (ext.p[normName_(n)] || { c: 0, k: 0 }) : null;
+        return { name: n, dept: r.dept || '未設定', gp: r.gp || '', kind: r.kind || '未設定', prod: r.prod || '未設定', type: r.type || '', item: r.item || '未設定', h: Math.round(p.h * 100) / 100, c: e ? e.c : p.c, k: e ? e.k : p.k, t: p.t, tg: p.g || 0, pts: Math.round(((p.pa || 0) + (p.pc || 0)) * 100) / 100, tenm: tenOf(n).m, tenc: tenOf(n).cat, hire: tenOf(n).hire };
+    }).filter(function (p) { return p.h > 0 || p.c > 0 || p.t > 0 || p.tg > 0 || p.pts > 0; }),
+    tgt: s.tgt, tosR: s.tosR, tgOk: tgOk, ptA: Math.round(s.pa * 100) / 100, ptC: Math.round(s.pc * 100) / 100, ptOk: ptOk, hireOk: !!hd, tenCats: TEN_CATS,
+    future: Utilities.formatDate(target, TZ, 'yyyy-MM-dd') >= Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd')
+  };
+}
+
+// ===== ALLの絞り込み（名簿の区分で人を絞って集計し直す） =====
+const ALL_FILTER_KEYS = ['prod', 'kind', 'type', 'item'];
+
+function filterOptions_(ym) {
+  const info = getRosterInfo_(SpreadsheetApp.getActiveSpreadsheet(), ym);
+  const out = {};
+  ALL_FILTER_KEYS.forEach(function (k) {
+    const seen = {};
+    Object.keys(info).forEach(function (n) { if (info[n][k]) seen[info[n][k]] = 1; });
+    out[k] = Object.keys(seen).sort();
+  });
+  return out;
+}
+
+function monthFor_(ym, month, force, dept, filt) {
+  const keys = ALL_FILTER_KEYS.filter(function (k) { return filt && filt[k]; });
+  const base = getMonthData_(ym, month, force, dept);
+  if (!keys.length) return base;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const info = getRosterInfo_(ss, ym);
+  const pass = function (n) {
+    const p = info[n];
+    if (!p) return false;
+    if (dept && p.dept !== dept) return false;
+    return keys.every(function (k) { return p[k] === filt[k]; });
+  };
+  const cache = CacheService.getScriptCache();
+  const ids = [];
+  for (let d = 1; d <= 31; d++) ids.push(monthId_(ym, '#pp|' + d));
+  let got = cache.getAll(ids);
+  if (Object.keys(got).length < 31) {
+    getMonthData_(ym, month, true, dept);
+    got = cache.getAll(ids);
+    if (Object.keys(got).length < 31) throw new Error('絞り込み用の集計を準備中です。1〜2分後に「更新」を押してください。');
+  }
+  const days = {};
+  for (let d = 1; d <= 31; d++) {
+    const o = got[monthId_(ym, '#pp|' + d)] ? JSON.parse(got[monthId_(ym, '#pp|' + d)]) : {};
+    const b = newBucket_();
+    Object.keys(o).forEach(function (n) { if (pass(n)) mergeBucket_(b, o[n]); });
+    days[d] = b;
+  }
+  return {
+    roster: Object.keys(info).filter(pass).length,
+    updatedAt: base.updatedAt, savedAt: base.savedAt, groupNames: base.groupNames, days: days
+  };
+}
+
+// シートを編集したら、当月と前月のコール集計の保存結果を消す（次に開いたとき最新を読み直す）。
+// 再計算中に待たされないよう、スプレッドシートには触らず保存結果だけ消す
+function onEdit(e) {
+  try {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1;
+    const pm = m === 1 ? 12 : m - 1, py = m === 1 ? y - 1 : y;
+    CacheService.getScriptCache().removeAll(['ch8_' + y + '_' + m, 'ch8_' + py + '_' + pm]);
+  } catch (err) {}
+}
+
+// 部署ごとの席数（管理会計設定シートの M:N 列）
+function getDeptSeats_() {
+  return cached_('ds1', 600, function () {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_COST), o = {};
+    if (!sh || sh.getLastRow() < 2) return o;
+    sh.getRange(2, 13, Math.max(sh.getLastRow() - 1, 1), 2).getValues().forEach(function (r) {
+      const n = String(r[0]).trim(), v = Number(r[1]);
+      if (n && v > 0) o[n] = v;
+    });
+    return o;
+  });
+}
+function getDeptBreaks_() {
+  return cached_('db1', 600, function () {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_COST), o = {};
+    if (!sh || sh.getLastRow() < 2) return o;
+    sh.getRange(2, 13, Math.max(sh.getLastRow() - 1, 1), 3).getValues().forEach(function (r) {
+      const n = String(r[0]).trim(), raw = String(r[2]).trim(), v = Number(raw);
+      if (n && raw !== '' && v >= 0 && v <= 23) o[n] = Math.floor(v);
+    });
+    return o;
+  });
+}
+function saveDeptSeats_(obj) {
+  const seatsNow = getDeptSeats_(), brkNow = getDeptBreaks_(), names = Object.keys(obj || {});
+  const seats = {}, brks = {};
+  const val = function (x) { return String(x === null || x === undefined ? '' : x).trim(); };
+  names.forEach(function (n) {
+    const o = obj[n] !== null && typeof obj[n] === 'object' ? obj[n] : { s: obj[n] };
+    const s = val(o.s), b = val(o.b);
+    if (s !== '') {
+      const v = Number(s);
+      if (!(v >= 1) || v !== Math.floor(v)) throw new Error('「' + n + '」の席数は1以上の整数で入力してください（空欄なら未設定）');
+      seats[n] = v;
+    }
+    if (b !== '') {
+      const v = Number(b);
+      if (!(v >= 0 && v <= 23) || v !== Math.floor(v)) throw new Error('「' + n + '」の休憩は0〜23の時台で入力してください（例：13 → 13時〜14時）');
+      brks[n] = v;
+    } else if (!Object.prototype.hasOwnProperty.call(o, 'b') && brkNow[n] !== undefined) brks[n] = brkNow[n];
+  });
+  Object.keys(seatsNow).forEach(function (n) { if (names.indexOf(n) < 0) seats[n] = seatsNow[n]; });
+  Object.keys(brkNow).forEach(function (n) { if (names.indexOf(n) < 0) brks[n] = brkNow[n]; });
+  if (JSON.stringify(seats) === JSON.stringify(seatsNow) && JSON.stringify(brks) === JSON.stringify(brkNow)) return;
+  const sh = costSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  const last = Math.max(sh.getLastRow(), 2);
+  sh.getRange(1, 13, last, 3).clearContent();
+  const all = {};
+  Object.keys(seats).concat(Object.keys(brks)).forEach(function (n) { all[n] = 1; });
+  const rows = [['部署', '席数', '休憩（時台）']].concat(Object.keys(all).map(function (n) {
+    return [n, seats[n] === undefined ? '' : seats[n], brks[n] === undefined ? '' : brks[n]];
+  }));
+  sh.getRange(1, 13, rows.length, 3).setValues(rows);
+  CacheService.getScriptCache().removeAll(['ds1', 'db1']);
+}
+
+// 個人別：同じ商材（名簿のI列）の人の中でのTOP・平均・順位
+function callBench_(ym, month, info, allp, days, me) {
+  const item = (info[me] && info[me].item) || DEPT_NONE;
+  const pts = ppPoints_(ym, month, days);
+  const group = Object.keys(allp).filter(function (n) {
+    return ((info[n] && info[n].item) || DEPT_NONE) === item && allp[n].h > 0;
+  });
+  const defs = [
+    ['cph', '1時間あたりコール数', function (p) { return p.c / p.h; }, 1],
+    ['kph', '1時間あたり対話数', function (p) { return p.k / p.h; }, 2],
+    ['tp', 'トス生産性', function (p) { return p.t / p.h; }, 2],
+    ['pph', '1時間あたりポイント', function (p, n) { return pts ? (pts[n] || 0) / p.h : null; }, 2],
+    ['lr', '16時以降の稼働比率', function (p) { return (p.l || 0) / p.h * 100; }, 1, '%']
+  ];
+  const mine = allp[me];
+  const metrics = defs.map(function (df) {
+    const vals = group.map(function (n) { return { n: n, v: df[2](allp[n], n), h: allp[n].h }; }).filter(function (x) { return x.v !== null && isFinite(x.v); });
+    vals.sort(function (a, b) { return b.v - a.v; });
+    const top = vals[0] || null;
+    const meV = mine && mine.h > 0 ? df[2](mine, me) : null;
+    const rank = meV === null ? null : vals.filter(function (x) { return x.v > meV + 1e-9; }).length + 1;
+    const avg = vals.length ? vals.reduce(function (s, x) { return s + x.v; }, 0) / vals.length : null;
+    return { k: df[0], label: df[1], d: df[3], u: df[4] || '', me: meV, top: top ? top.v : null, topName: top ? top.n : '', topH: top ? top.h : 0, avg: avg, rank: rank, size: vals.length };
+  });
+  return { item: item, size: group.length, myH: mine ? mine.h : 0, myL: mine ? mine.l : 0, ptsOk: !!pts, metrics: metrics };
+}
+// 1人ごとの獲得ポイント合計（ALL集計の人別×日の保存結果から）。用意できなければ null
+function ppPoints_(ym, month, days) {
+  const cache = CacheService.getScriptCache();
+  const ids = days.map(function (d) { return monthId_(ym, '#pp|' + d); });
+  if (!ids.length) return {};
+  let got = cache.getAll(ids);
+  if (Object.keys(got).length < ids.length) {
+    try { getMonthData_(ym, month, false, ''); } catch (e) {}
+    got = cache.getAll(ids);
+    if (Object.keys(got).length < ids.length) return null;
+  }
+  const out = {};
+  ids.forEach(function (id) {
+    const o = JSON.parse(got[id]);
+    Object.keys(o).forEach(function (n) { out[n] = (out[n] || 0) + ((o[n].points && o[n].points.all) || 0); });
+  });
+  return out;
+}
+
+// ===== パートナー =====
+const SHEET_PT_CONF = 'パートナー設定';
+const SHEET_PT_DATA = 'パートナー実績';
+function ptSheet_(name, header) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(name);
+  if (!sh) { sh = ss.insertSheet(name); sh.getRange(1, 1, 1, header.length).setValues([header]); sh.setFrozenRows(1); }
+  return sh;
+}
+// [{name, dept, cost}]（会社名・担当部署・条件＝1件あたりの支払額）
+// 一覧はスクリプトのプロパティに控えておく（シートが重いときも速く、保存直後の読み違いも起きない）
+function getPartners_() {
+  const props = PropertiesService.getScriptProperties(), saved = props.getProperty('partners');
+  if (saved) return JSON.parse(saved);
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PT_CONF);
+  const list = (!sh || sh.getLastRow() < 2) ? [] : sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 3).getValues()
+    .filter(function (r) { return String(r[0]).trim() !== ''; })
+    .map(function (r) { return { name: String(r[0]).trim(), dept: String(r[1]).trim(), cost: Number(r[2]) || 0 }; });
+  props.setProperty('partners', JSON.stringify(list));
+  return list;
+}
+function getPartnerNames() { return getPartners_().map(function (p) { return p.name; }); }
+function savePartners_(list) {
+  const seen = {}, rows = [];
+  (list || []).forEach(function (p) {
+    const n = String(p.name || '').trim();
+    if (!n) return;
+    if (seen[n]) throw new Error('会社名「' + n + '」が重複しています');
+    seen[n] = 1;
+    const raw = String(p.cost === null || p.cost === undefined ? '' : p.cost).trim(), v = Number(raw);
+    if (raw === '' || !(v >= 0)) throw new Error('「' + n + '」の条件（ET単価）を0以上の数字で入力してください');
+    rows.push([n, String(p.dept || '').trim(), v]);
+  });
+  const now = getPartners_().map(function (p) { return [p.name, p.dept, p.cost]; });
+  if (JSON.stringify(now) === JSON.stringify(rows)) return;
+  const sh = ptSheet_(SHEET_PT_CONF, ['会社名', '担当部署', '条件（ET単価）']);
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 3).clearContent();
+  if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
+  PropertiesService.getScriptProperties().setProperty('partners', JSON.stringify(rows.map(function (r) { return { name: r[0], dept: r[1], cost: r[2] }; })));
+}
+// 仕分け名 → ET単価（同じ仕分けに複数の商材があるときは最初の行）
+function ptGroups_() {
+  const out = [], et = {};
+  getProductSettings().forEach(function (r) {
+    if (!r.group || Object.prototype.hasOwnProperty.call(et, r.group)) return;
+    et[r.group] = Number(r.et) || 0;
+    out.push({ g: r.group, et: et[r.group] });
+  });
+  return { list: out, et: et };
+}
+// { 日: { 会社名: { 仕分け名: 件数 } } }。件数はスクリプトのプロパティ（ptd_yyyy/MM/dd）に保存（シートへの書き込みは重いため）
+function ptMonth_(ym) {
+  const all = PropertiesService.getScriptProperties().getProperties(), pre = 'ptd_' + ym + '/', out = {};
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf(pre) !== 0) return;
+    out[Number(k.slice(pre.length))] = JSON.parse(all[k]);
+  });
+  return out;
+}
+// 入力内容を「パートナー実績」シートに書き出す（自動集計のときにまとめて）
+function ptSyncSheet_() {
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('ptdirty')) return;
+  const all = props.getProperties(), rows = [];
+  Object.keys(all).filter(function (k) { return k.indexOf('ptd_') === 0; }).sort().forEach(function (k) {
+    const p = k.slice(4).split('/'), dt = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])), o = JSON.parse(all[k]);
+    Object.keys(o).forEach(function (co) { Object.keys(o[co]).forEach(function (g) { rows.push([dt, co, g, o[co][g]]); }); });
+  });
+  const sh = ptSheet_(SHEET_PT_DATA, ['日付', '会社名', '仕分け名', '件数', '更新日時']);
+  if (sh.getLastRow() > 1) sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 5).clearContent();
+  if (rows.length) sh.getRange(2, 1, rows.length, 4).setValues(rows);
+  sh.getRange(1, 5).setValue('書き出し ' + Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'));
+  props.deleteProperty('ptdirty');
+}
+
+function ptCalc_(byGroup, et, cost) {
+  let n = 0, sales = 0;
+  Object.keys(byGroup || {}).forEach(function (g) { n += byGroup[g]; sales += byGroup[g] * (et[g] || 0); });
+  const pay = n * cost;
+  return { n: n, sales: sales, pay: pay, gross: sales - pay };
+}
+// 会社ごとの当日・前日まで（締め月は月全体）の件数と金額。dept を渡すとその担当部署の会社だけ
+function ptSummary_(ym, day, dept, closed) {
+  try {
+    const m = ptMonth_(ym), et = ptGroups_().et;
+    const lastDay = Number(ym.split('/')[1]) ? new Date(Number(ym.split('/')[0]), Number(ym.split('/')[1]), 0).getDate() : 31;
+    return getPartners_().filter(function (p) { return !dept || p.dept === dept; }).map(function (p) {
+      const t = {}, cu = {};
+      const add = function (to, from) { Object.keys(from || {}).forEach(function (g) { to[g] = (to[g] || 0) + from[g]; }); };
+      if (!closed) add(t, (m[day] || {})[p.name]);
+      const to = closed ? lastDay : day - 1;
+      for (let d = 1; d <= to; d++) add(cu, (m[d] || {})[p.name]);
+      return { name: p.name, dept: p.dept, cost: p.cost, today: ptCalc_(t, et, p.cost), cum: ptCalc_(cu, et, p.cost), tg: t, cg: cu };
+    });
+  } catch (e) { return []; }
+}
+// パートナー画面（当月・対象日）。company が空ならALL
+function getPartnerView(dateStr, company) {
+  const target = dateStr ? new Date(dateStr + 'T00:00:00+09:00') : new Date();
+  const ym = Utilities.formatDate(target, TZ, 'yyyy/MM');
+  const year = Number(Utilities.formatDate(target, TZ, 'yyyy')), month = Number(Utilities.formatDate(target, TZ, 'M')), day = Number(Utilities.formatDate(target, TZ, 'd'));
+  const groups = ptGroups_();
+  const all = ptSummary_(ym, day, '', false);
+  const res = {
+    date: Utilities.formatDate(target, TZ, 'yyyy-MM-dd'), month: month, day: day, year: year,
+    dim: new Date(year, month, 0).getDate(), groups: groups.list, partners: all, company: company || ''
+  };
+  if (company) {
+    const p = all.filter(function (x) { return x.name === company; })[0];
+    if (!p) throw new Error('パートナー「' + company + '」が設定画面にありません');
+    res.one = p;
+    const m = ptMonth_(ym), entries = [];
+    Object.keys(m).map(Number).sort(function (a, b) { return b - a; }).forEach(function (d) {
+      const o = (m[d] || {})[company] || {};
+      Object.keys(o).forEach(function (g) { if (o[g]) entries.push({ d: d, date: year + '-' + ('0' + month).slice(-2) + '-' + ('0' + d).slice(-2), g: g, n: o[g] }); });
+    });
+    res.entries = entries;
+  }
+  return res;
+}
+// 件数の登録（同じ日・会社・仕分けは上書き。0なら削除）
+function savePartnerEntry(dateStr, company, group, count) {
+  const n = Number(count);
+  if (!(n >= 0) || n !== Math.floor(n)) throw new Error('件数は0以上の整数で入力してください');
+  if (!getPartners_().some(function (p) { return p.name === company; })) throw new Error('パートナー「' + company + '」が設定画面にありません');
+  if (!Object.prototype.hasOwnProperty.call(ptGroups_().et, group)) throw new Error('仕分け名「' + group + '」が商材設定にありません');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))) throw new Error('日付を選んでください');
+  const target = new Date(dateStr + 'T00:00:00+09:00');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const key = 'ptd_' + Utilities.formatDate(target, TZ, 'yyyy/MM/dd');
+    const o = JSON.parse(props.getProperty(key) || '{}');
+    const co = o[company] || (o[company] = {});
+    if (n > 0) co[group] = n; else delete co[group];
+    if (!Object.keys(co).length) delete o[company];
+    if (Object.keys(o).length) props.setProperty(key, JSON.stringify(o)); else props.deleteProperty(key);
+    props.setProperty('ptdirty', '1');
+  } finally { lock.releaseLock(); }
+  return getPartnerView(dateStr, company);
+}
+
+
+// 入力済みの件数を修正（日付・仕分け・件数を変えられる）。viewDate は表示中の対象日
+function editPartnerEntry(company, oldDate, oldGroup, newDate, newGroup, count, viewDate) {
+  const n = Number(count);
+  if (!(n >= 0) || n !== Math.floor(n)) throw new Error('件数は0以上の整数で入力してください');
+  if (!getPartners_().some(function (p) { return p.name === company; })) throw new Error('パートナー「' + company + '」が設定画面にありません');
+  if (!Object.prototype.hasOwnProperty.call(ptGroups_().et, newGroup)) throw new Error('仕分け名「' + newGroup + '」が商材設定にありません');
+  [oldDate, newDate].forEach(function (d) { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d))) throw new Error('日付を選んでください'); });
+  const keyOf = function (d) { return 'ptd_' + d.replace(/-/g, '/'); };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const get = function (k) { return JSON.parse(props.getProperty(k) || '{}'); };
+    const put = function (k, o) { if (Object.keys(o).length) props.setProperty(k, JSON.stringify(o)); else props.deleteProperty(k); };
+    const ok = keyOf(oldDate), nk = keyOf(newDate), moved = ok !== nk || oldGroup !== newGroup;
+    const oo = get(ok);
+    if (!oo[company] || !oo[company][oldGroup]) throw new Error('修正前の入力が見つかりません（他の人が変えた可能性があります）。画面を更新してください');
+    if (moved) {
+      const no = ok === nk ? oo : get(nk);
+      if (no[company] && no[company][newGroup]) throw new Error(newDate + ' の「' + newGroup + '」にはすでに' + no[company][newGroup] + '件あります。そちらの行を修正してください');
+      delete oo[company][oldGroup];
+      if (!Object.keys(oo[company]).length) delete oo[company];
+      if (ok === nk) { if (n > 0) (oo[company] = oo[company] || {})[newGroup] = n; put(ok, oo); }
+      else { put(ok, oo); if (n > 0) { (no[company] = no[company] || {})[newGroup] = n; put(nk, no); } }
+    } else {
+      if (n > 0) oo[company][oldGroup] = n; else { delete oo[company][oldGroup]; if (!Object.keys(oo[company]).length) delete oo[company]; }
+      put(ok, oo);
+    }
+    props.setProperty('ptdirty', '1');
+  } finally { lock.releaseLock(); }
+  return getPartnerView(viewDate || newDate, company);
+}
+
+// ===== 入社データ（CC第一と同じ集計。CCALLの入社データから読む）=====
+const HIRE_DEPT = 'CC第二';
+// ===== 入社月数（入社予算シートの「CSV＿インポート のコピー」：姓C・名D・入社年月日H・ビジネスネームN/O） =====
+const HIRE_SHEET_ID = '1w9a-5vI_9xcz6Ahw81oT3g2Ne8zQfTdQEbze6_-uLwo', HIRE_GID = 1324236148;
+const TEN_CATS = ['1か月目', '2か月目', '3か月目', '6か月未満', '6か月以上', '入社日不明'];
+function hireDates_() {
+  try {
+    return cached_('hd2', 21600, function () {
+      const ss = SpreadsheetApp.openById(HIRE_SHEET_ID);
+      const sh = ss.getSheets().filter(function (s) { return s.getSheetId() === HIRE_GID; })[0];
+      if (!sh || sh.getLastRow() < 4) return {};
+      const v = sh.getRange(4, 3, sh.getLastRow() - 3, 13).getValues(), out = {};
+      const norm = function (s) { return String(s || '').replace(/[\s　]/g, ''); };
+      v.forEach(function (r) {
+        let h = r[5];
+        if (h instanceof Date) h = Utilities.formatDate(h, TZ, 'yyyy/MM/dd');
+        else { const m = /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(String(h)); h = m ? m[1] + '/' + ('0' + m[2]).slice(-2) + '/' + ('0' + m[3]).slice(-2) : ''; }
+        if (!h) return;
+        [norm(r[0]) + norm(r[1]), norm(r[11]) + norm(r[12])].forEach(function (k) { if (k && !out[k]) out[k] = h; });
+      });
+      return out;
+    });
+  } catch (e) { console.log(e); return null; }
+}
+// 対象月から見て入社何か月目か（入社月＝1か月目）と区分
+function tenureOf_(hire, year, month) {
+  if (!hire) return { m: null, cat: '入社日不明', hire: '' };
+  const p = hire.split('/'), m = (year * 12 + month) - (Number(p[0]) * 12 + Number(p[1])) + 1;
+  const cat = m <= 1 ? '1か月目' : m === 2 ? '2か月目' : m === 3 ? '3か月目' : m < 6 ? '6か月未満' : '6か月以上';
+  return { m: Math.max(m, 1), cat: cat, hire: hire };
+}
+// ===== 入社データ（入社月数・入社後の稼働時間とポイント・残存率・入社率）=====
+function hcache_(key, seconds, read) {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  const value = read();
+  try { cache.put(key, JSON.stringify(value), seconds); } catch (e) { console.log(e); }
+  return value;
+}
+// 入社予算シート：名前・部署・雇用形態・入社日・在籍状況・退職日だけ読む（他の個人情報は使わない）
+function hirePeople_(force) {
+  if (force) CacheService.getScriptCache().remove('hp1');
+  return hcache_('hp1', 21600, function () {
+    const sh = SpreadsheetApp.openById(HIRE_SHEET_ID).getSheets().filter(function (s) { return s.getSheetId() === HIRE_GID; })[0];
+    if (!sh || sh.getLastRow() < 4) return [];
+    const n = sh.getLastRow() - 3;
+    const a = sh.getRange(4, 3, n, 13).getValues(); // C〜O
+    const b = sh.getRange(4, 52, n, 2).getValues(); // AZ 在籍状況, BA 退職年月日
+    const ds = function (v) {
+      if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy/MM/dd');
+      const m = /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(String(v));
+      return m ? m[1] + '/' + ('0' + m[2]).slice(-2) + '/' + ('0' + m[3]).slice(-2) : '';
+    };
+    const norm = function (s) { return String(s || '').replace(/[\s　]/g, ''); };
+    const out = [], lim = Utilities.formatDate(new Date(new Date().getFullYear() - 3, 0, 1), TZ, 'yyyy/MM/dd');
+    a.forEach(function (r, i) {
+      const hire = ds(r[5]);
+      if (!hire) return;
+      // キャッシュに収めるため、この事業部の人・在職中・直近3年の入社だけ残す
+      if (String(r[2] || '').indexOf(HIRE_DEPT) < 0 && String(b[i][0]) !== '在職中' && hire < lim) return;
+      out.push({ k: norm(r[0]) + norm(r[1]), bk: norm(r[11]) + norm(r[12]), cc: String(r[2] || '').indexOf(HIRE_DEPT) >= 0 ? 1 : 0, emp: String(r[4] || ''), hire: hire, st: String(b[i][0] || ''), quit: ds(b[i][1]) });
+    });
+    return out;
+  });
+}
+// 月次集計（管理会計と同じ個人別の稼働時間・合計P、当月は前日まで）。シフトのシートが無い月は none
+function hireMonth_(ym, curYm) {
+  return hcache_('hm3_' + ym, ym < curYm ? 21600 : 600, function () {
+    let raw;
+    try { raw = getMonthData_(ym, Number(ym.slice(5)), false, MG_ID); } catch (e) { return { none: 1 }; }
+    const h = {}, p = {};
+    (raw.rows || []).forEach(function (r) {
+      const n = String(r.name || '').trim();
+      if (!n) return;
+      if (r.hours) h[n] = (h[n] || 0) + r.hours;
+      if (r.points) p[n] = (p[n] || 0) + r.points;
+    });
+    return { h: h, p: p };
+  });
+}
+function getHireData(force) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const now = new Date();
+  const Y = Number(Utilities.formatDate(now, TZ, 'yyyy')), M = Number(Utilities.formatDate(now, TZ, 'M'));
+  const today = Number(Utilities.formatDate(now, TZ, 'd'));
+  const curYm = Utilities.formatDate(now, TZ, 'yyyy/MM'), todayStr = Utilities.formatDate(now, TZ, 'yyyy/MM/dd');
+  const ymOf = function (y, m) { const d = new Date(y, m - 1, 1); return Utilities.formatDate(d, TZ, 'yyyy/MM'); };
+  const norm = function (s) { return String(s || '').replace(/[\s　]/g, ''); };
+  // 名簿（全月）
+  const rs = ss.getSheetByName(SHEET_ROSTER);
+  const rv = rs.getRange(2, 1, rs.getLastRow() - 1, 8).getValues();
+  const roster = {};
+  rv.forEach(function (r) {
+    if (!r[0] || !r[1]) return;
+    const n = String(r[1]).trim();
+    if (typeof CALL_EXCLUDE !== 'undefined' && CALL_EXCLUDE.indexOf(n) >= 0) return;
+    (roster[n] = roster[n] || {})[monthKey_(r[0])] = { dept: String(r[6] || DEPT_NONE), kind: String(r[3] || '') };
+  });
+  // 稼働時間・ポイント（シフトがある月だけ、最大12か月）
+  const months = [];
+  for (let k = 11; k >= 0; k--) {
+    const ym = ymOf(Y, M - k);
+    const hm = hireMonth_(ym, curYm);
+    if (hm.none) continue;
+    months.push({ ym: ym, h: hm.h, p: hm.p });
+  }
+  // 入社予算シート
+  const hp = hirePeople_(force) || [];
+  const byKey = {};
+  hp.forEach(function (p) { [p.k, p.bk].forEach(function (k) { if (k && (!byKey[k] || byKey[k].hire < p.hire)) byKey[k] = p; }); });
+  // 個人別
+  const persons = [];
+  Object.keys(roster).forEach(function (n) {
+    const rm = roster[n], yms = Object.keys(rm).sort();
+    const inCur = !!rm[curYm];
+    const inData = months.some(function (m) { return rm[m.ym]; });
+    if (!inCur && !inData) return;
+    const last = rm[yms[yms.length - 1]];
+    const h = byKey[norm(n)];
+    let hire = h ? h.hire : '', hireKnown = !!h;
+    if (!hire && inCur) hire = curYm + '/01'; // 入社シートにいない人＝今月入社
+    const t = hire ? tenureOf_(hire, Y, M) : { m: null, cat: '入社日不明' };
+    let th = 0, tp = 0, ch = 0, cp = 0;
+    months.forEach(function (m) {
+      if (hire && m.ym < hire.slice(0, 7)) return;
+      th += m.h[n] || 0; tp += m.p[n] || 0;
+      if (m.ym === curYm) { ch += m.h[n] || 0; cp += m.p[n] || 0; }
+    });
+    persons.push({
+      name: n, dept: last.dept, kind: last.kind, hire: hireKnown ? hire : '', tenm: t.m, tenc: t.cat,
+      st: inCur ? '在籍' : (h && h.st === '在職中' ? '在籍（今月名簿外）' : '退職・異動'),
+      h: Math.round(th * 100) / 100, p: Math.round(tp * 100) / 100, ch: Math.round(ch * 100) / 100, cp: Math.round(cp * 100) / 100, cur: inCur
+    });
+  });
+  // 残存率・入社率（この事業部の人＝入社シートの部署が該当、または名簿にいる人）
+  const rk = {}; Object.keys(roster).forEach(function (n) { rk[norm(n)] = 1; });
+  const pop = hp.filter(function (p) { return p.cc || rk[p.k] || rk[p.bk]; });
+  const qd = function (p) { return p.quit && p.quit <= todayStr ? p.quit : (p.st === '退職済' ? (p.quit || p.hire) : ''); };
+  const addMemo = {};
+  const addM = function (ds, k) { const key = ds + '|' + k; if (addMemo[key]) return addMemo[key]; const p = ds.split('/'); const d = new Date(Number(p[0]), Number(p[1]) - 1 + k, Number(p[2])); return (addMemo[key] = d.getFullYear() + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + ('0' + d.getDate()).slice(-2)); }; // Utilities.formatDate は1回1ms以上かかるため使わない
+  const trend = [];
+  for (let k = 23; k >= 0; k--) {
+    const ym = ymOf(Y, M - k), first = ym + '/01';
+    const endD = k === 0 ? todayStr : Utilities.formatDate(new Date(Number(ym.slice(0, 4)), Number(ym.slice(5)), 0), TZ, 'yyyy/MM/dd');
+    let start = 0, end = 0, hires = 0, quits = 0;
+    pop.forEach(function (p) {
+      const q = qd(p);
+      if (p.hire < first && (!q || q >= first)) start++;
+      if (p.hire <= endD && (!q || q > endD)) end++;
+      if (p.hire.slice(0, 7) === ym) hires++;
+      if (q && q.slice(0, 7) === ym) quits++;
+    });
+    trend.push({ ym: ym, start: start, end: end, hires: hires, quits: quits });
+  }
+  const OFFS = []; for (let o = 1; o <= 24; o++) OFFS.push(o);
+  const cohorts = [];
+  for (let k = 23; k >= 0; k--) {
+    const ym = ymOf(Y, M - k);
+    const ps = pop.filter(function (p) { return p.hire.slice(0, 7) === ym; });
+    const row = { ym: ym, n: ps.length, now: ps.filter(function (p) { return !qd(p); }).length, r: {} };
+    OFFS.forEach(function (o) {
+      const el = ps.filter(function (p) { return addM(p.hire, o) <= todayStr; });
+      if (!el.length) return;
+      row.r[o] = { n: el.length, s: el.filter(function (p) { const q = qd(p); return !q || q > addM(p.hire, o); }).length };
+    });
+    cohorts.push(row);
+  }
+  const curve = [];
+  const from36 = ymOf(Y, M - 36) + '/01';
+  for (let o = 1; o <= 24; o++) {
+    const el = pop.filter(function (p) { return p.hire >= from36 && addM(p.hire, o) <= todayStr; });
+    curve.push({ m: o, n: el.length, s: el.filter(function (p) { const q = qd(p); return !q || q > addM(p.hire, o); }).length });
+  }
+  return {
+    today: todayStr, curYm: curYm, months: months.map(function (m) { return m.ym; }),
+    persons: persons, trend: trend, cohorts: cohorts, curve: curve, offs: OFFS, tenCats: TEN_CATS, hireOk: hp.length > 0, pop: pop.length
+  };
+}
+
+
+
+// ===== 四半期・半期（今期は2026年9月〜2027年8月。Q1=9〜11月、Q2=12〜2月、Q3=3〜5月、Q4=6〜8月、上半期=Q1+Q2、下半期=Q3+Q4） =====
+// 画面からは getClosedMonth('P:年度:Q1') のように呼ぶ。終わった月は月全体、今月は前日までを足す
+function getClosedMonth(ymDash, force, dept, filt) {
+  if (String(ymDash).indexOf('P:') !== 0) return closedMonthBase_(ymDash, force, dept, filt);
+  return periodData_(ymDash, force, dept, filt);
+}
+const PERIOD_DEFS = { Q1: ['第1四半期', 0, 3], Q2: ['第2四半期', 3, 3], Q3: ['第3四半期', 6, 3], Q4: ['第4四半期', 9, 3], H1: ['上半期', 0, 6], H2: ['下半期', 6, 6] };
+function periodData_(key, force, dept, filt) {
+  const m = /^P:([0-9]{4}):(Q[1-4]|H[12])$/.exec(key);
+  if (!m) throw new Error('期間の指定が正しくありません：' + key);
+  const fy = Number(m[1]), def = PERIOD_DEFS[m[2]], list = [];
+  for (let i = 0; i < def[2]; i++) { const dt = new Date(fy, 8 + def[1] + i, 1); list.push(dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2)); }
+  const t = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'), curYm = t.slice(0, 7);
+  const months = list.filter(function (ym) { return ym <= curYm; });
+  if (!months.length) throw new Error(def[0] + 'はまだ始まっていません');
+  const ms = months.map(function (ym) { return ym === curYm ? getAllMetrics(t, force, dept, filt) : closedMonthBase_(ym, force, dept, filt); });
+  const prices = getPriceMap_(), tot = newBucket_(), trend = [], labels = [], fo = {}, gn = [];
+  ms.forEach(function (d, i) {
+    mergeBucket_(tot, d.cum);
+    const tr = months[i] === curYm ? d.trend.slice(0, Math.max(d.day - 1, 0)) : d.trend;
+    tr.forEach(function (x) { labels.push(d.month + '/' + x.d); trend.push({ d: trend.length + 1, count: x.count, points: x.points, hours: x.hours, gross: x.gross }); });
+    Object.keys(d.filterOptions || {}).forEach(function (k) { (d.filterOptions[k] || []).forEach(function (v) { fo[k] = fo[k] || []; if (fo[k].indexOf(v) < 0) fo[k].push(v); }); });
+    (d.groupNames || []).forEach(function (g) { if (gn.indexOf(g) < 0) gn.push(g); });
+  });
+  Object.keys(fo).forEach(function (k) { fo[k].sort(); });
+  const last = ms[ms.length - 1], lastCur = months[months.length - 1] === curYm;
+  const start = Number(months[0].slice(5)) + '/1', end = lastCur ? (last.day > 1 ? last.month + '/' + (last.day - 1) : start) : last.month + '/' + last.day;
+  return {
+    filterOptions: fo, filter: filt || {}, closed: true, date: last.date, month: last.month, day: last.day,
+    roster: last.roster, updatedAt: last.updatedAt, ageMin: 0, groupNames: gn,
+    trend: trend.length ? trend : [{ d: 1, count: { all: 0, shot: 0, stock: 0 }, points: 0, hours: 0, gross: 0 }],
+    today: finish_(newBucket_(), prices), cum: finish_(tot, prices), partners: [],
+    planMonth: ms.reduce(function (a, d) { return a + (d.planMonth || 0); }, 0),
+    period: { key: key, label: fy + '年度 ' + def[0], range: start + '〜' + end + (lastCur ? '（前日まで）' : ''), labels: labels.length ? labels : [start] }
+  };
+}
+
+// ===== ランキングの四半期・半期（各月のランキングシートを人ごとに足す。比率は足した時間で計算し直す） =====
+function getRanking(ymDash, force) {
+  const d = String(ymDash).indexOf('P:') !== 0 ? rankingBase_(ymDash, force) : rankPeriod_(ymDash, force);
+  return normRank_(addRankItem_(d, ymDash));
+}
+const RANK_P_SUM = { '月初予定時間': 2, '実稼働時間': 2, 'その他稼働時間': 2, 'ズレ稼働時間': 2, '獲得件数': 0, '合計P': 2, '目標P': 2, '着地見込': 2, 'トス件数': 0, '対象トス件数': 0, 'ショット時間': 2, 'ショットP': 2, 'ストック時間': 2, 'ストックP': 2 };
+const RANK_P_TEXT = ['現在グレード', '名前', '部署', 'GPユニット', '生産・非生産', '役職'];
+function rankNum_(s) { const v = parseFloat(String(s).replace(/,/g, '')); return isNaN(v) ? 0 : v; }
+function rankFmt_(v, d) { return Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function rankPeriod_(key, force) {
+  const m = /^P:([0-9]{4}):(Q[1-4]|H[12])$/.exec(key);
+  if (!m) throw new Error('期間の指定が正しくありません：' + key);
+  const defs = { Q1: ['第1四半期', 0, 3], Q2: ['第2四半期', 3, 3], Q3: ['第3四半期', 6, 3], Q4: ['第4四半期', 9, 3], H1: ['上半期', 0, 6], H2: ['下半期', 6, 6] };
+  const fy = Number(m[1]), def = defs[m[2]], cur = Utilities.formatDate(new Date(), TZ, 'yyyy-MM'), list = [];
+  for (let i = 0; i < def[2]; i++) { const dt = new Date(fy, 8 + def[1] + i, 1); const ym = dt.getFullYear() + '-' + ('0' + (dt.getMonth() + 1)).slice(-2); if (ym <= cur) list.push([dt.getFullYear(), dt.getMonth() + 1]); }
+  const ds = list.map(function (x) { return readRanking_(x[0], x[1], force); }).filter(function (d) { return d; });
+  if (!ds.length) throw new Error(def[0] + 'のランキングシートがありません');
+  const H = ds[ds.length - 1].head, people = {}, order = [], kinds = {};
+  ds.forEach(function (d) {
+    Object.keys(d.kinds || {}).forEach(function (n) { kinds[n] = d.kinds[n]; });
+    const iN = d.head.indexOf('名前');
+    d.rows.forEach(function (r) {
+      const n = r[iN];
+      if (!n) return;
+      let p = people[n];
+      if (!p) { p = people[n] = { sum: {}, text: {} }; order.push(n); }
+      d.head.forEach(function (h, i) {
+        if (RANK_P_SUM[h] !== undefined) p.sum[h] = (p.sum[h] || 0) + rankNum_(r[i]);
+        else if (RANK_P_TEXT.indexOf(h) >= 0 && r[i] !== '') p.text[h] = r[i]; // 最後の月の値
+      });
+    });
+  });
+  const build = function (sum, text) {
+    const hrs = (sum['実稼働時間'] || 0) + (sum['その他稼働時間'] || 0);
+    const ratio = { '獲得生産性': '獲得件数', 'PT平均値': '合計P', 'トス生産性': 'トス件数', '対象トス生産性': '対象トス件数' };
+    return H.map(function (h) {
+      if (RANK_P_SUM[h] !== undefined) return rankFmt_(sum[h] || 0, RANK_P_SUM[h]);
+      if (ratio[h]) return hrs ? rankFmt_((sum[ratio[h]] || 0) / hrs, 2) : '0.00';
+      return text[h] !== undefined ? String(text[h]) : '';
+    });
+  };
+  const all = {};
+  const rows = order.map(function (n) { const p = people[n]; Object.keys(p.sum).forEach(function (k) { all[k] = (all[k] || 0) + p.sum[k]; }); return build(p.sum, p.text); });
+  const iP = H.indexOf('合計P'), iR = H.indexOf('順位');
+  rows.sort(function (a, b) { return rankNum_(b[iP]) - rankNum_(a[iP]); });
+  if (iR >= 0) rows.forEach(function (r, i) { r[iR] = String(i + 1); });
+  const total = build(all, { '名前': '全体' });
+  if (iR >= 0) total[iR] = '-';
+  return {
+    month: list[list.length - 1][1], lastYm: list[list.length - 1][0] + '/' + ('0' + list[list.length - 1][1]).slice(-2), head: H, kinds: kinds, rows: rows, total: total,
+    readAt: ds.map(function (d) { return d.readAt; }).sort()[0], prevMonth: null, prev: null,
+    period: { key: key, label: fy + '年度 ' + def[0], months: list.map(function (x) { return x[1] + '月'; }).join('・') }
+  };
+}
+
+// ===== 終わった月の作り直し（毎日1回。シートを後から直しても、過去の月・四半期・半期に反映されるように） =====
+// 時間トリガーの autoRefresh から呼ぶ。0時台（または朝7時以降の最初の回）に、今期の終わった月を1か月ずつ作り直す。
+// 1回の実行は4分まで。終わらなければ次の回に続きから。
+/**
+ * ダッシュボードのautoRefreshは元の更新処理だけに戻す。
+ * フォーム受信・30分データ保存は、別プロジェクトのcall_statistics.gsが担当する。
+ * 同じフォームを複数のGASから読み取って削除しない。
+ */
+function autoRefresh() {
+  autoRefreshBase_();
+  try { rebuildClosedMonths_(); } catch (e) { console.log(e); }
+  aclRefresh_();
+}
+function rebuildClosedMonths_() {
+  const now = new Date(), hour = Number(Utilities.formatDate(now, TZ, 'H'));
+  if (hour >= 1 && hour < 7) return;
+  const today = Utilities.formatDate(now, TZ, 'yyyy-MM-dd'), props = PropertiesService.getScriptProperties();
+  if (props.getProperty('closedDoneOn') === today) return;
+  const curYm = Utilities.formatDate(now, TZ, 'yyyy/MM');
+  const y = Number(curYm.slice(0, 4)), m = Number(curYm.slice(5));
+  const fy = m >= 9 ? y : y - 1, list = [];
+  for (let k = 0; k < 12; k++) {
+    const d = new Date(fy, 8 + k, 1), ym = Utilities.formatDate(d, TZ, 'yyyy/MM');
+    if (ym >= curYm) break;
+    list.push([ym, d.getMonth() + 1]);
+  }
+  if (!list.length) { const d = new Date(y, m - 2, 1); list.push([Utilities.formatDate(d, TZ, 'yyyy/MM'), d.getMonth() + 1]); } // 9月は前期の8月
+  let i = Number(props.getProperty('closedNext') || 0);
+  if (i >= list.length) i = 0;
+  const t0 = Date.now();
+  while (i < list.length && Date.now() - t0 < 240000) {
+    try { getMonthData_(list[i][0], list[i][1], true, ''); } catch (e) { console.log(list[i][0], e); }
+    i++;
+  }
+  if (i >= list.length) { props.setProperty('closedDoneOn', today); props.deleteProperty('closedNext'); }
+  else props.setProperty('closedNext', String(i));
+}
+
+// ランキングに名簿の商材（I列）の列を足す（役職の右）。期間ランキングは最後の月の名簿
+function addRankItem_(d, ymDash) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const put = function (x, ym) {
+      if (!x || !x.head || x.head.indexOf('商材') >= 0) return;
+      const info = getRosterInfo_(ss, ym), iN = x.head.indexOf('名前');
+      let at = x.head.indexOf('役職') + 1;
+      if (at <= 0) at = x.head.length;
+      x.head.splice(at, 0, '商材');
+      x.rows.forEach(function (r) { r.splice(at, 0, (info[r[iN]] && info[r[iN]].item) || ''); });
+      if (x.total) x.total.splice(at, 0, '');
+    };
+    const isP = String(ymDash).indexOf('P:') === 0;
+    const ym = isP ? d.lastYm : String(ymDash).replace('-', '/');
+    put(d, ym);
+    if (d.prev && d.prevMonth) {
+      const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5));
+      put(d.prev, (m === 1 ? y - 1 : y) + '/' + ('0' + d.prevMonth).slice(-2));
+    }
+  } catch (e) { console.log(e); }
+  return d;
+}
+
+// ===== 管理会計ランキングの四半期・半期と商材（ランキングと同じ形） =====
+function getMgmtRanking(ymDash, force) {
+  const d = String(ymDash).indexOf('P:') !== 0 ? mgmtBase_(ymDash, force) : mgmtPeriod_(ymDash, force);
+  return normMg_(addMgItem_(d, ymDash));
+}
+function mgItemize_(rows, ym) {
+  const info = getRosterInfo_(SpreadsheetApp.getActiveSpreadsheet(), ym);
+  (rows || []).forEach(function (r) { if (r.item === undefined) r.item = (info[r.name] && info[r.name].item) || ''; });
+}
+function addMgItem_(d, ymDash) {
+  try {
+    if (String(ymDash).indexOf('P:') === 0) return d;
+    const ym = String(ymDash).replace('-', '/');
+    mgItemize_(d.rows, ym);
+    if (d.prev && d.prevMonth) {
+      const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5));
+      mgItemize_(d.prev.rows, (m === 1 ? y - 1 : y) + '/' + ('0' + d.prevMonth).slice(-2));
+    }
+  } catch (e) { console.log(e); }
+  return d;
+}
+function mgmtPeriod_(key, force) {
+  const mm = /^P:([0-9]{4}):(Q[1-4]|H[12])$/.exec(key);
+  if (!mm) throw new Error('期間の指定が正しくありません：' + key);
+  const defs = { Q1: ['第1四半期', 0, 3], Q2: ['第2四半期', 3, 3], Q3: ['第3四半期', 6, 3], Q4: ['第4四半期', 9, 3], H1: ['上半期', 0, 6], H2: ['下半期', 6, 6] };
+  const fy = Number(mm[1]), def = defs[mm[2]], cur = Utilities.formatDate(new Date(), TZ, 'yyyy/MM'), list = [];
+  for (let i = 0; i < def[2]; i++) { const dt = new Date(fy, 8 + def[1] + i, 1), ym = Utilities.formatDate(dt, TZ, 'yyyy/MM'); if (ym <= cur) list.push([dt.getFullYear(), dt.getMonth() + 1, ym]); }
+  if (!list.length) throw new Error(def[0] + 'はまだ始まっていません');
+  const SUM = ['hours', 'late', 'count', 'points', 'gross', 'labor', 'sga', 'cost', 'profit'], TXT = ['dept', 'gp', 'prod', 'kind', 'role', 'grade', 'item', 'wage'];
+  const people = {}, order = [], ms = [];
+  list.forEach(function (x) {
+    const d = mgmtMonth_(x[0], x[1], force);
+    mgItemize_(d.rows, x[2]);
+    ms.push(d);
+    d.rows.forEach(function (r) {
+      let p = people[r.name];
+      if (!p) { p = people[r.name] = { name: r.name }; SUM.forEach(function (k) { p[k] = 0; }); order.push(r.name); }
+      SUM.forEach(function (k) { p[k] += Number(r[k]) || 0; });
+      TXT.forEach(function (k) { if (r[k] !== '' && r[k] !== undefined && r[k] !== null) p[k] = r[k]; }); // 最後の月の値
+    });
+  });
+  const rows = order.map(function (n) { const p = people[n]; TXT.forEach(function (k) { if (p[k] === undefined) p[k] = ''; }); p.gph = p.hours ? p.gross / p.hours : 0; return p; });
+  const last = ms[ms.length - 1];
+  return {
+    rows: rows, upto: last.upto, readAt: ms.map(function (d) { return d.readAt; }).sort()[0],
+    lateOk: ms.every(function (d) { return d.lateOk; }), firstMonth: ms.some(function (d) { return d.firstMonth; }),
+    noGrade: ms.reduce(function (a, d) { return a + (d.noGrade || 0); }, 0),
+    missingSga: ms.some(function (d) { return d.missingSga; }), missingEmp: ms.some(function (d) { return d.missingEmp; }),
+    unpriced: Math.max.apply(null, ms.map(function (d) { return d.unpriced || 0; })),
+    month: list[list.length - 1][1], prevMonth: null, prev: null,
+    period: { key: key, label: fy + '年度 ' + def[0] }
+  };
+}
+
+// ===== 役職・区分の表示をそろえる（クルー・アルバイト・パート→アルバイト、専任係長→係長） =====
+function normRole_(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  if (s === 'クルー' || s.indexOf('アルバイト') === 0) return 'アルバイト';
+  if (s === '専任係長') return '係長';
+  return s;
+}
+function normKind_(v) {
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  return (s === 'クルー' || s.indexOf('アルバイト') === 0) ? 'アルバイト' : s;
+}
+function normRank_(d) {
+  try {
+    const fix = function (x) {
+      if (!x || !x.head) return;
+      const i = x.head.indexOf('役職');
+      if (i >= 0) x.rows.forEach(function (r) { r[i] = normRole_(r[i]); });
+      Object.keys(x.kinds || {}).forEach(function (n) { x.kinds[n] = normKind_(x.kinds[n]); });
+    };
+    fix(d); fix(d.prev);
+  } catch (e) { console.log(e); }
+  return d;
+}
+function normMg_(d) {
+  try {
+    const fix = function (rows) { (rows || []).forEach(function (r) { r.role = normRole_(r.role); r.kind = normKind_(r.kind); }); };
+    fix(d.rows); if (d.prev) fix(d.prev.rows);
+  } catch (e) { console.log(e); }
+  return d;
+}
+
+// ===== クローズOK率（実績反映2：O=前確者、AA=前確月、U=前確コール結果（前確OK）、V=後確コール結果（後確OK）、C=獲得者＝トス者） =====
+// 前確者がこの事業部の名簿にいる行を、前確者×トス者ごとに数える。[前確者, トス者, 件数, 前確OK, 後確OK, 前確OKかつ後確OK]
+function closeMonths_(list, force) {
+  const cache = CacheService.getScriptCache(), cur = Utilities.formatDate(new Date(), TZ, 'yyyy/MM'), out = {}, need = [];
+  list.forEach(function (ym) {
+    const hit = force ? null : cache.get('cl1_' + ym);
+    if (hit) out[ym] = JSON.parse(hit); else need.push(ym);
+  });
+  if (!need.length) return out;
+  const ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ss.getSheetByName('実績反映2');
+  const norm = function (s) { return String(s || '').replace(/[\s　]/g, ''); };
+  const readAt = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm');
+  const agg = {}, mine = {};
+  need.forEach(function (ym) {
+    agg[ym] = {};
+    const m = {}, info = getRosterInfo_(ss, ym);
+    Object.keys(info).forEach(function (k) { m[norm(k)] = k; });
+    mine[ym] = m;
+  });
+  if (sh && sh.getLastRow() > 1) {
+    const n = sh.getLastRow() - 1;
+    const C = sh.getRange(2, 3, n, 1).getValues(), O = sh.getRange(2, 15, n, 1).getValues();
+    const UV = sh.getRange(2, 21, n, 2).getValues(), AA = sh.getRange(2, 27, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      const a = AA[i][0];
+      const ym = a instanceof Date ? Utilities.formatDate(a, TZ, 'yyyy/MM') : String(a).replace(/-/g, '/').slice(0, 7);
+      const g = agg[ym];
+      if (!g) continue;
+      const closer = mine[ym][norm(O[i][0])];
+      if (!closer) continue;
+      const t = mine[ym][norm(C[i][0])] || String(C[i][0] || '').trim();
+      const k = closer + '\t' + t;
+      const x = g[k] || (g[k] = [closer, t, 0, 0, 0, 0]);
+      const u = String(UV[i][0]).trim() === '前確OK', v = String(UV[i][1]).trim() === '後確OK';
+      x[2]++; if (u) x[3]++; if (v) x[4]++; if (u && v) x[5]++;
+    }
+  }
+  need.forEach(function (ym) {
+    const d = { pairs: Object.keys(agg[ym]).map(function (k) { return agg[ym][k]; }), readAt: readAt };
+    try { cache.put('cl1_' + ym, JSON.stringify(d), ym < cur ? 21600 : 600); } catch (e) { console.log(e); }
+    out[ym] = d;
+  });
+  return out;
+}
+function getCloseRate(ymDash, force) {
+  const cur = Utilities.formatDate(new Date(), TZ, 'yyyy/MM');
+  let list = [], label = '';
+  const mm = /^P:([0-9]{4}):(Q[1-4]|H[12])$/.exec(String(ymDash));
+  if (mm) {
+    const defs = { Q1: ['第1四半期', 0, 3], Q2: ['第2四半期', 3, 3], Q3: ['第3四半期', 6, 3], Q4: ['第4四半期', 9, 3], H1: ['上半期', 0, 6], H2: ['下半期', 6, 6] };
+    const def = defs[mm[2]];
+    for (let i = 0; i < def[2]; i++) { const ym = Utilities.formatDate(new Date(Number(mm[1]), 8 + def[1] + i, 1), TZ, 'yyyy/MM'); if (ym <= cur) list.push(ym); }
+    label = mm[1] + '年度 ' + def[0];
+    if (!list.length) throw new Error(def[0] + 'はまだ始まっていません');
+  } else {
+    list = [String(ymDash).replace('-', '/')];
+    label = Number(list[0].slice(5)) + '月';
+  }
+  const ms = closeMonths_(list, force);
+  const sum = {};
+  list.forEach(function (ym) {
+    (ms[ym].pairs || []).forEach(function (p) {
+      const k = p[0] + '\t' + p[1], x = sum[k] || (sum[k] = [p[0], p[1], 0, 0, 0, 0]);
+      for (let j = 2; j < 6; j++) x[j] += p[j];
+    });
+  });
+  const ss = SpreadsheetApp.getActiveSpreadsheet(), people = {};
+  list.forEach(function (ym) {
+    const info = getRosterInfo_(ss, ym);
+    Object.keys(info).forEach(function (n) {
+      const p = info[n];
+      people[n] = { dept: p.dept || '', kind: normKind_(p.kind), role: normRole_(p.role), gp: p.gp || '', prod: p.prod || '', item: p.item || '' };
+    });
+  });
+  return {
+    label: label, months: list, pairs: Object.keys(sum).map(function (k) { return sum[k]; }), people: people,
+    readAt: list.map(function (ym) { return ms[ym].readAt; }).sort()[0]
+  };
+}
+
+// ===== アクセス制限：CC第一のスプレッドシート「アクセス許可」シートのA列にあるメールアドレスだけ開ける（オーナーは常に可） =====
+// 開くたびに重いシートを読まないよう、リストはこのスクリプトに保存して使う（定期実行で読み直す。リストにない人が来たときも読み直す）
+const ACL_SHEET_ID = '1n12HA1V0lgZ5cxbnK9C77bmmFOPqDfLUb0yybEW9xhg';
+const ACL_SHEET = 'アクセス許可';
+function aclRead_() {
+  const sh = SpreadsheetApp.openById(ACL_SHEET_ID).getSheetByName(ACL_SHEET);
+  const list = (sh && sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues() : [])
+    .map(function (r) { return String(r[0] || '').trim().toLowerCase(); })
+    .filter(function (x) { return x.indexOf('@') > 0; });
+  const s = JSON.stringify(list);
+  PropertiesService.getScriptProperties().setProperty('aclList', s);
+  CacheService.getScriptCache().put('acl1', s, 600);
+  return list;
+}
+function aclList_() {
+  const c = CacheService.getScriptCache(), hit = c.get('acl1');
+  if (hit) return JSON.parse(hit);
+  const p = PropertiesService.getScriptProperties().getProperty('aclList');
+  if (p) { c.put('acl1', p, 600); return JSON.parse(p); }
+  return aclRead_();
+}
+// 定期実行から呼ぶ：許可リストを読み直す
+function aclRefresh_() { try { aclRead_(); } catch (e) { console.log('許可リストを読めませんでした: ' + e); } }
+function aclUser_() {
+  const me = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!me) return { ok: false, me: '' };
+  if (me === String(Session.getEffectiveUser().getEmail() || '').toLowerCase()) return { ok: true, me: me };
+  if (aclList_().indexOf(me) >= 0) return { ok: true, me: me };
+  // 追加されたばかりの人のために、シートを読み直す（同じ人は1分に1回まで）
+  const c = CacheService.getScriptCache(), key = 'aclTry_' + me;
+  if (!c.get(key)) {
+    c.put(key, '1', 60);
+    try { if (aclRead_().indexOf(me) >= 0) return { ok: true, me: me }; } catch (e) { console.log(e); }
+  }
+  return { ok: false, me: me };
+}
+function aclDenied_(who) {
+  const esc = function (s) { return String(s).replace(/[&<>"]/g, function (x) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[x]; }); };
+  return HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;max-width:560px;margin:80px auto;padding:0 16px;text-align:center;color:#333">' +
+    '<h2>このページを見る権限がありません</h2>' +
+    '<p>ログイン中のアカウント：<b>' + esc(who.me || '（確認できません）') + '</b></p>' +
+    '<p>見る必要がある場合は、管理者にこのアカウントの追加を依頼してください。<br>別のアカウントでログインしている場合は、会社のアカウントに切り替えて開き直してください。</p></div>'
+  ).setTitle('アクセス権がありません').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function aclShow() { console.log(JSON.stringify(aclRead_())); }
+
+// コール集計の対象トス・ポイント（CC第一と同じ）
+function tgtMonth_(ym) {
+  return cached_('tg1_' + ym, 600, function () {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('実績反映2'), out = {};
+    if (!sh || sh.getLastRow() < 2) return out;
+    const n = sh.getLastRow() - 1;
+    const C = sh.getRange(2, 3, n, 1).getValues(), Q = sh.getRange(2, 17, n, 1).getValues();
+    const U = sh.getRange(2, 21, n, 1).getValues(), Z = sh.getRange(2, 26, n, 1).getValues();
+    const ymOf = function (v) { return v instanceof Date ? Utilities.formatDate(v, TZ, 'yyyy/MM') : String(v).replace(/-/g, '/').slice(0, 7); };
+    for (let i = 0; i < n; i++) {
+      const name = String(C[i][0]).trim();
+      if (!name || ymOf(Z[i][0]) !== ym) continue;
+      const q = Q[i][0];
+      let d = 0;
+      if (q instanceof Date) d = Number(Utilities.formatDate(q, TZ, 'd'));
+      else { const m = /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(String(q)); if (m && (m[1] + '/' + ('0' + m[2]).slice(-2)) === ym) d = Number(m[3]); }
+      if (!d) continue;
+      const o = (out[d] = out[d] || {}), p = (o[name] = o[name] || { t: 0, g: 0 });
+      p.t++;
+      if (String(U[i][0]).trim() !== '前確留守') p.g++;
+    }
+    return out;
+  });
+}
+function ptsMonth_(ym) {
+  return cached_('pm2_' + ym, 600, function () {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_RESULT), out = {};
+    if (!sh || sh.getLastRow() < 2) return out;
+    const n = sh.getLastRow() - 1;
+    const col = function (k) { return sh.getRange(2, k, n, 1).getValues(); };
+    const C = col(3), O = col(15), S = col(19), W = col(24), X = col(25), AB = col(28);
+    const ymOf = function (v) { return v instanceof Date ? Utilities.formatDate(v, TZ, 'yyyy/MM') : String(v).replace(/-/g, '/').slice(0, 7); };
+    const num = function (v) { const x = Number(String(v).replace(/,/g, '')); return isFinite(x) ? x : 0; };
+    for (let i = 0; i < n; i++) {
+      if (ymOf(AB[i][0]) !== ym) continue;
+      const s = S[i][0];
+      let d = 0;
+      if (s instanceof Date) d = Number(Utilities.formatDate(s, TZ, 'd'));
+      else { const m = /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/.exec(String(s)); if (m) d = Number(m[3]); }
+      if (!d) continue;
+      const o = (out[d] = out[d] || {});
+      const a = String(C[i][0]).trim(), cl = String(O[i][0]).trim(), w = num(W[i][0]), x = num(X[i][0]);
+      if (a && w) { (o[a] = o[a] || { a: 0, c: 0 }).a += w; }
+      if (cl && x) { (o[cl] = o[cl] || { a: 0, c: 0 }).c += x; }
+    }
+    return out;
+  });
+}

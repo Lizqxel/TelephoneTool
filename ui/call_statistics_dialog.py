@@ -1,6 +1,6 @@
-"""毎時の集計・シート送信と、日別・時間帯別の通話集計表。
+"""30分ごとの集計・シート送信と、日別・時間帯別の通話集計表。
 
-起動時・毎時00分・手動で、架電履歴と見込検索を裏で検索して集計し、スプレッドシートへ送る。
+起動時・毎時00分/30分・手動で、架電履歴と見込検索を裏で検索して集計し、スプレッドシートへ送る。
 """
 
 from datetime import datetime
@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDateEdi
                                QHeaderView, QLabel, QPushButton, QTableWidget,
                                QTableWidgetItem, QVBoxLayout)
 
-from services.call_statistics import JST, StatisticsStore, format_duration, next_hour
-from services.call_statistics_sheet import SheetSender, sheet_hours
+from services.call_statistics import JST, StatisticsStore, format_duration, next_half_hour
+from services.call_statistics_sheet import SheetSender, sheet_hours, sheet_intervals
 from services.cti_statistics_service import CtiStatisticsCollector
 
 
@@ -57,14 +57,17 @@ class StatisticsWorker(QThread):
                 return "シートの送信先が未設定のため送信していません。"
             day = snapshot.acquired_at.astimezone(JST).date().isoformat()
             hours = sheet_hours(self.store.display_hours(snapshot.staff_id, day))
-            if not hours:
+            intervals = self.store.intervals(snapshot.staff_id, day)
+            if not hours and not intervals:
                 return ""
-            result = sender.send(day, snapshot.staff_id, snapshot.staff_name, hours)
+            # 履歴を取れなかった回は、前回保存した30分データの取得日時も維持する。
+            details = {"intervals": sheet_intervals(intervals), "observed_at": intervals[-1]["observed_at"]} if intervals else {}
+            result = sender.send(day, snapshot.staff_id, snapshot.staff_name, hours, **details)
             skipped = result.get("skipped") or []
             if skipped:
                 return "シート送信済み（シートに枠が無い時間帯：" + "・".join(f"{h}時" for h in skipped) + "）"
             # フォームは書き込み結果を返さないので、反映までの時間と確かめ方も添える
-            return "シート送信済み（反映は1〜2分後。全員の集計で確認できます）"
+            return "シート送信済み（GASの次回自動更新後に反映。全員の集計で確認できます）"
         except Exception as exc:
             return f"シート送信失敗：{exc}"
 
@@ -106,7 +109,7 @@ class CallStatisticsController(QObject):
     def schedule(self):
         self.timer.stop()
         now = datetime.now(JST)
-        self.next_run = next_hour(now)
+        self.next_run = next_half_hour(now)
         if self.automatic and not self.closing:
             # 境界の2秒後に読み、前の時間帯の差分を確定させる（保存側で00分に切り揃える）。
             self.timer.start(max(1, int((self.next_run - now).total_seconds() * 1000)) + 2000)
@@ -119,7 +122,7 @@ class CallStatisticsController(QObject):
         self.automatic = enabled
         self.store.set_preference("automatic", "1" if enabled else "0")
         self.schedule()
-        self.set_status("1時間ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。「今すぐ集計」から手動で取得できます。")
+        self.set_status("30分ごとの自動集計を有効にしました。" if enabled else "自動集計を停止しました。「今すぐ集計」から手動で取得できます。")
 
     def set_status(self, message):
         self.status = message
@@ -199,9 +202,9 @@ class CallStatisticsDialog(QDialog):
         self.day.setDisplayFormat("yyyy/MM/dd")
         self.staff = QComboBox()
         self.collect_button = QPushButton("今すぐ集計")
-        self.collect_button.setToolTip("毎時00分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")
-        self.automatic = QCheckBox("1時間ごとに自動集計")
-        self.automatic.setToolTip("起動時と毎時00分に集計してシートへ送ります。")
+        self.collect_button.setToolTip("毎時00分・30分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")
+        self.automatic = QCheckBox("30分ごとに自動集計")
+        self.automatic.setToolTip("起動時と毎時00分・30分に集計してシートへ送ります。")
         self.automatic.setChecked(controller.automatic)
         top.addWidget(QLabel("日付"))
         top.addWidget(self.day)

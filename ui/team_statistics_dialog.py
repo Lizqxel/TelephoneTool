@@ -9,12 +9,13 @@ from PySide6.QtCore import QDate, QObject, QTimer, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (QApplication, QComboBox, QDateEdit, QDialog, QFrame, QGridLayout, QHBoxLayout,
                                QHeaderView, QLabel, QPushButton, QStackedWidget, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QTabWidget, QVBoxLayout, QWidget)
 
 from services.team_statistics import LABELS, GoogleLogin, LoginCancelled, fetch_day, normalize
+from ui.team_statistics_analysis import TeamStatisticsAnalysis
 
 REFRESH_MS = 5 * 60 * 1000
-AFTER_SEND_MS = 90 * 1000  # シートへの反映（1分ごと）を待ってから読み直す
+AFTER_SEND_MS = 90 * 1000  # 送信後に一度確認する。未反映ならGASの次回autoRefresh後に更新する。
 ALL_UNITS = "全員"
 WEEKDAYS = "月火水木金土日"
 HEADER_ROWS = 2
@@ -102,7 +103,7 @@ class TeamStatisticsDialog(QDialog):
         self.unit.addItem(ALL_UNITS)
         self.refresh_button = QPushButton("更新")
         self.send_button = QPushButton("自分の集計を送信")
-        self.send_button.setToolTip("毎時00分の自動送信を待たずに、CTIから自分の当日分を集計してシートへ送ります。")
+        self.send_button.setToolTip("毎時00分・30分の自動送信を待たずに、CTIから自分の当日分を集計してシートへ送ります。")
         self.account = QLabel()
         self.logout_button = QPushButton("ログアウト")
         top.addWidget(QLabel("日付"))
@@ -207,12 +208,16 @@ class TeamStatisticsDialog(QDialog):
             pane.scroll_target = self.body
         body_h.rangeChanged.connect(lambda *_: self._align_edges())
         body_v.rangeChanged.connect(lambda *_: self._align_edges())
-        table_layout.addWidget(grid_widget, 1)
+        self.views = QTabWidget()
+        self.analysis = TeamStatisticsAnalysis()
+        self.views.addTab(self.analysis, "30分集計・ランキング")
+        self.views.addTab(grid_widget, "従来の1時間集計表")
+        table_layout.addWidget(self.views, 1)
         self.pages.addWidget(self.login_page)
         self.pages.addWidget(self.table_page)
         layout.addWidget(self.pages, 1)
         note = QLabel("スプレッドシート「コール集計打ち込み用」の内容を表示しています（読み取りのみ）。"
-                      "各自のTelephoneToolが毎時送った値が、1〜2分ほどで反映されます。")
+                      "各自のTelephoneToolが30分ごとに送った値は、GASの次回自動更新後に反映されます。")
         note.setWordWrap(True)
         layout.addWidget(note)
 
@@ -377,7 +382,7 @@ class TeamStatisticsDialog(QDialog):
         message = controller.status
         if "シート送信済み" in message:
             self.after_send_timer.start()
-            message += "　→ 1〜2分後に自動で読み直して、反映を確かめます。"
+            message += "　→ 自動で読み直します。反映待ちの場合はGASの次回更新後に「更新」を押してください。"
         self.status.setText(message)
 
     def _fetch_after_send(self):
@@ -389,6 +394,8 @@ class TeamStatisticsDialog(QDialog):
         controller = self.controller
         if controller is None or not self.own_name or data.day != QDate.currentDate().toString("yyyy-MM-dd"):
             return ""
+        if data.legacy_error:
+            return "従来表を取得できないため、1時間表への反映確認は保留です。取得できた30分実績は表示しています。"
         staff = controller.store.staff()
         if not staff:
             return ""
@@ -401,6 +408,15 @@ class TeamStatisticsDialog(QDialog):
         if missing:
             hours = "・".join(f"{h}時台" for h in missing)
             return f"⚠ 送ったコール数がシートに反映されていません（{hours}）。設定の「共有トークン」が正しいか確認してください。"
+        if hasattr(controller.store, "intervals"):
+            saved = controller.store.intervals(staff[0]["staff_id"], data.day)
+            if saved:
+                detail = next((person for person in data.interval_members if person.staff_id == staff[0]["staff_id"]), None)
+                for row in saved:
+                    actual = detail.intervals.get(row["start_minute"], (None,) * 4) if detail else (None,) * 4
+                    expected = tuple(row[key] for key in ("total_calls", "dialogues", "toss", "dialogue_seconds"))
+                    if any(value is not None and value != actual[index] for index, value in enumerate(expected)):
+                        return "⚠ 1時間表は反映済みですが、30分データは未反映です。少し待って更新し、続く場合はGASの実行ログを確認してください。"
         return "シートへの反映を確認しました。"
 
     # ----- 読み取り -----
@@ -448,7 +464,7 @@ class TeamStatisticsDialog(QDialog):
             self.status.setText(f"シートを読み取れませんでした：{error}" + ("（前回の表示を残しています）" if self.data else ""))
             return
         self.data = data
-        units = sorted({m.unit for m in data.members if m.unit})
+        units = sorted({m.unit for m in [*data.members, *data.interval_members] if m.unit})
         current = self.unit.currentText()
         self.unit.blockSignals(True)
         self.unit.clear()
@@ -457,6 +473,8 @@ class TeamStatisticsDialog(QDialog):
         self.unit.blockSignals(False)
         from datetime import datetime
         message = f"{datetime.now():%H:%M} 更新：{data.sheet}　{len(data.members)}人"
+        if data.legacy_error:
+            message = f"{datetime.now():%H:%M} 30分集計を取得：{len(data.interval_members)}人　従来表は取得できませんでした：{data.legacy_error}"
         if self.verify_after_send:
             self.verify_after_send = False
             result = self.verify_own(data)
@@ -493,10 +511,11 @@ class TeamStatisticsDialog(QDialog):
         self.left.verticalScrollBar().setValue(v.value())
 
     def render(self):
+        self.analysis.set_data(self.data, self.unit.currentText())
         for pane in (self.corner, self.top, self.left, self.body):
             pane.clear()
             pane.clearSpans()
-        if not self.data:
+        if not self.data or self.data.legacy_error:
             self.banner.hide()
             for pane in (self.corner, self.top, self.left, self.body):
                 pane.setRowCount(0)
