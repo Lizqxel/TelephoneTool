@@ -206,13 +206,81 @@ def test_fetches_hidden_sheet_and_keeps_unsent_roster_members_unknown():
     assert data.interval_error == ""
     assert data.interval_members[0].intervals[600] == (3, 2, 1, 90.5)
     assert len(data.interval_members) == 2 and not data.interval_members[1].intervals
-    assert "通話集計データ_2026-11" in session.ranges[-1]
+    assert "通話集計データ_2026-11" in session.ranges[0]
 
 
 def test_missing_hidden_sheet_keeps_legacy_table_with_explicit_message():
     data = team.fetch_day(DetailSession([], 400), "2026-11-13")
     assert len(data.members) == 2 and "30分集計を取得できません" in data.interval_error
     assert all(not member.intervals for member in data.interval_members)
+
+
+@pytest.mark.parametrize("fail_at", ["A1:D", "rows"])
+def test_legacy_timeout_does_not_discard_successful_half_hour_data(fail_at):
+    from requests.exceptions import ReadTimeout
+
+    class SlowLegacy(DetailSession):
+        def get(self, url, params, timeout):
+            assert timeout == (10, 120)
+            name, cells = params["ranges"].rsplit("!", 1)
+            if "通話集計データ_" not in name and ((fail_at == "A1:D" and cells == "A1:D") or (fail_at == "rows" and cells != "A1:D")):
+                raise ReadTimeout()
+            return super().get(url, params, timeout)
+
+    session = SlowLegacy([team.INTERVAL_HEADERS, hidden_row()])
+    data = team.fetch_day(session, "2026-11-13")
+    assert data.interval_members[0].intervals[600] == (3, 2, 1, 90.5)
+    assert data.members == [] and "120秒" in data.legacy_error
+    assert data.interval_error == ""
+    assert "通話集計データ_" in session.ranges[0]
+
+
+def test_hidden_timeout_keeps_the_legacy_table():
+    from requests.exceptions import ReadTimeout
+
+    class SlowHidden(DetailSession):
+        def get(self, url, params, timeout):
+            if "通話集計データ_" in params["ranges"]:
+                raise ReadTimeout()
+            return super().get(url, params, timeout)
+
+    data = team.fetch_day(SlowHidden([]), "2026-11-13")
+    assert len(data.members) == 2 and data.legacy_error == ""
+    assert "120秒" in data.interval_error
+
+
+def test_timeout_of_both_sources_is_reported_without_zero_results():
+    from requests.exceptions import ReadTimeout
+
+    class Offline:
+        def get(self, *args, **kwargs):
+            raise ReadTimeout()
+
+    with pytest.raises(RuntimeError, match="応答待ち.*120秒"):
+        team.fetch_day(Offline(), "2026-11-13")
+
+
+def test_dialog_can_show_copy_and_recover_half_hour_data_when_legacy_table_failed():
+    from test_team_statistics import FakeLogin
+    from PySide6.QtCore import QDate
+    from ui.team_statistics_dialog import TeamStatisticsDialog
+    app = QApplication.instance() or QApplication([])
+    person = member("bb1", "岩田悠河", {600: (3, 2, 1, 90)})
+    data = team.TeamDay("sheet", "2026-11-13", [], [], [person], legacy_error="応答待ちが時間切れ")
+    dialog = TeamStatisticsDialog(login=FakeLogin())
+    dialog.day.setDate(QDate(2026, 11, 13))
+    dialog._fetched(data, "", data.day)
+    assert dialog.analysis.table.rowCount() == 1
+    assert "30分集計を取得" in dialog.status.text()
+    assert "受信済みの人のみ" in dialog.analysis.message.text()
+    assert dialog.row_count() == 0
+    dialog.analysis.copy_button.click()
+    assert "00:01:30" in QApplication.clipboard().text()
+    normal = team.fetch_day(DetailSession([team.INTERVAL_HEADERS, hidden_row()]), data.day)
+    dialog._fetched(normal, "", data.day)
+    assert dialog.row_count() > 0
+    assert "受信済みの人のみ" not in dialog.analysis.message.text()
+    dialog.close()
 
 
 @pytest.mark.parametrize("change", [{"minute": 601}, {"calls": -1}, {"calls": 0.5}, {"seconds": float("nan")},

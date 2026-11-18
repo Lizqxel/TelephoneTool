@@ -234,6 +234,7 @@ class TeamDay:
     members: list
     interval_members: list = field(default_factory=list)
     interval_error: str = ""
+    legacy_error: str = ""
 
 
 @dataclass
@@ -386,49 +387,52 @@ def _sheet_read_error(response, sheet, range_name):
 
 
 def fetch_day(session, day):
-    """day は 'YYYY-MM-DD'。シートの該当日の表を2回の読み取りで取得する。"""
+    """30分データを先に取得し、従来表だけの失敗で取得済みの実績を失わない。"""
     year, month, date = (int(x) for x in day.split("-"))
     sheet = f"{SHEET_NAME_PREFIX}{month}月"
 
-    def read(range_name):
+    def read(range_name, sheet_name=sheet, render="FORMATTED_VALUE"):
+        started = time.monotonic()
         try:
             response = session.get(f"{API}/{SPREADSHEET_ID}/values:batchGet",
-                                   params={"ranges": f"'{sheet}'!{range_name}", "valueRenderOption": "FORMATTED_VALUE"},
-                                   timeout=60)
+                                   params={"ranges": f"'{sheet_name}'!{range_name}", "valueRenderOption": render},
+                                   timeout=(10, 120))
         except Exception as exc:
             logging.getLogger(__name__).warning(
-                "全員の通話集計: シート接続失敗 sheet=%s range=%s error_type=%s",
-                sheet, range_name, exc.__class__.__name__,
+                "全員の通話集計: シート接続失敗 sheet=%s range=%s error_type=%s elapsed=%.1fs",
+                sheet_name, range_name, exc.__class__.__name__, time.monotonic() - started,
             )
-            raise RuntimeError(f"シートへ接続できませんでした（{exc.__class__.__name__}）") from exc
+            if exc.__class__.__name__ == "ReadTimeout":
+                raise RuntimeError(f"シート「{sheet_name}」の応答待ちが時間切れになりました（上限120秒）。少し待って更新してください。") from exc
+            raise RuntimeError(f"シート「{sheet_name}」へ接続できませんでした（{exc.__class__.__name__}）") from exc
         if response.status_code != 200:
-            raise _sheet_read_error(response, sheet, range_name)
+            raise _sheet_read_error(response, sheet_name, range_name)
         ranges = response.json().get("valueRanges") or [{}]
         return ranges[0].get("values", [])
 
-    left = read("A1:D")
-    if not left or f"{year}年{month}月" not in normalize("".join(left[0])):
-        raise RuntimeError(f"シート「{sheet}」が{year}年{month}月の表ではありません。")
-    block, end = find_block(left, month, date)
-    # block・end は0始まりの行番号。見出し（時台）の行から、次の日付の見出しの直前までを行ごと読む。
-    hours, members = parse_block(read(f"{block + 2}:{max(end, block + 3)}"))
-    data = TeamDay(sheet=sheet, day=day, hours=hours, members=members)
+    data = TeamDay(sheet=sheet, day=day, hours=[], members=[])
     hidden = f"通話集計データ_{year:04}-{month:02}"
     try:
-        response = session.get(f"{API}/{SPREADSHEET_ID}/values:batchGet",
-                               params={"ranges": f"'{hidden}'!A1:K", "valueRenderOption": "UNFORMATTED_VALUE"}, timeout=60)
-        if response.status_code != 200:
-            raise _sheet_read_error(response, hidden, "A1:K")
-        values = (response.json().get("valueRanges") or [{}])[0].get("values", [])
-        data.interval_members = parse_intervals(values, day)
+        data.interval_members = parse_intervals(read("A1:K", hidden, "UNFORMATTED_VALUE"), day)
         if not data.interval_members:
             data.interval_error = "この日の30分集計はまだありません。各PCから集計を送信してください。"
     except Exception as exc:
         logging.getLogger(__name__).warning("全員の通話集計: 30分データ取得失敗 error_type=%s", type(exc).__name__)
         data.interval_error = f"30分集計を取得できませんでした：{exc}"
+    try:
+        left = read("A1:D")
+        if not left or f"{year}年{month}月" not in normalize("".join(left[0])):
+            raise RuntimeError(f"シート「{sheet}」が{year}年{month}月の表ではありません。")
+        block, end = find_block(left, month, date)
+        data.hours, data.members = parse_block(read(f"{block + 2}:{max(end, block + 3)}"))
+    except Exception as exc:
+        if not data.interval_members:
+            raise
+        logging.getLogger(__name__).warning("全員の通話集計: 従来表のみ取得失敗 day=%s error_type=%s", day, type(exc).__name__)
+        data.legacy_error = str(exc) or type(exc).__name__
     # 未送信の人も対象人数に含め、取得済みの人だけで全員分と誤認させない。
     sent_names = {normalize(member.name) for member in data.interval_members}
-    for member in members:
+    for member in data.members:
         if normalize(member.name) not in sent_names:
             data.interval_members.append(IntervalMember("", member.name, member.department, member.unit))
     return data

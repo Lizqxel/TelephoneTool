@@ -394,6 +394,8 @@ class TeamStatisticsDialog(QDialog):
         controller = self.controller
         if controller is None or not self.own_name or data.day != QDate.currentDate().toString("yyyy-MM-dd"):
             return ""
+        if data.legacy_error:
+            return "従来表を取得できないため、1時間表への反映確認は保留です。取得できた30分実績は表示しています。"
         staff = controller.store.staff()
         if not staff:
             return ""
@@ -471,6 +473,8 @@ class TeamStatisticsDialog(QDialog):
         self.unit.blockSignals(False)
         from datetime import datetime
         message = f"{datetime.now():%H:%M} 更新：{data.sheet}　{len(data.members)}人"
+        if data.legacy_error:
+            message = f"{datetime.now():%H:%M} 30分集計を取得：{len(data.interval_members)}人　従来表は取得できませんでした：{data.legacy_error}"
         if self.verify_after_send:
             self.verify_after_send = False
             result = self.verify_own(data)
@@ -511,7 +515,7 @@ class TeamStatisticsDialog(QDialog):
         for pane in (self.corner, self.top, self.left, self.body):
             pane.clear()
             pane.clearSpans()
-        if not self.data:
+        if not self.data or self.data.legacy_error:
             self.banner.hide()
             for pane in (self.corner, self.top, self.left, self.body):
                 pane.setRowCount(0)

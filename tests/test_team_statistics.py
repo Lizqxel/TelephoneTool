@@ -74,7 +74,7 @@ def test_reads_the_requested_day_without_mixing_up_11_1_and_11_10():
     assert [m.name for m in data.members] == ["岩田悠河", "三浦甲斐"]
     assert data.members[0].total == (20, 6, 1) and data.members[0].hours[11] == (8, 2, 0)
     assert data.members[1].unit == "杉崎伸明" and data.members[1].hours[11] == (None, None, None)
-    assert session.ranges[0] == "'コール集計打ち込み用_11月'!A1:D"
+    assert "'コール集計打ち込み用_11月'!A1:D" in session.ranges
     assert data_for(session, "2026-11-01").members[0].name == "岩田祐樹"
     assert data_for(session, "2026-11-10").members[0].total == (9, 9, 9)
 

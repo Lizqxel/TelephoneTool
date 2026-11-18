@@ -138,6 +138,8 @@ class TeamStatisticsAnalysis(QWidget):
         self.average.setText(summaries(self.report)[1])
         stamps = [member.observed_at for member in self.members if member.observed_at]
         message = self.data.interval_error if self.data else "シートを読み込むと表示します。"
+        if self.data and self.data.legacy_error:
+            message += "　従来表・名簿は未取得のため、対象人数は30分データ受信済みの人のみです。"
         if stamps and self.data:
             message += f"　対象日 {self.data.day}　取得日時 {min(stamps)} ～ {max(stamps)}"
         self.message.setText(message)
