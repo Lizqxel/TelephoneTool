@@ -295,7 +295,7 @@ def test_past_day_button_collects_that_day_and_shows_history_only_totals(tmp_pat
     dialog.close()
 
 
-def test_date_is_locked_while_collecting_and_cancel_stops_without_saving(tmp_path, monkeypatch):
+def test_date_can_change_while_collecting_and_cancel_stops_without_saving(tmp_path, monkeypatch):
     import threading
     from ui import call_statistics_dialog as module
     app = QApplication.instance() or QApplication([])
@@ -322,14 +322,17 @@ def test_date_is_locked_while_collecting_and_cancel_stops_without_saving(tmp_pat
     controller = CallStatisticsController(store=Store(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=lambda: None)
     controller.set_automatic(False)
     dialog = CallStatisticsDialog(controller)
-    dialog.day.setDate(QDate.currentDate().addDays(-1))
+    collected = QDate.currentDate().addDays(-1)
+    dialog.day.setDate(collected)
     assert not dialog.cancel_button.isVisible() or not dialog.cancel_button.isVisibleTo(dialog)
     dialog.collect_button.click()
     worker = controller.worker
     try:
         assert entered.wait(2)
-        # 集計中は日付を変えられない（終わったときに集計した日の表を見せる）。中止ボタンが出る。
-        assert not dialog.day.isEnabled()
+        # 集計中も日付は変えられる（自動集計の間に過去日を見られなくなっていたため）。中止ボタンが出る。
+        assert dialog.day.isEnabled()
+        dialog.day.setDate(collected.addDays(-3))
+        assert dialog.day.date() == collected.addDays(-3)
         assert dialog.cancel_button.isVisibleTo(dialog) and dialog.cancel_button.isEnabled()
         controller.collect()  # 自動集計などが重なった
         assert controller.pending
@@ -341,7 +344,9 @@ def test_date_is_locked_while_collecting_and_cancel_stops_without_saving(tmp_pat
             app.processEvents()
         assert controller.status == "集計を中止しました。保存済みの値は維持しています。"
         assert controller.worker is None and saved == []
-        assert dialog.day.isEnabled() and not dialog.cancel_button.isVisibleTo(dialog)
+        assert not dialog.cancel_button.isVisibleTo(dialog)
+        # この画面で始めた集計が終わったら、集計した日の表に戻る。
+        assert dialog.day.date() == collected
     finally:
         if controller.worker is not None:  # 失敗したときだけ残っている（終わった集計は画面側で破棄済み）
             controller.worker.cancelled.set()
@@ -373,3 +378,44 @@ def test_cancel_after_collection_is_not_saved_or_sent(tmp_path, monkeypatch):
     worker.completed.connect(lambda *args: completed.append(args))
     worker.run()
     assert completed == [(None, module.CANCELLED, "")] and saved == []
+
+
+def test_automatic_collection_does_not_block_or_move_the_date(tmp_path, monkeypatch):
+    import threading
+    from ui import call_statistics_dialog as module
+    from test_call_statistics import counter_snapshot
+    app = QApplication.instance() or QApplication([])
+    release, entered = threading.Event(), threading.Event()
+
+    class Collector:
+        def __init__(self, cancel):
+            pass
+
+        def collect(self, unit, day=None):
+            entered.set()
+            release.wait(3)
+            return counter_snapshot("2026-11-13T12:00:02", 1)
+
+        def clear_history(self):
+            pass
+
+    monkeypatch.setattr(module, "CtiStatisticsCollector", Collector)
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=lambda: None)
+    controller.set_automatic(False)
+    dialog = CallStatisticsDialog(controller)
+    controller.collect()  # 毎時00分・30分の自動集計（画面のボタンではない）
+    worker = controller.worker
+    try:
+        assert entered.wait(2)
+        past = QDate.currentDate().addDays(-2)
+        dialog.day.setDate(past)  # 自動集計の間も過去日を選べる
+        assert dialog.day.isEnabled() and dialog.collect_button.text() == "集計中…"
+        release.set()
+        assert worker.wait(3000)
+        for _ in range(20):
+            app.processEvents()
+        assert dialog.day.date() == past  # 自動集計では、見ている日付を動かさない
+        assert dialog.collect_button.text() == "この日を集計" and dialog.collect_button.isEnabled()
+    finally:
+        release.set()
+        dialog.close()

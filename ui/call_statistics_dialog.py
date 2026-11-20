@@ -226,6 +226,7 @@ class CallStatisticsDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self._scroll_key = None
+        self._collected_day = None  # この画面のボタンで集計した日。終わったらその日の表へ戻す
         self.setWindowTitle("時間帯別 通話集計")
         self.resize(980, 690)
         layout = QVBoxLayout(self)
@@ -301,7 +302,10 @@ class CallStatisticsDialog(QDialog):
     def _collect_clicked(self):
         if self.day.date() > QDate.currentDate():
             return
+        day = self.day.date()
         self.controller.collect(self.selected_past_day())
+        if self.controller.busy:
+            self._collected_day = day  # 始まった集計だけ、終わったらこの日へ戻す
 
     def _unit_changed(self):
         self.controller.store.set_preference("duration_unit", self.duration_unit.currentData())
@@ -314,6 +318,12 @@ class CallStatisticsDialog(QDialog):
             self.day.setDate(today)  # dateChanged から refresh が呼ばれる
             return
         controller = self.controller
+        if self._collected_day is not None and not controller.busy:
+            # この画面で始めた集計が終わったら、集計した日の表を見せる（集計中に別の日を見ていても戻す）。
+            day, self._collected_day = self._collected_day, None
+            if self.day.date() != day:
+                self.day.setDate(day)  # dateChanged から refresh が呼ばれる
+                return
         people = controller.store.staff()
         selected = self.staff.currentData()
         self.staff.blockSignals(True)
@@ -326,8 +336,7 @@ class CallStatisticsDialog(QDialog):
         past = self.selected_past_day()
         self.collect_button.setEnabled(not controller.busy and not controller.closing and self.day.date() <= today)
         self.collect_button.setText("集計中…" if controller.busy else "この日を集計" if past else "今すぐ集計")
-        # 集計中は日付を固定し、終わったときに集計した日の表がそのまま見えるようにする。
-        self.day.setEnabled(not controller.busy)
+        # 日付は集計中も変えられる（自動集計の間も過去日を見られるように）。終わったら上で集計した日へ戻す。
         self.cancel_button.setVisible(controller.busy and not controller.closing)
         self.cancel_button.setEnabled(controller.busy and not controller.cancelling)
         self.cancel_button.setText("中止中…" if controller.cancelling else "中止")
