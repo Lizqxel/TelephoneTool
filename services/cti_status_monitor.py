@@ -13,6 +13,10 @@ CtiOutboundSysの状態変化（「発信中」→「通話中」）を監視し
 - 「次」「留守」「担当者不在」「NG」ボタンクリックの検出と提供判定のキャンセル
 - エラーハンドリングとログ出力
 
+プレディクティブ設定がオンの時は、状態変化では自動処理を行わない。
+プレディクティブのリストでは別システムが発信するため状態表示が変わらず、
+代わりにCTIの顧客表示の切り替わり（MainWindow側）で自動処理を始める。
+
 制限事項：
 - 常時監視のためCPU負荷を考慮
 - 重複実行防止機能付き
@@ -100,6 +104,7 @@ class CTIStatusMonitor:
         self.last_window_redetect_time = 0
         self.enable_auto_processing = True  # 自動処理の有効/無効
         self.enable_screen_change_fetch = True  # CTI画面切り替わり時の顧客情報取得
+        self.predictive_mode = False  # プレディクティブ（顧客の切り替わりで自動処理する）
         self.last_screen_signature_poll_time = 0
         self.screen_signature_poll_interval = 0.5
         self.screen_data_service = OneClickService()
@@ -132,17 +137,20 @@ class CTIStatusMonitor:
                     settings = json.load(f)
                     self.enable_auto_processing = settings.get('enable_auto_cti_processing', True)
                     self.enable_screen_change_fetch = settings.get('enable_cti_screen_change_fetch', True)
+                    self.predictive_mode = bool(settings.get('predictive_mode', False))
                     self.monitor_interval = settings.get('cti_monitor_interval', 0.5)
                     self.call_duration_threshold = settings.get('call_duration_threshold', 0)
             else:
                 self.enable_auto_processing = True
                 self.enable_screen_change_fetch = True
+                self.predictive_mode = False
                 self.monitor_interval = 0.5
                 self.call_duration_threshold = 0
         except Exception as e:
             logging.error(f"CTI監視設定の読み込みに失敗しました: {str(e)}")
             self.enable_auto_processing = True
             self.enable_screen_change_fetch = True
+            self.predictive_mode = False
             self.monitor_interval = 0.5
             self.call_duration_threshold = 0
             
@@ -322,7 +330,8 @@ class CTIStatusMonitor:
 
     def _check_screen_change(self):
         """CTIメイン画面の表示内容切り替わりを検出"""
-        if not self.enable_screen_change_fetch or not self.on_screen_changed_callback:
+        # プレディクティブは顧客の切り替わりで自動処理を始めるので、画面切替時の取得がオフでも監視する
+        if not (self.enable_screen_change_fetch or self.predictive_mode) or not self.on_screen_changed_callback:
             return
 
         try:
@@ -463,8 +472,11 @@ class CTIStatusMonitor:
                     logging.info(f"- コールバック設定: {self.on_dialing_to_talking_callback is not None}")
                     logging.info(f"- 自動処理有効: {self.enable_auto_processing}")
                     logging.info(f"- 通話時間閾値: {self.call_duration_threshold}秒")
-                    
-                    if (self.on_dialing_to_talking_callback and self.enable_auto_processing):
+
+                    if self.predictive_mode and self.enable_auto_processing:
+                        # 顧客の切り替わりで実行済み・実行予定なので、ここでも始めると二重に検索してしまう
+                        logging.info("プレディクティブ設定がオンのため、状態変化では自動処理を行いません（CTIの顧客の切り替わりで実行します）")
+                    elif (self.on_dialing_to_talking_callback and self.enable_auto_processing):
                         # 通話開始時間を記録
                         self.talking_start_time = current_time
                         

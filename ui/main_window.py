@@ -4539,11 +4539,18 @@ ND：{nd}
         UIの値とは比べない。比べると、非掲載商材で郵便番号から住所を組み立てた時や
         住所・名前を手で直した時に「CTIと違う」と判定され、0.5秒ごとの監視で
         入力内容がCTIの値に戻されてしまう。
+
+        プレディクティブ設定がオンの時は、顧客が切り替わったら提供判定も自動で始める。
+        プレディクティブのリストでは別システムが発信するため、CTIの状態表示が
+        「発信中→通話中」に変わらず、ふだんの自動処理が動かないため。
         """
         try:
             customer_name = (customer_name or "").strip()
             address = (address or "").strip()
             if not customer_name and not address:
+                if getattr(self, '_cti_values_at_last_fetch', None) is None:
+                    # 顧客のいない画面を見たので、次に顧客が出たら「切り替わった」とみなす
+                    self._cti_values_at_last_fetch = ("", "")
                 return
 
             last_values = getattr(self, '_cti_values_at_last_fetch', None)
@@ -4564,10 +4571,63 @@ ND：{nd}
             if not ui_is_empty and not cti_changed:
                 return
 
+            settings = getattr(self, 'settings', None) or {}
+            predictive = bool(
+                settings.get('predictive_mode', False)
+                and settings.get('enable_auto_cti_processing', True)
+            )
+            if not predictive and not settings.get('enable_cti_screen_change_fetch', True):
+                return
+
             logging.info("CTIの顧客表示が前回の取得時から変わったため、顧客情報を取得します")
             self.fetch_cti_data()
+
+            # 起動直後の1回目と、入力欄が空なので取り直しただけの時は切り替わりではない
+            if predictive and last_values is not None and cti_changed:
+                self._schedule_predictive_auto_processing()
         except Exception as e:
             logging.error(f"CTI画面切替時の顧客情報取得中にエラーが発生: {str(e)}")
+
+    def _schedule_predictive_auto_processing(self):
+        """プレディクティブ：顧客の切り替わりから通話時間設定の秒数たったら提供判定を始める。"""
+        settings = getattr(self, 'settings', None) or {}
+        try:
+            delay_seconds = max(0.0, float(settings.get('call_duration_threshold', 0) or 0))
+        except (TypeError, ValueError):
+            delay_seconds = 0.0
+
+        # 待っている間に次の顧客へ切り替わったり「次」「NG」などが押されたら、前の予定は取り消す
+        generation = getattr(self, '_predictive_generation', 0) + 1
+        self._predictive_generation = generation
+        self._predictive_scheduled_at = time.time()
+
+        if delay_seconds > 0:
+            logging.info(f"プレディクティブ: CTIの顧客が切り替わったため、{delay_seconds:g}秒後に提供判定を自動で始めます")
+        else:
+            logging.info("プレディクティブ: CTIの顧客が切り替わったため、提供判定を自動で始めます")
+        QTimer.singleShot(
+            int(delay_seconds * 1000),
+            lambda: self._run_predictive_auto_processing(generation),
+        )
+
+    def _run_predictive_auto_processing(self, generation):
+        """プレディクティブ：予定していた提供判定を始める（予定が取り消されていなければ）。"""
+        try:
+            if generation != getattr(self, '_predictive_generation', 0):
+                logging.info("プレディクティブ: 待っている間に顧客が切り替わったか、結果ボタンが押されたため、自動実行を取りやめます")
+                return
+            if getattr(self, 'is_auto_processing', False):
+                logging.info("プレディクティブ: 前の自動処理が終わっていないため、今回の自動実行は行いません")
+                return
+
+            self.is_auto_processing = True
+            self.last_auto_processing_time = time.time()
+            logging.info("プレディクティブ: 提供判定の自動実行を始めます")
+            # 顧客情報は切り替わった時に取得済み。提供判定はふだんの自動処理と同じ入口から始める
+            self.auto_search_service_area()
+        except Exception as e:
+            logging.error(f"プレディクティブの自動実行中にエラーが発生: {str(e)}")
+            self.is_auto_processing = False
 
     def on_cti_dialing_to_talking(self):
         """
@@ -4653,6 +4713,8 @@ ND：{nd}
             
             if not postal_code or not address:
                 logging.warning("CTI自動処理: 郵便番号または住所が未入力のため検索をスキップします")
+                # フラグを戻さないと、次の顧客からの自動処理が「実行中」扱いで止まってしまう
+                self.is_auto_processing = False
                 return
             
             # UIの提供エリア検索ボタンが存在し、クリック可能な場合は直接クリック
@@ -4729,7 +4791,14 @@ ND：{nd}
         """
         try:
             logging.info(f"★★★ 「{button_name}」ボタンクリックによる処理キャンセル要求を受信 ★★★")
-            
+
+            # プレディクティブで待っている自動実行も取り消す（通話はもう終わっているため）。
+            # ただし1秒以内に予定したものは、ボタンを押した後につながった次の顧客の分なので残す
+            # （クリックの検出は監視の間隔ぶん遅れるため）。
+            scheduled_at = getattr(self, '_predictive_scheduled_at', 0)
+            if time.time() - scheduled_at >= 1.0:
+                self._predictive_generation = getattr(self, '_predictive_generation', 0) + 1
+
             # 1. 即座にキャンセルフラグを設定（最優先）
             try:
                 from services.area_search import set_cancel_flag, clear_cancel_flag
