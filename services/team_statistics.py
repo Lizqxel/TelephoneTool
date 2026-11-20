@@ -332,7 +332,8 @@ def parse_block(rows):
         raise RuntimeError("表の見出しを読み取れませんでした。")
     hour_row, label_row = rows[0], rows[1]
     width = max(len(hour_row), len(label_row))
-    name_column = next((i for i in range(min(4, len(hour_row))) if normalize(hour_row[i]) == "名前"), None)
+    # 「名前」は見出しの1行目（〜11/18の表）か、部署・GPユニットと同じ2行目（11/19からの表）にある。
+    name_column = next((i for row in (hour_row, label_row) for i in range(min(4, len(row))) if normalize(row[i]) == "名前"), None)
     if name_column is None:
         raise RuntimeError("表に「名前」の列がありません。")
     groups = {}

@@ -222,3 +222,74 @@ def test_status_change_is_announced_only_after_the_collection_is_running(tmp_pat
     release.set()
     assert worker.wait(3000)
     app.processEvents()
+
+
+@pytest.fixture
+def today_is_13th(monkeypatch):
+    """テストのデータ（2026-11-13）を「今日」として画面を出す。"""
+    from ui import call_statistics_dialog as module
+
+    class FixedDate(QDate):
+        @staticmethod
+        def currentDate():
+            return QDate(2026, 11, 13)
+
+    monkeypatch.setattr(module, "QDate", FixedDate)
+
+
+def test_hour_of_the_last_collection_is_marked_in_progress(tmp_path, today_is_13th):
+    from test_call_statistics import history_row, history_snapshot
+    QApplication.instance() or QApplication([])
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False)
+    controller.set_automatic(False)
+    # 13:00に集計した時点では13時台はまだ0件。終わった時間帯の0件と見分けられるようにする。
+    controller.store.save(history_snapshot("2026-11-13T13:00:02", [history_row("12:45")]))
+    dialog = CallStatisticsDialog(controller)
+    dialog.day.setDate(QDate(2026, 11, 13))
+    rows = {dialog.table.item(i, 0).text()[:5]: i for i in range(dialog.table.rowCount())}
+    assert dialog.table.item(rows["13:00"], 1).text() == "0"
+    assert dialog.table.item(rows["13:00"], 7).text().endswith("途中（13:00時点）")
+    assert "途中" not in dialog.table.item(rows["12:00"], 7).text()
+    dialog.close()
+
+
+def test_past_day_button_collects_that_day_and_shows_history_only_totals(tmp_path, today_is_13th):
+    from dataclasses import replace
+    from datetime import datetime
+    from services.call_statistics import JST
+    from test_call_statistics import history_row, history_snapshot
+    QApplication.instance() or QApplication([])
+    controller = CallStatisticsController(store=StatisticsStore(tmp_path / "stats.sqlite3"), autostart=False)
+    controller.set_automatic(False)
+    requested = []
+    controller.collect = lambda day=None: requested.append(day)
+    dialog = CallStatisticsDialog(controller)
+    dialog.day.setDate(QDate(2026, 11, 12))
+    assert dialog.collect_button.text() == "この日を集計"
+    assert "「この日を集計」" in dialog.total_label.text()
+    dialog.collect_button.click()
+    dialog.day.setDate(QDate(2026, 11, 13))
+    assert dialog.collect_button.text() == "今すぐ集計"
+    dialog.collect_button.click()
+    dialog.day.setDate(QDate(2026, 11, 14))
+    assert not dialog.collect_button.isEnabled()  # 先の日付は集計しない
+    assert requested == ["2026-11-12", None]
+    # 過去日の集計結果（上部カウンター無し）でも表と合計を出し、「途中」は付けない。
+    rows = [{**history_row("10:05", call_id="a"), "対応日時": "2026/11/12 10:05"},
+            {**history_row("18:40", call_id="b"), "対応日時": "2026/11/12 18:40"}]
+    base = history_snapshot("2026-11-13T00:00:00", [])
+    from services.call_statistics import hourly_history_totals
+    totals = hourly_history_totals(rows, "2026-11-12", base.staff_name)
+    past = replace(base, acquired_at=datetime(2026, 11, 12, 23, 59, 59, tzinfo=JST), history_rows=2,
+                   counters={key: None for key in base.counters}, talk_seconds=totals["talk_seconds"],
+                   history_counters=totals["counters"], first_history_hour=totals["first_hour"], history_only=True)
+    controller.store.save(past)
+    dialog.day.setDate(QDate(2026, 11, 12))
+    assert dialog.staff.currentData() == base.staff_id
+    texts = {dialog.table.item(i, 0).text()[:5]: dialog.table.item(i, 7).text() for i in range(dialog.table.rowCount())}
+    assert "途中" not in "".join(texts.values())
+    assert dialog.total_label.text().startswith("この日の合計　コール 2")
+    assert "CTI上部" not in dialog.total_label.text()
+    controller._completed(past, "", "")
+    assert controller.status.startswith("11/12分を集計済み")
+    dialog.close()

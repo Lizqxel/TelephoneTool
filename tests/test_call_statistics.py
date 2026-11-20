@@ -244,13 +244,36 @@ def test_display_starts_at_first_log_even_when_it_has_zero_talk_duration(tmp_pat
 
 def test_historical_outcomes_require_explicit_labels():
     rows = [history_row(outcome="新規見込"), history_row(outcome="対話有NG", call_id="call-2"),
-            history_row(when="14:10", outcome="NG", call_id="call-3")]
+            {**history_row(when="14:10", outcome="NG", call_id="call-3"), "架電結果詳細": "申込意思NG"}]
     totals = hourly_history_totals(rows, "2026-11-13", "姓　名")
     assert totals["counters"][13]["new_prospects"] == 1
     assert totals["counters"][13]["ng_with_dialogue"] == 1
     assert totals["counters"][14]["total_calls"] == 1
     # NGは現アナNG・多重留守NG以外を対話有NGとして数える。
     assert totals["counters"][14]["ng_with_dialogue"] == 1
+
+
+@pytest.mark.parametrize("detail", [None, "", "-", " "])
+def test_ng_without_readable_detail_is_unknown_not_ng_with_dialogue(detail):
+    # CTIは架電履歴で商材が未選択だと詳細を空欄にする。現アナNGかもしれないので推測しない。
+    row = history_row(outcome="NG")
+    if detail is None:
+        del row["架電結果詳細"]
+    else:
+        row["架電結果詳細"] = detail
+    totals = hourly_history_totals([row, history_row("13:55", call_id="call-2")], "2026-11-13", "姓　名")
+    counts = totals["counters"][13]
+    assert counts["total_calls"] == 2
+    assert counts["dialogues"] is None and counts["ng_with_dialogue"] is None and counts["ng_without_dialogue"] is None
+    assert totals["unknown_dialogue_results"] == {"NG（詳細なし）": 1}
+
+
+@pytest.mark.parametrize("detail", ["架電禁止NG", "非勧奨登録NG", "非勧奨登録 ＮＧ"])
+def test_ng_details_recorded_as_prohibited_are_not_dialogues(detail):
+    row = {**history_row(outcome="NG"), "架電結果詳細": detail}
+    counts = hourly_history_totals([row], "2026-11-13", "姓　名")["counters"][13]
+    assert counts["total_calls"] == 1
+    assert counts["dialogues"] == counts["ng_with_dialogue"] == counts["ng_without_dialogue"] == 0
 
 
 def test_backfills_existing_database_without_discarding_counter_baseline(tmp_path):

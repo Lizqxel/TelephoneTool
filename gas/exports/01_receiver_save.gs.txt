@@ -282,7 +282,9 @@ function writeStatistics(body, book) {
   }
   const hourRow = data.headers[blockIndex][0];
   const labelRow = data.headers[blockIndex][1];
-  const nameColumn = hourRow.slice(0, LOOKUP_COLUMNS).findIndex(function (cell) { return normalize(cell) === '名前'; });
+  // 「名前」は見出しの1行目（〜11/18の表）か、部署・GPユニットと同じ2行目（11/19からの表）にある。
+  const findName = function (row) { return row.slice(0, LOOKUP_COLUMNS).findIndex(function (cell) { return normalize(cell) === '名前'; }); };
+  const nameColumn = findName(hourRow) >= 0 ? findName(hourRow) : findName(labelRow);
   if (nameColumn < 0) throw permanentError(month + '/' + day + 'の表に「名前」の列が見つかりません');
 
   const matches = [];

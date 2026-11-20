@@ -124,6 +124,16 @@ test('creates monthly hidden sheet, stores seconds and metadata, preserves daily
   assert(dataSheet(env).maxRows >= 23);
 });
 
+test('writes days whose name header moved to the second header row (sheet layout from 11/19)', () => {
+  const env = environment();
+  env.legacy.rows[2][1] = '';
+  env.legacy.rows[3][1] = '名前';
+  const result = env.context.writeStatistics(payload());
+  assert.deepEqual(clone(result.written), [10]);
+  assert.deepEqual(env.legacy.rows[4].slice(7, 10), [4, 3, 1]);
+  assert.deepEqual(dataSheet(env).rows[21].slice(0, 6), ['2026-11-13', 'bb1', '姓 名', '部署A', 'ユニットA', 600]);
+});
+
 test('same submission replaces rows; staff IDs separate people; next capture adds only new slots', () => {
   const env = environment();
   env.context.writeStatistics(payload());
