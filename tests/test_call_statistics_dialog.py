@@ -293,3 +293,83 @@ def test_past_day_button_collects_that_day_and_shows_history_only_totals(tmp_pat
     controller._completed(past, "", "")
     assert controller.status.startswith("11/12分を集計済み")
     dialog.close()
+
+
+def test_date_is_locked_while_collecting_and_cancel_stops_without_saving(tmp_path, monkeypatch):
+    import threading
+    from ui import call_statistics_dialog as module
+    app = QApplication.instance() or QApplication([])
+    entered = threading.Event()
+    saved = []
+
+    class SlowCollector:
+        def __init__(self, cancel):
+            self.cancel = cancel
+
+        def collect(self, unit, day=None):
+            entered.set()
+            # 本物の集計と同じく、取り消されたらCTIの条件を戻してから CollectionCancelled（RuntimeError）で抜ける。
+            if self.cancel.wait(3):
+                threading.Event().wait(0.5)  # 検索日時・商材を元に戻している間
+                raise RuntimeError("集計を中止しました。")
+            raise AssertionError("中止されなかった")
+
+    class Store(StatisticsStore):
+        def save(self, snapshot):
+            saved.append(snapshot)
+
+    monkeypatch.setattr(module, "CtiStatisticsCollector", SlowCollector)
+    controller = CallStatisticsController(store=Store(tmp_path / "stats.sqlite3"), autostart=False, sender_factory=lambda: None)
+    controller.set_automatic(False)
+    dialog = CallStatisticsDialog(controller)
+    dialog.day.setDate(QDate.currentDate().addDays(-1))
+    assert not dialog.cancel_button.isVisible() or not dialog.cancel_button.isVisibleTo(dialog)
+    dialog.collect_button.click()
+    worker = controller.worker
+    try:
+        assert entered.wait(2)
+        # 集計中は日付を変えられない（終わったときに集計した日の表を見せる）。中止ボタンが出る。
+        assert not dialog.day.isEnabled()
+        assert dialog.cancel_button.isVisibleTo(dialog) and dialog.cancel_button.isEnabled()
+        controller.collect()  # 自動集計などが重なった
+        assert controller.pending
+        dialog.cancel_button.click()
+        assert dialog.cancel_button.text() == "中止中…" and not dialog.cancel_button.isEnabled()
+        assert not controller.pending  # 中止したら、待っていた集計も始めない
+        assert worker.wait(3000)
+        for _ in range(20):
+            app.processEvents()
+        assert controller.status == "集計を中止しました。保存済みの値は維持しています。"
+        assert controller.worker is None and saved == []
+        assert dialog.day.isEnabled() and not dialog.cancel_button.isVisibleTo(dialog)
+    finally:
+        if controller.worker is not None:  # 失敗したときだけ残っている（終わった集計は画面側で破棄済み）
+            controller.worker.cancelled.set()
+            controller.worker.wait(3000)
+        dialog.close()
+
+
+def test_cancel_after_collection_is_not_saved_or_sent(tmp_path, monkeypatch):
+    from ui import call_statistics_dialog as module
+    from test_call_statistics import history_row, history_snapshot
+    QApplication.instance() or QApplication([])
+    result = history_snapshot("2026-11-13T16:40:00", [history_row()])
+    completed, saved = [], []
+
+    class Collector:
+        def __init__(self, cancel):
+            self.cancel = cancel
+
+        def collect(self, unit):
+            self.cancel.set()  # 集計し終えた直後に中止された
+            return result
+
+    class Store:
+        def save(self, snapshot):
+            saved.append(snapshot)
+
+    monkeypatch.setattr(module, "CtiStatisticsCollector", Collector)
+    worker = module.StatisticsWorker(Store(), "seconds", lambda: pytest.fail("送信しない"))
+    worker.completed.connect(lambda *args: completed.append(args))
+    worker.run()
+    assert completed == [(None, module.CANCELLED, "")] and saved == []

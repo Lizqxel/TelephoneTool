@@ -242,6 +242,11 @@ class TeamDay:
     interval_members: list = field(default_factory=list)
     interval_error: str = ""
     legacy_error: str = ""
+    sheet_total: "Member | None" = None  # 表の最後にあるシートの「合計」行（人としては数えない）
+
+
+# 日付ごとの表の最後にある合計の行。名前の列に書かれているが、人ではない。
+TOTAL_ROW_NAMES = ("合計", "総計")
 
 
 @dataclass
@@ -350,16 +355,20 @@ def parse_block(rows):
     if "total" not in groups:
         raise RuntimeError("表に「日計」の列がありません。")
     hours = sorted(h for h in groups if h != "total")
-    members = []
+    members, total = [], None
     for row in rows[2:]:
         name = str(_cell(row, name_column)).strip()
         if not name:
             continue
         values = lambda start: tuple(number(_cell(row, start + k)) for k in range(3))
-        members.append(Member(name=name, department=str(_cell(row, name_column + 1)).strip(),
-                              unit=str(_cell(row, name_column + 2)).strip(), total=values(groups["total"]),
-                              hours={h: values(groups[h]) for h in hours}))
-    return hours, members
+        member = Member(name=name, department=str(_cell(row, name_column + 1)).strip(),
+                        unit=str(_cell(row, name_column + 2)).strip(), total=values(groups["total"]),
+                        hours={h: values(groups[h]) for h in hours})
+        if normalize(name) in TOTAL_ROW_NAMES:
+            total = member  # シートの合計行。人数・合計・30分集計の対象には入れない
+        else:
+            members.append(member)
+    return hours, members, total
 
 
 def _sheet_read_error(response, sheet, range_name):
@@ -432,7 +441,7 @@ def fetch_day(session, day):
         if not left or f"{year}年{month}月" not in normalize("".join(left[0])):
             raise RuntimeError(f"シート「{sheet}」が{year}年{month}月の表ではありません。")
         block, end = find_block(left, month, date)
-        data.hours, data.members = parse_block(read(f"{block + 2}:{max(end, block + 3)}"))
+        data.hours, data.members, data.sheet_total = parse_block(read(f"{block + 2}:{max(end, block + 3)}"))
     except Exception as exc:
         if not data.interval_members:
             raise

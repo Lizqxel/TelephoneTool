@@ -12,10 +12,11 @@ from services import team_statistics as team
 from ui.team_statistics_dialog import TeamStatisticsDialog
 
 
-def block_rows(day, members, hours=(10, 11), name_in_label_row=False):
+def block_rows(day, members, hours=(10, 11), name_in_label_row=False, total_row=False):
     """シートの1日分（見出し・時台・ラベル・名前の行）をAPIの返す形で作る。
 
     name_in_label_row: 11/19からの表は「名前」が1行目ではなく、部署・GPユニットと同じ2行目にある。
+    total_row: 本物のシートと同じく、最後に「合計」行（日計は空欄、時台は全員の合計）を付ける。
     """
     hour_row = ["", "" if name_in_label_row else "名前", "", "", "日計", "", ""]
     label_row = ["", "名前" if name_in_label_row else "", "部署", "GPユニット", "コール", "対話", "トス"]
@@ -29,6 +30,9 @@ def block_rows(day, members, hours=(10, 11), name_in_label_row=False):
             chunk = values[3 + 3 * k: 6 + 3 * k]
             row += ["" if v is None else str(v) for v in chunk]
         rows.append(row)
+    if total_row:
+        sums = [str(sum(v[i] or 0 for _, _, v in members)) for i in range(3, 3 + 3 * len(hours))]
+        rows.append(["", "合計", "", "", "", "", "", *sums])
     rows.append([])
     return rows
 
@@ -38,7 +42,7 @@ def sheet_grid():
     grid += block_rows(1, [("岩田祐樹", "岩田祐樹", [0] * 9)])
     grid += block_rows(10, [("岩田悠河", "岩田祐樹", [9, 9, 9, 9, 9, 9, 9, 9, 9])])
     grid += block_rows(13, [("岩田悠河", "岩田祐樹", [20, 6, 1, 12, 4, 1, 8, 2, 0]),
-                            ("三浦甲斐", "杉崎伸明", [5, 1, 0, 5, 1, 0, None, None, None])])
+                            ("三浦甲斐", "杉崎伸明", [5, 1, 0, 5, 1, 0, None, None, None])], total_row=True)
     return grid
 
 
@@ -77,6 +81,10 @@ def test_reads_the_requested_day_without_mixing_up_11_1_and_11_10():
     assert [m.name for m in data.members] == ["岩田悠河", "三浦甲斐"]
     assert data.members[0].total == (20, 6, 1) and data.members[0].hours[11] == (8, 2, 0)
     assert data.members[1].unit == "杉崎伸明" and data.members[1].hours[11] == (None, None, None)
+    # 表の最後のシートの「合計」行は人として数えず、別に持つ（30分集計の対象人数にも入れない）。
+    assert data.sheet_total.name == "合計" and data.sheet_total.total == (None, None, None)
+    assert data.sheet_total.hours == {10: (17, 5, 1), 11: (8, 2, 0)}
+    assert [m.name for m in data.interval_members] == ["岩田悠河", "三浦甲斐"]
     assert "'コール集計打ち込み用_11月'!A1:D" in session.ranges
     assert data_for(session, "2026-11-01").members[0].name == "岩田祐樹"
     assert data_for(session, "2026-11-10").members[0].total == (9, 9, 9)
@@ -146,14 +154,15 @@ class FakeLogin:
         return Session(sheet_grid())
 
 
-def test_dialog_looks_like_the_sheet_with_a_total_row_and_own_name_marked():
+def test_dialog_looks_like_the_sheet_with_its_total_row_and_own_name_marked():
     app = QApplication.instance() or QApplication([])
     dialog = TeamStatisticsDialog(login=FakeLogin(), own_name="岩田 悠河")
     dialog.day.setDate(QDate(2026, 11, 13))
     data = team.fetch_day(Session(sheet_grid()), "2026-11-13")
     dialog._fetched(data, "", "2026-11-13")
     assert dialog.banner.text() == "【11/13（金）】"
-    assert dialog.row_count() == 2 + 2 + 1  # 見出し2行＋2人＋全体
+    assert dialog.row_count() == 2 + 2 + 1  # 見出し2行＋2人＋シートの「合計」行
+    assert "2人" in dialog.status.text()
     # 見出しはシートと同じ「名前／日計／10時台」と「部署／GPユニット／コール・対話・トス」
     assert [dialog.cell(0, c).text() for c in (0, 3, 6, 9)] == ["名前", "日計", "10時台", "11時台"]
     assert [dialog.cell(1, c).text() for c in (1, 2, 6, 7, 8)] == ["部署", "GPユニット", "コール", "対話", "トス"]
@@ -166,9 +175,12 @@ def test_dialog_looks_like_the_sheet_with_a_total_row_and_own_name_marked():
     assert dialog.cell(2, 6).background().color().name() == "#ffffff"  # 10時台は白
     assert dialog.cell(2, 9).background().color().name() == "#fff2cc"  # 11時台は薄い黄色
     assert dialog.cell(3, 9).text() == ""  # 未入力は空欄
-    assert dialog.cell(4, 0).text() == "全体（2人）" and dialog.cell(4, 3).text() == "25"
+    # 最後の行はシートの「合計」行をそのまま出す（ツールで足し直さないので2倍にならない。日計はシートどおり空欄）。
+    assert dialog.cell(4, 0).text() == "合計" and dialog.cell(4, 3).text() == ""
+    assert [dialog.cell(4, c).text() for c in (6, 7, 8, 9)] == ["17", "5", "1", "8"]
+    # GPユニットで絞り込んだときは、全員分の合計行は出さない。
     dialog.unit.setCurrentText("杉崎伸明")
-    assert dialog.row_count() == 4 and dialog.cell(2, 0).text() == "三浦甲斐"
+    assert dialog.row_count() == 3 and dialog.cell(2, 0).text() == "三浦甲斐"
     assert "ログイン中" in dialog.account.text()
     dialog.close()
 
