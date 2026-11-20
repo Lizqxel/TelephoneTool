@@ -526,3 +526,34 @@ def test_sheet_sender_is_disabled_until_the_form_is_configured(monkeypatch):
         module.SheetSender.from_settings()
     monkeypatch.setattr(module, "DEFAULT_FORM", {"formResponseUrl": "", "tokenEntry": "", "dataEntry": ""})
     assert module.SheetSender.from_settings() is None
+
+
+def filtered_msaa_result(headers, rows, kept):
+    """列を絞って読んだ結果（見出し行はすべて、データ行は kept の列のセルだけ。index は行の中の位置）。"""
+    result = msaa_result(headers, rows)
+    positions = [i for i, name in enumerate(headers) if name in kept]
+    nodes, position = [], {}
+    for node in result["nodes"]:
+        if node["role"] == 29:
+            index = position[node["parent_id"]] = position.get(node["parent_id"], -1) + 1
+            if index not in positions:
+                continue
+            node = {**node, "index": index}
+        nodes.append(node)
+    return {**result, "nodes": nodes, "columns": [headers[i] for i in positions]}
+
+
+def test_only_the_requested_columns_are_read_and_duplicates_keep_their_position():
+    headers = ["選択", "管理番号", "スタッフ", "電話番号", "ランク", "スタッフ"]
+    table = msaa_tables([filtered_msaa_result(headers, [["False", "0171_1", "姓 名", "0120", "トス", "bb01"]],
+                                              {"管理番号", "スタッフ", "ランク"})])[0]
+    assert table["headers"] == ["選択", "管理番号", "スタッフ", "電話番号", "ランク", "スタッフ#2"]
+    assert table["rows"] == [{"管理番号": "0171_1", "スタッフ": "姓 名", "ランク": "トス", "スタッフ#2": "bb01"}]
+
+
+def test_a_row_missing_a_requested_column_is_an_error():
+    headers = ["対応日時", "管理番号", "電話番号"]
+    result = filtered_msaa_result(headers, [["2026/11/13 10:00", "0171_1", "0120"]], {"対応日時", "管理番号"})
+    result["nodes"] = [n for n in result["nodes"] if not (n["role"] == 29 and n["index"] == 1)]
+    with pytest.raises(RuntimeError, match="セルを読み取れません"):
+        msaa_tables([result])
