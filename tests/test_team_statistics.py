@@ -12,10 +12,13 @@ from services import team_statistics as team
 from ui.team_statistics_dialog import TeamStatisticsDialog
 
 
-def block_rows(day, members, hours=(10, 11)):
-    """シートの1日分（見出し・時台・ラベル・名前の行）をAPIの返す形で作る。"""
-    hour_row = ["", "名前", "", "", "日計", "", ""]
-    label_row = ["", "", "部署", "GPユニット", "コール", "対話", "トス"]
+def block_rows(day, members, hours=(10, 11), name_in_label_row=False):
+    """シートの1日分（見出し・時台・ラベル・名前の行）をAPIの返す形で作る。
+
+    name_in_label_row: 11/19からの表は「名前」が1行目ではなく、部署・GPユニットと同じ2行目にある。
+    """
+    hour_row = ["", "" if name_in_label_row else "名前", "", "", "日計", "", ""]
+    label_row = ["", "名前" if name_in_label_row else "", "部署", "GPユニット", "コール", "対話", "トス"]
     for hour in hours:
         hour_row += [f"{hour}時台", "", ""]
         label_row += ["コール", "対話", "トス"]
@@ -77,6 +80,21 @@ def test_reads_the_requested_day_without_mixing_up_11_1_and_11_10():
     assert "'コール集計打ち込み用_11月'!A1:D" in session.ranges
     assert data_for(session, "2026-11-01").members[0].name == "岩田祐樹"
     assert data_for(session, "2026-11-10").members[0].total == (9, 9, 9)
+
+
+def test_reads_days_whose_name_header_moved_to_the_second_row():
+    # 11/19からの表は「名前」が部署・GPユニットと同じ見出しの2行目にある（11/18は両方の行にある）。
+    grid = sheet_grid()
+    grid += block_rows(18, [("岩田悠河", "岩田祐樹", [3] * 9)])
+    grid[-3][1] = "名前"  # 11/18の見出し2行目（1行目にも残っている）
+    grid += block_rows(19, [("岩田悠河", "岩田祐樹", [7, 2, 1, 4, 1, 1, 3, 1, 0]),
+                            ("三浦甲斐", "杉崎伸明", [1] * 9)], name_in_label_row=True)
+    session = Session(grid)
+    data = team.fetch_day(session, "2026-11-19")
+    assert data.legacy_error == "" and data.hours == [10, 11]
+    assert [(m.name, m.department, m.unit) for m in data.members] == [("岩田悠河", "岩田祐樹", "岩田祐樹"), ("三浦甲斐", "岩田祐樹", "杉崎伸明")]
+    assert data.members[0].total == (7, 2, 1) and data.members[0].hours[11] == (3, 1, 0)
+    assert [m.name for m in team.fetch_day(session, "2026-11-18").members] == ["岩田悠河"]
 
 
 def data_for(session, day):

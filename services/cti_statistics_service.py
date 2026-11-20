@@ -9,10 +9,20 @@ from types import SimpleNamespace
 
 from services.call_statistics import JST, StatisticsSnapshot, hourly_history_totals, may_be_new_prospect, normalize_name
 from services.cti_accessibility import Windows, msaa_tables, read_msaa, read_status_bar, uia_snapshot
+from services.cti_remote import set_date_time
 
 
 WM_COMMAND = 0x111
+WM_GETTEXT = 0x000D
 SMTO_ABORTIFHUNG = 0x0002
+CB_GETCOUNT = 0x0146
+CB_GETCURSEL = 0x0147
+CB_GETLBTEXT = 0x0148
+CB_GETLBTEXTLEN = 0x0149
+CB_SETCURSEL = 0x014E
+CBN_SELCHANGE = 1
+# 架電履歴の検索条件の「未選択」。CTIは商材が未選択だと架電結果詳細（現アナNGなど）を空欄で返す。
+UNSELECTED_CHOICE = "-"
 MAX_HISTORY_PAGES = 60
 COUNTER_LABELS = {"総コール数": "total_calls", "新規見込": "new_prospects", "対話有NG": "ng_with_dialogue",
                   "対話無NG": "ng_without_dialogue", "有効コール": "valid_calls"}
@@ -147,13 +157,23 @@ def history_total(nodes):
     return values[0]
 
 
+def parse_search_date(text):
+    return datetime.fromisoformat(text.strip().replace("/", "-"))
+
+
+def search_date_pickers(nodes):
+    """架電履歴の検索日時の欄（開始・終了）。CTIでは上が開始、下が終了。2つ無ければ None。"""
+    pickers = sorted((n for n in nodes if "SysDateTimePick32" in n["class_name"]), key=lambda n: (n["rect"][1], n["rect"][0]))
+    return pickers if len(pickers) == 2 else None
+
+
 def validate_search_dates(nodes, day):
-    """検索期間が当日の00:00:00～23:59:59を含んでいればよい（他の日の行は集計で除く）。"""
+    """検索期間が対象日の00:00:00～23:59:59を含んでいればよい（他の日の行は集計で除く）。"""
     values = [n["text"].strip() for n in nodes if "SysDateTimePick32" in n["class_name"]]
     if len(values) != 2:
         raise RuntimeError("架電履歴の検索日時を確認できませんでした。")
     try:
-        start, end = sorted(datetime.fromisoformat(v.replace("/", "-")) for v in values)
+        start, end = sorted(parse_search_date(v) for v in values)
     except ValueError as exc:
         raise RuntimeError("架電履歴の検索日時を読み取れませんでした。") from exc
     if start > datetime.fromisoformat(f"{day}T00:00:00") or end < datetime.fromisoformat(f"{day}T23:59:59"):
@@ -173,6 +193,60 @@ def validate_phone_filter(nodes):
         raise RuntimeError("架電履歴の電話番号検索欄を特定できませんでした。")
     if editors[0]["text"].strip():
         raise CollectionSkipped("架電履歴の電話番号欄に入力があるため、今回は履歴の取得をスキップしました。空にすると次回から取得します。")
+
+
+def find_labeled_combo(nodes, label_text):
+    """ラベルと同じ行で、すぐ右にあるコンボボックス。見つからなければ None。"""
+    labels = [n for n in nodes if n["text"] == label_text and "STATIC" in n["class_name"]]
+    if len(labels) != 1:
+        return None
+    label = labels[0]
+    rect = label["rect"]
+    combos = [n for n in nodes if "COMBOBOX" in n["class_name"] and n["parent_hwnd"] == label["parent_hwnd"]
+              and n["rect"][0] >= rect[2] - 4
+              and abs((n["rect"][1] + n["rect"][3]) - (rect[1] + rect[3])) <= max(10, rect[3] - rect[1])]
+    return min(combos, key=lambda n: n["rect"][0]) if combos else None
+
+
+def current_list_product(nodes):
+    """架電画面で、今のリストと同じ行にある「商材」欄の値。読めなければ空文字。"""
+    lists = sorted((n for n in nodes if n["visible"] and n["text"] == "リスト" and "STATIC" in n["class_name"]),
+                   key=lambda n: n["rect"][1])
+    if not lists:
+        return ""
+    top = lists[0]["rect"][1]
+    labels = [n for n in nodes if n["visible"] and n["text"].strip() == "商材" and "STATIC" in n["class_name"]
+              and abs(n["rect"][1] - top) <= 8]
+    if len(labels) != 1:
+        return ""
+    label = labels[0]
+    rect = label["rect"]
+    values = [n for n in nodes if n["visible"] and n["hwnd"] != label["hwnd"] and n["parent_hwnd"] == label["parent_hwnd"]
+              and any(kind in n["class_name"] for kind in ("EDIT", "STATIC", "COMBOBOX")) and n["text"].strip()
+              and n["rect"][0] >= rect[2] - 4
+              and abs((n["rect"][1] + n["rect"][3]) - (rect[1] + rect[3])) <= max(10, rect[3] - rect[1])]
+    return min(values, key=lambda n: n["rect"][0])["text"].strip() if values else ""
+
+
+def product_to_select(items, current, preferred=""):
+    """架電履歴の商材が未選択なら、選ぶ位置を返す。選ばないときは (None, 理由)。
+
+    架電画面の商材（preferred）と同じ名前を優先し、無ければ選べる商材が1つだけのときにそれを選ぶ。
+    """
+    if current is None or not 0 <= current < len(items):
+        return None, "架電履歴の商材の選択状態を読めないため、商材を自動で選んでいません。"
+    if normalize_name(items[current]) != UNSELECTED_CHOICE:
+        return None, ""  # 担当者が選んだ商材のまま検索する
+    if preferred:
+        same = [i for i, item in enumerate(items) if normalize_name(item) == normalize_name(preferred)]
+        if len(same) == 1:
+            return same[0], ""
+    products = [i for i, item in enumerate(items) if normalize_name(item) not in ("", UNSELECTED_CHOICE)]
+    if len(products) == 1:
+        return products[0], ""
+    if preferred:
+        return None, f"架電履歴の商材に、架電画面の商材「{preferred}」と同じ選択肢が無いため、自動で選んでいません。"
+    return None, f"架電画面の商材を読めず、架電履歴で選べる商材が{len(products)}件あるため、自動で選んでいません。"
 
 
 def find_button(controls, text):
@@ -226,6 +300,9 @@ class CtiStatisticsCollector:
         self.windows = None
         self._history_context = None
         self.clear_history_info = None
+        self.history_notes = []  # 集計結果と一緒に表示するお知らせ
+        self.product_note = ""  # 商材を自動で選べなかった理由（NGの詳細が読めなかったときに表示）
+        self.started_day = None  # 集計を始めた日（途中で日付が変わったら集計し直す）
 
     def check_cancelled(self):
         if self.cancel.is_set():
@@ -256,29 +333,37 @@ class CtiStatisticsCollector:
             stable = grid["rows"]
         raise RuntimeError("表の更新が完了しませんでした。")
 
-    def collect(self, numeric_unit="seconds"):
+    def collect(self, numeric_unit="seconds", day=None):
         """上部カウンターと、架電履歴・見込検索から当日分を取得する。
 
+        day に過去日を渡すと、その日の架電履歴だけを集計する（上部カウンターは当日の累計なので使わない）。
         履歴を取れない回（条件が合わない・エラー）もカウンターは返し、理由を note に入れる。
         """
         self._history_context = None
         self.clear_history_info = None
+        self.history_notes = []
+        self.product_note = ""
         started = datetime.now(JST)
-        day = started.date().isoformat()
+        self.started_day = started.date().isoformat()
+        day = day or self.started_day
+        past = day != self.started_day
+        if day > self.started_day:
+            raise RuntimeError("先の日付は集計できません。")
         self.windows = Windows()
         ctis = self.windows.windows("CTIメイン")
         if len(ctis) != 1:
             raise RuntimeError("CTIメインを1つだけ起動してください。")
         cti = ctis[0]
         before = self.windows.snapshot(cti["hwnd"], 5000)
-        observed = datetime.now(JST)
+        # 過去日は、その日の終わりまでの履歴として保存・送信する。
+        observed = datetime.fromisoformat(f"{day}T23:59:59").replace(tzinfo=JST) if past else datetime.now(JST)
         if before["errors"]:
             raise RuntimeError("CTIの画面構造をすべて取得できませんでした。")
-        counters = read_counters(before["nodes"])
+        counters = {key: None for key in COUNTER_LABELS.values()} if past else read_counters(before["nodes"])
         session = f"{cti['pid']}:{cti['hwnd']}:{counter_context(before['nodes'])}"
         staff_name, staff_id = self.read_login_staff(cti, before["nodes"])
         base = dict(acquired_at=observed, staff_id=staff_id, staff_name=staff_name, session=session,
-                    counters=counters, talk_seconds=None, history_rows=0)
+                    counters=counters, talk_seconds=None, history_rows=0, history_only=past)
         try:
             rows = self.collect_history(cti, before, day, staff_name)
             ranks, rank_note = None, ""
@@ -299,9 +384,13 @@ class CtiStatisticsCollector:
             return StatisticsSnapshot(**base, note=f"履歴を取得できませんでした：{exc}")
         if totals["unmatched_prospects"]:
             rank_note = (rank_note + " " if rank_note else "") + f"見込検索に無い見込{totals['unmatched_prospects']}件はトスに数えていません。"
+        notes = [rank_note] if rank_note else []
         if totals["unknown_dialogue_results"]:
             listed = "、".join(f"{k or '空欄'} {v}件" for k, v in totals["unknown_dialogue_results"].items())
-            rank_note = (rank_note + " " if rank_note else "") + f"対話の有無が分からない架電結果があるため、その時間帯の対話は未判定です（{listed}）。"
+            notes.append(f"対話の有無が分からない架電結果があるため、その時間帯の対話は未判定です（{listed}）。")
+            if any(k.endswith("（詳細なし）") for k in totals["unknown_dialogue_results"]):
+                notes.append(self.product_note or "CTIが架電結果詳細を返さなかったため、NGが対話有か対話無か判定できません。")
+        rank_note = " ".join(notes + self.history_notes)
         own_rows = sum(totals["counters"][h]["total_calls"] for h in range(24))
         return StatisticsSnapshot(**{**base, "talk_seconds": totals["talk_seconds"], "history_rows": own_rows},
                                   history_counters=totals["counters"], first_history_hour=totals["first_hour"], note=rank_note,
@@ -329,24 +418,137 @@ class CtiStatisticsCollector:
         if page["visible"]:
             raise CollectionSkipped("架電履歴を表示中のため、今回は履歴の取得をスキップしました。")
         controls = descendants(before["nodes"], page["hwnd"])
-        validate_search_dates(controls, day)
+        # 検索日時はその日の00:00:00〜23:59:59にして検索し、読み終えたら元に戻す（過去日の集計と、長い期間の読み込み短縮）。
+        dates = self.prepare_dates(cti, controls, day)
+        try:
+            if dates is None:
+                validate_search_dates(controls, day)
+            rows, first_page, grid, tables, refreshed_page, total, staff = self.search_own_history(cti, before, page, controls, staff_name)
+        except BaseException:
+            if dates:
+                try:
+                    self.restore_dates(cti, dates)
+                except Exception:
+                    pass  # 集計できなかった理由（元の例外）を優先して知らせる
+            raise
+        if dates:
+            try:
+                self.restore_dates(cti, dates)
+            except RuntimeError as exc:
+                self.history_notes.append(f"架電履歴の検索日時を元に戻せませんでした（{exc}）。")
+        if total != len(rows):
+            raise RuntimeError(f"履歴は{total}件ですが{len(rows)}件しか読めませんでした。")
+        staff_after = next((t for t in tables if t["hwnd"] == staff["hwnd"]), None)
+        if staff_after is not None:
+            validate_staff_selection(staff_after, staff_name)
+        if datetime.now(JST).date().isoformat() != (self.started_day or day):
+            raise RuntimeError("集計中に日付が変わりました。再実行してください。")
+        # Filters can be changed by the operator while reading.
+        final = self.windows.snapshot(cti["hwnd"], 5000)
+        final_controls = descendants(final["nodes"], refreshed_page["hwnd"])
+        if dates is None:
+            validate_search_dates(final_controls, day)
+        validate_phone_filter(final_controls)
+        # 保存後のクリア用。1ページ目へ戻した状態の一覧と検索条件が変わっていなければクリアする。
+        self._history_context = {"cti": cti, "page_hwnd": refreshed_page["hwnd"], "history_hwnd": grid["hwnd"],
+                                 "staff_hwnd": staff["hwnd"], "staff_rows": (staff_after or staff)["rows"],
+                                 "rows": first_page, "conditions": search_conditions(final_controls)}
+        return rows
+
+    def search_own_history(self, cti, before, page, controls, staff_name):
+        """条件を確かめ、商材を選んで検索し、商材を元に戻す。検索日時は呼び出し元が戻す。"""
         validate_phone_filter(controls)
         tables = msaa_tables(read_msaa(grid_handles(before["nodes"], page)))
         self.check_cancelled()
         staff = staff_table(tables)
         validate_staff_selection(staff, staff_name)
+        product = self.prepare_product(controls, current_list_product(before["nodes"]))
+        try:
+            if product:
+                self.select_choice(product["combo"], product["target"])
+            result = self.search_history(cti, page, controls, staff)
+        except BaseException:
+            if product:
+                try:
+                    self.restore_choice(product)
+                except Exception:
+                    pass  # 集計できなかった理由（元の例外）を優先して知らせる
+            raise
+        if product:
+            try:
+                self.restore_choice(product)
+            except RuntimeError as exc:
+                self.history_notes.append(f"架電履歴の商材を元の「{product['items'][product['original']]}」に戻せませんでした（{exc}）。")
+        return (*result, staff)
+
+    def read_text(self, hwnd):
+        buffer = ctypes.create_unicode_buffer(256)
+        if self.send_message(hwnd, WM_GETTEXT, len(buffer), ctypes.addressof(buffer)) is None:
+            return None
+        return buffer.value
+
+    def prepare_dates(self, cti, controls, day):
+        """検索日時をその日の00:00:00〜23:59:59にする。既にそうなら何もしない（None）。
+
+        変えられなかったときは元に戻してお知らせを残し、今の検索日時のまま集計する（None）。
+        """
+        pickers = search_date_pickers(controls)
+        if pickers is None:
+            return None  # 検索日時の確認（validate_search_dates）で理由を出す
+        try:
+            original = [parse_search_date(p["text"]) for p in pickers]
+        except ValueError:
+            return None
+        target = [datetime.fromisoformat(f"{day}T00:00:00"), datetime.fromisoformat(f"{day}T23:59:59")]
+        if original == target:
+            return None
+        self.check_cancelled()
+        dates = {"pickers": pickers, "original": original}
+        try:
+            self.set_dates(cti, pickers, target)
+        except RuntimeError as exc:
+            try:
+                self.restore_dates(cti, dates)
+            except RuntimeError:
+                pass
+            self.history_notes.append(f"架電履歴の検索日時を変えられなかったため、今の検索日時のまま集計しました（{exc}）。")
+            return None
+        return dates
+
+    def set_dates(self, cti, pickers, values):
+        for picker, value in zip(pickers, values):
+            set_date_time(self.windows.api, cti["pid"], picker, value)
+        shown = [self.read_text(p["hwnd"]) for p in pickers]
+        try:
+            if [parse_search_date(text or "") for text in shown] != list(values):
+                raise ValueError()
+        except ValueError:
+            raise RuntimeError("架電履歴の検索日時が変わったことを確認できませんでした。") from None
+
+    def restore_dates(self, cti, dates):
+        """検索日時を集計前の値へ戻す。"""
+        self.set_dates(cti, dates["pickers"], dates["original"])
+
+    def search_history(self, cti, page, controls, staff):
+        """架電履歴を裏で検索し、全ページを読んで1ページ目へ戻す。"""
         if not self.press(find_button(controls, "検索")):
             raise RuntimeError("CTIの検索応答がありません。検索を連続実行せず、完了を確認してください。")
         refreshed = self.windows.snapshot(cti["hwnd"], 5000)
         refreshed_page = find_page(refreshed["nodes"], "架電履歴") or page
         handles = grid_handles(refreshed["nodes"], refreshed_page)
-        # Read twice after the command returns; never treat a truncated table as all rows.
-        grid, tables = self.read_grid(handles, choose_history, staff["hwnd"])
-        after = self.windows.snapshot(cti["hwnd"], 5000)
-        if after["errors"]:
-            raise RuntimeError("検索後の画面を取得できませんでした。")
-        after_controls = descendants(after["nodes"], refreshed_page["hwnd"])
-        total = history_total(after_controls)
+        try:
+            # Read twice after the command returns; never treat a truncated table as all rows.
+            grid, tables = self.read_grid(handles, choose_history, staff["hwnd"])
+            after = self.windows.snapshot(cti["hwnd"], 5000)
+            if after["errors"]:
+                raise RuntimeError("検索後の画面を取得できませんでした。")
+            after_controls = descendants(after["nodes"], refreshed_page["hwnd"])
+            total = history_total(after_controls)
+        except RuntimeError:
+            empty = self.empty_search_result(cti, refreshed_page, handles)
+            if empty is None:
+                raise
+            return [], [], empty[0], empty[1], refreshed_page, 0
         rows = list(grid["rows"])
         first_page = list(grid["rows"])
         if len(rows) < total:
@@ -365,23 +567,84 @@ class CtiStatisticsCollector:
                 self.press(find_button(after_controls, "最初"), 5000)
             except RuntimeError:
                 pass
-        if total != len(rows):
-            raise RuntimeError(f"履歴は{total}件ですが{len(rows)}件しか読めませんでした。")
-        staff_after = next((t for t in tables if t["hwnd"] == staff["hwnd"]), None)
-        if staff_after is not None:
-            validate_staff_selection(staff_after, staff_name)
-        if datetime.now(JST).date().isoformat() != day:
-            raise RuntimeError("集計中に日付が変わりました。再実行してください。")
-        # Filters can be changed by the operator while reading.
-        final = self.windows.snapshot(cti["hwnd"], 5000)
-        final_controls = descendants(final["nodes"], refreshed_page["hwnd"])
-        validate_search_dates(final_controls, day)
-        validate_phone_filter(final_controls)
-        # 保存後のクリア用。1ページ目へ戻した状態の一覧と検索条件が変わっていなければクリアする。
-        self._history_context = {"cti": cti, "page_hwnd": refreshed_page["hwnd"], "history_hwnd": grid["hwnd"],
-                                 "staff_hwnd": staff["hwnd"], "staff_rows": (staff_after or staff)["rows"],
-                                 "rows": first_page, "conditions": search_conditions(final_controls)}
-        return rows
+        return rows, first_page, grid, tables, refreshed_page, total
+
+    def empty_search_result(self, cti, page, handles):
+        """検索結果が0件なら (空の表, 表の一覧)。そうでなければ None。
+
+        CTIは0件のとき、表も件数表示も変えず、メッセージも出さずに終わる。結果があるときは
+        検索ボタンを押せなくする（クリアするまで）ので、検索ボタンが押せて表が空なら0件と判断する。
+        """
+        snap = self.windows.snapshot(cti["hwnd"], 5000)
+        if snap["errors"]:
+            return None
+        try:
+            if not find_button(descendants(snap["nodes"], page["hwnd"]), "検索")["enabled"]:
+                return None
+        except RuntimeError:
+            return None
+        tables = msaa_tables(read_msaa(handles))
+        # クリア直後は列の見出しが消えていることもある（choose_history と同じ扱い）。
+        grids = [t for t in tables if {"対応日時", "管理番号"}.issubset(t["headers"]) or (not t["headers"] and not t["rows"])]
+        if len(grids) != 1 or grids[0]["rows"]:
+            return None
+        return grids[0], tables
+
+    def send_message(self, hwnd, message, wparam=0, lparam=0, timeout_ms=5000):
+        """応答が無ければ None。CB_ERR（-1）などの負の戻り値は負の数で返す。"""
+        result = ctypes.c_size_t()
+        if not self.windows.api.SendMessageTimeoutW(hwnd, message, wparam, lparam, SMTO_ABORTIFHUNG, timeout_ms, ctypes.byref(result)):
+            return None
+        bits = ctypes.sizeof(ctypes.c_size_t) * 8
+        return result.value - (1 << bits) if result.value >= 1 << (bits - 1) else result.value
+
+    def combo_items(self, combo):
+        count = self.send_message(combo["hwnd"], CB_GETCOUNT)
+        if count is None or not 0 <= count <= 500:
+            return None
+        items = []
+        for index in range(count):
+            length = self.send_message(combo["hwnd"], CB_GETLBTEXTLEN, index)
+            if length is None or length < 0:
+                return None
+            buffer = ctypes.create_unicode_buffer(length + 1)
+            if self.send_message(combo["hwnd"], CB_GETLBTEXT, index, ctypes.addressof(buffer)) is None:
+                return None
+            items.append(buffer.value)
+        return items
+
+    def prepare_product(self, controls, preferred=""):
+        """商材が未選択なら、検索の間だけ架電画面と同じ商材を選ぶ（選ばないと架電結果詳細が空欄になる）。
+
+        選べないときは理由を残し、今の条件のまま検索する（詳細の無いNGは未判定になる）。
+        """
+        combo = find_labeled_combo(controls, "商材")
+        if combo is None:
+            self.product_note = "架電履歴の商材欄を特定できないため、商材を自動で選んでいません。"
+            return None
+        items = self.combo_items(combo)
+        current = self.send_message(combo["hwnd"], CB_GETCURSEL)
+        target, reason = product_to_select(items or [], current, preferred)
+        self.product_note = reason
+        if target is None:
+            return None
+        self.check_cancelled()
+        return {"combo": combo, "items": items, "original": current, "target": target}
+
+    def select_choice(self, combo, index):
+        """利用者が選んだときと同じく、選択を変えてから親へ CBN_SELCHANGE を送る（CTIの検索条件が切り替わる）。"""
+        if self.send_message(combo["hwnd"], CB_SETCURSEL, index) != index:
+            raise RuntimeError("架電履歴の商材を選べませんでした。")
+        wparam = (CBN_SELCHANGE << 16) | (combo["control_id"] & 0xffff)
+        if self.send_message(combo["parent_hwnd"], WM_COMMAND, wparam, combo["hwnd"], 15000) is None:
+            raise RuntimeError("架電履歴の商材の切り替えに応答がありません。")
+        if self.send_message(combo["hwnd"], CB_GETCURSEL) != index:
+            raise RuntimeError("架電履歴の商材が切り替わりませんでした。")
+
+    def restore_choice(self, product):
+        """自動で選んだ商材を、担当者が選んでいた状態（未選択）へ戻す。取消済みでも戻す。"""
+        if self.send_message(product["combo"]["hwnd"], CB_GETCURSEL) != product["original"]:
+            self.select_choice(product["combo"], product["original"])
 
     def clear_history(self):
         """呼び出し元が集計を保存した後で、取得した一覧だけをクリアする。"""
@@ -389,6 +652,11 @@ class CtiStatisticsCollector:
         context = self._history_context
         if context is None:
             raise RuntimeError("クリア対象の集計済み履歴がありません。")
+        if not context["rows"]:
+            # 検索結果が0件のときはCTIの一覧は空のまま（クリアボタンも押せない）なので、何もしない。
+            self._history_context = None
+            self.clear_history_info = {"rows_before": 0, "rows_after": 0, "skipped": "検索結果が0件"}
+            return
         windows = Windows()
         ctis = windows.windows("CTIメイン")
         if not any(w["hwnd"] == context["cti"]["hwnd"] and w["pid"] == context["cti"]["pid"] for w in ctis):

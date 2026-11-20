@@ -16,8 +16,13 @@ COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dial
 # 架電履歴から時間帯別に再計算できる値。トスは見込検索のランクと突き合わせる。
 HISTORY_COUNTERS = ("total_calls", "new_prospects", "ng_with_dialogue", "ng_without_dialogue", "dialogues", "toss")
 TOSS_RANK = "トス"
-# 架電結果「NG」のうち対話無NGに入る詳細。これ以外のNG詳細はすべて対話有NG（2026-11-13 運用側で確認）。
+# 架電結果「NG」のうち対話無NGに入る詳細。これ以外のNG詳細はすべて対話有NG（2026-11-13 運用側で確認。
+# 2026-11-20 CTIの個人別コール集計103人分でも、対話無NG件数＝現アナNG＋多重留守NG を確認）。
 NG_WITHOUT_DIALOGUE_DETAILS = ("現アナNG", "多重留守NG", "対話無NG")
+# NGの一覧から選ぶが、CTIは架電結果「禁止」として記録・集計する詳細（同じ集計で 禁止件数＝この2つの合計）。
+NG_RECORDED_AS_PROHIBITED = ("架電禁止NG", "非勧奨登録NG")
+# CTIは架電履歴の検索で商材が未選択だと、架電結果詳細を空欄で返す。詳細の無いNGは対話有無を決めない。
+MISSING_DETAILS = ("", "-")
 
 
 def normalize_name(value):
@@ -65,7 +70,12 @@ def history_outcome_counters(row):
     outcome = normalize_name(row.get("架電結果"))
     detail = normalize_name(row.get("架電結果詳細"))
     if outcome == "NG":
-        detail = "対話無NG" if detail in {normalize_name(d) for d in NG_WITHOUT_DIALOGUE_DETAILS} else "対話有NG"
+        if detail in MISSING_DETAILS:
+            return dict(new_prospects=None, ng_with_dialogue=None, ng_without_dialogue=None)
+        if detail in {normalize_name(d) for d in NG_RECORDED_AS_PROHIBITED}:
+            outcome = "禁止"
+        else:
+            detail = "対話無NG" if detail in {normalize_name(d) for d in NG_WITHOUT_DIALOGUE_DETAILS} else "対話有NG"
     if outcome in ("留守", "不在", "担当者不在", "受注", "禁止", "削除"):
         return dict(new_prospects=0, ng_with_dialogue=0, ng_without_dialogue=0)
     if outcome in ("新規見込", "継続見込") or (outcome == "見込" and detail in ("新規", "新規見込", "継続", "継続見込")):
@@ -76,6 +86,11 @@ def history_outcome_counters(row):
         result = detail if outcome == "NG" else outcome
         return dict(new_prospects=0, ng_with_dialogue=int(result == "対話有NG"), ng_without_dialogue=int(result == "対話無NG"))
     return dict(new_prospects=None, ng_with_dialogue=None, ng_without_dialogue=None)
+
+
+def ng_detail_missing(row):
+    """架電結果がNGなのに詳細が読めない行（CTIの架電履歴で商材が未選択のとき）。"""
+    return normalize_name(row.get("架電結果")) == "NG" and normalize_name(row.get("架電結果詳細")) in MISSING_DETAILS
 
 
 def dialogue_count(row):
@@ -143,6 +158,8 @@ def hourly_history_totals(rows, day, staff_name, numeric_unit="seconds", ranks=N
             dialogue_seconds[slot] += seconds
         if dialogues is None:
             label = "／".join(v for v in (row.get("架電結果"), row.get("架電結果詳細")) if v and v.strip() not in ("", "-"))
+            if ng_detail_missing(row):
+                label += "（詳細なし）"
             unknown[label] = unknown.get(label, 0) + 1
         for key, value in (*outcome_counts.items(), ("dialogues", dialogues)):
             if value is None or counters[slot][key] is None:
@@ -195,6 +212,7 @@ class StatisticsSnapshot:
     first_history_hour: int | None = None
     note: str = ""
     intervals: dict | None = None
+    history_only: bool = False  # 過去日の集計。架電履歴だけで、上部カウンターの値・差分は持たない
 
 
 class StatisticsStore:
@@ -232,6 +250,9 @@ class StatisticsStore:
                     total_calls INTEGER, dialogues INTEGER, toss INTEGER, dialogue_seconds REAL,
                     observed_at TEXT NOT NULL,
                     PRIMARY KEY(staff_id,day,start_minute));
+                -- 過去日だけを集計した人も、集計表のスタッフ欄に出す（snapshots は当日の集計でだけ作る）。
+                CREATE TABLE IF NOT EXISTS staff_names (
+                    staff_id TEXT PRIMARY KEY, staff_name TEXT NOT NULL, last_seen TEXT NOT NULL);
             """)
             # 既存DB（有効コール・トス追加前）にも列を足す。保存済みの値は残す。
             for table, column in (("snapshots", "valid_calls"), ("hourly", "valid_calls"),
@@ -262,7 +283,9 @@ class StatisticsStore:
         stamp = snapshot.acquired_at.astimezone(JST)
         day = stamp.date().isoformat()
         with self.connect() as db:
-            previous = db.execute("SELECT * FROM snapshots WHERE staff_id=? AND day=?", (snapshot.staff_id, day)).fetchone()
+            # 過去日の集計（history_only）は架電履歴だけを保存し、上部カウンターの基準・差分には触れない。
+            previous = None if snapshot.history_only else db.execute(
+                "SELECT * FROM snapshots WHERE staff_id=? AND day=?", (snapshot.staff_id, day)).fetchone()
             if previous and stamp <= datetime.fromisoformat(previous["observed_at"]):
                 raise ValueError("前回より古い集計結果は保存できません。")
             if snapshot.intervals is not None:
@@ -307,10 +330,14 @@ class StatisticsStore:
                     for hour in range(start.hour, last.hour + 1):
                         db.execute("UPDATE hourly SET counter_status=?,counter_updated_at=? WHERE staff_id=? AND day=? AND hour=?",
                                    (status, stamp.isoformat(), snapshot.staff_id, day, hour))
-            db.execute(f"INSERT OR REPLACE INTO snapshots (staff_id,day,staff_name,observed_at,session,{','.join(COUNTERS)}) "
-                       f"VALUES (?,?,?,?,?{',?' * len(COUNTERS)})",
-                       (snapshot.staff_id, day, snapshot.staff_name, stamp.isoformat(), snapshot.session,
-                        *(snapshot.counters.get(k) for k in COUNTERS)))
+            if snapshot.history_only:
+                db.execute("INSERT OR REPLACE INTO staff_names VALUES (?,?,?)",
+                           (snapshot.staff_id, snapshot.staff_name, datetime.now(JST).isoformat()))
+            else:
+                db.execute(f"INSERT OR REPLACE INTO snapshots (staff_id,day,staff_name,observed_at,session,{','.join(COUNTERS)}) "
+                           f"VALUES (?,?,?,?,?{',?' * len(COUNTERS)})",
+                           (snapshot.staff_id, day, snapshot.staff_name, stamp.isoformat(), snapshot.session,
+                            *(snapshot.counters.get(k) for k in COUNTERS)))
             if snapshot.history_counters is not None:
                 if snapshot.first_history_hour is not None:
                     db.execute("INSERT INTO history_bounds VALUES (?,?,?) ON CONFLICT(staff_id,day) DO UPDATE SET first_hour=MIN(first_hour,excluded.first_hour)",
@@ -326,7 +353,11 @@ class StatisticsStore:
 
     def staff(self):
         with self.connect() as db:
-            return [dict(r) for r in db.execute("SELECT staff_id,staff_name,MAX(observed_at) AS last_seen FROM snapshots GROUP BY staff_id ORDER BY last_seen DESC")]
+            return [dict(r) for r in db.execute(
+                "SELECT staff_id,staff_name,MAX(last_seen) AS last_seen FROM ("
+                " SELECT staff_id,staff_name,observed_at AS last_seen FROM snapshots"
+                " UNION ALL SELECT staff_id,staff_name,last_seen FROM staff_names)"
+                " GROUP BY staff_id ORDER BY last_seen DESC")]
 
     def intervals(self, staff_id, day):
         """30分集計は履歴を再取得できた分だけ返す。旧1時間データから推測しない。"""

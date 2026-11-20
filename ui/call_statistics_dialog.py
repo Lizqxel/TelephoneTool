@@ -21,17 +21,19 @@ from services.cti_statistics_service import CtiStatisticsCollector
 class StatisticsWorker(QThread):
     completed = Signal(object, str, str)  # 集計結果、エラー、クリア・送信のお知らせ
 
-    def __init__(self, store, numeric_unit, sender_factory=None, parent=None):
+    def __init__(self, store, numeric_unit, sender_factory=None, parent=None, day=None):
         super().__init__(parent)
         self.store = store
         self.numeric_unit = numeric_unit
         self.sender_factory = sender_factory or SheetSender.from_settings
+        self.day = day  # None は当日。過去日（yyyy-mm-dd）はその日の架電履歴を集計する
         self.cancelled = threading.Event()
 
     def run(self):
         try:
             collector = CtiStatisticsCollector(self.cancelled)
-            snapshot = collector.collect(self.numeric_unit)
+            snapshot = (collector.collect(self.numeric_unit) if self.day is None
+                        else collector.collect(self.numeric_unit, day=self.day))
             if self.cancelled.is_set():
                 return
             self.store.save(snapshot)
@@ -87,6 +89,7 @@ class CallStatisticsController(QObject):
         self.dialog = None
         self.closing = False
         self.pending = False
+        self.pending_day = None
         self.status = "初回の集計前です。"
         self.automatic = self.store.preference("automatic", "1") == "1"
         self.timer = QTimer(self)
@@ -129,14 +132,16 @@ class CallStatisticsController(QObject):
         self.status_changed.emit(message)
         self.changed.emit()
 
-    def collect(self):
+    def collect(self, day=None):
+        """当日分を集計する。day に過去日（yyyy-mm-dd）を渡すと、その日の架電履歴を集計する。"""
         if self.closing:
             return
         if self.busy:
-            # 実行中に集計が重なった場合は、終わってから実行する。
+            # 実行中に集計が重なった場合は、終わってから実行する（過去日の指定も覚えておく）。
             self.pending = True
+            self.pending_day = day if day is not None else self.pending_day
             return
-        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), self.sender_factory, self)
+        worker = StatisticsWorker(self.store, self.store.preference("duration_unit", "seconds"), self.sender_factory, self, day=day)
         worker.completed.connect(self._completed)
         worker.finished.connect(self._finished)
         # 「集計中」になってから知らせる（先に知らせると、受け取った画面が集計中でないと誤解する）
@@ -150,9 +155,14 @@ class CallStatisticsController(QObject):
             return
         # クリアや送信だけ失敗した場合も、集計は保存済みであることを示す。
         saved = "（保存済み）" if any(word in notice for word in ("未完了", "失敗")) else ""
-        parts = [f"{snapshot.acquired_at:%H:%M} 集計済み{saved}：{snapshot.staff_name}"]
-        if snapshot.history_counters is not None:
-            parts.append(f"本人の当日履歴 {snapshot.history_rows}件")
+        if snapshot.history_only:
+            parts = [f"{snapshot.acquired_at:%m/%d}分を集計済み{saved}：{snapshot.staff_name}"]
+            if snapshot.history_counters is not None:
+                parts.append(f"本人の{snapshot.acquired_at:%m/%d}の履歴 {snapshot.history_rows}件")
+        else:
+            parts = [f"{snapshot.acquired_at:%H:%M} 集計済み{saved}：{snapshot.staff_name}"]
+            if snapshot.history_counters is not None:
+                parts.append(f"本人の当日履歴 {snapshot.history_rows}件")
         parts += [text for text in (snapshot.note, notice) if text]
         self.set_status("／".join(parts))
 
@@ -164,7 +174,8 @@ class CallStatisticsController(QObject):
         self.changed.emit()
         if self.pending and not self.closing:
             self.pending = False
-            self.collect()
+            day, self.pending_day = self.pending_day, None
+            self.collect(day)
 
     def show(self, collect=False):
         if self.dialog is None:
@@ -240,17 +251,29 @@ class CallStatisticsDialog(QDialog):
         self.total_label.setTextFormat(Qt.PlainText)
         self.total_label.setWordWrap(True)
         layout.addWidget(self.total_label)
-        note = QLabel("コール＝架電履歴の件数（通話0秒・留守も含む）。対話＝見込＋対話有NG（NGは現アナNG・多重留守NG以外を対話有）。\n"
-                      "トス＝当日の見込のうち、見込検索のランクが「トス」のもの。応答時間＝IP電話通話時間。対話NG＝対話有NG。")
+        note = QLabel("コール＝架電履歴の件数（通話0秒・留守も含む）。対話＝見込＋対話有NG（NGは現アナNG・多重留守NG以外を対話有。"
+                      "架電禁止NG・非勧奨登録NGは禁止）。\n"
+                      "トス＝当日の見込のうち、見込検索のランクが「トス」のもの。応答時間＝IP電話通話時間。対話NG＝対話有NG。"
+                      "「途中」の行は、その時刻までの件数です。")
         note.setWordWrap(True)
         layout.addWidget(note)
-        self.collect_button.clicked.connect(lambda: controller.collect())
+        self.collect_button.clicked.connect(self._collect_clicked)
         self.automatic.toggled.connect(controller.set_automatic)
         self.duration_unit.currentIndexChanged.connect(self._unit_changed)
         self.day.dateChanged.connect(self.refresh)
         self.staff.currentIndexChanged.connect(self.refresh)
         controller.changed.connect(self.refresh)
         self.refresh()
+
+    def selected_past_day(self):
+        """日付欄が今日より前なら yyyy-mm-dd、今日なら None。"""
+        selected = self.day.date()
+        return selected.toString("yyyy-MM-dd") if selected < QDate.currentDate() else None
+
+    def _collect_clicked(self):
+        if self.day.date() > QDate.currentDate():
+            return
+        self.controller.collect(self.selected_past_day())
 
     def _unit_changed(self):
         self.controller.store.set_preference("duration_unit", self.duration_unit.currentData())
@@ -272,8 +295,12 @@ class CallStatisticsDialog(QDialog):
         if selected:
             self.staff.setCurrentIndex(max(0, self.staff.findData(selected)))
         self.staff.blockSignals(False)
-        self.collect_button.setEnabled(not controller.busy and not controller.closing)
-        self.collect_button.setText("集計中…" if controller.busy else "今すぐ集計")
+        past = self.selected_past_day()
+        self.collect_button.setEnabled(not controller.busy and not controller.closing and self.day.date() <= today)
+        self.collect_button.setText("集計中…" if controller.busy else "この日を集計" if past else "今すぐ集計")
+        self.collect_button.setToolTip(
+            "CTIの架電履歴で、検索日時をこの日だけにして検索し、この日の分を集計してシートへ送ります。検索日時は元に戻します。"
+            if past else "毎時00分・30分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")
         self.duration_unit.setEnabled(not controller.busy)
         self.status_label.setText(controller.status)
         self.next_label.setText(f"次回の集計・送信 {controller.next_run:%H:%M}" if controller.automatic else "自動集計 停止中")
@@ -282,6 +309,8 @@ class CallStatisticsDialog(QDialog):
         rows = controller.store.display_hours(staff_id, day)
         self.table.setRowCount(len(rows))
         row_indexes = {}
+        latest = controller.store.latest(staff_id, day)
+        observed = datetime.fromisoformat(latest["observed_at"]) if latest else None
 
         def number(row, key):
             return str(row[key]) if row.get(key) is not None else "未取得"
@@ -289,29 +318,35 @@ class CallStatisticsDialog(QDialog):
         for index, row in enumerate(rows):
             hour = row["hour"]
             row_indexes[hour] = index
+            status = row["counter_status"]
+            if observed and hour == observed.hour and past is None:
+                # 今日の最後に集計した時刻の時間帯は、その時刻までの件数（終わった時間帯の0件と区別する）
+                status = f"{status}・途中（{observed:%H:%M}時点）"
             values = [f"{hour:02}:00–{hour + 1:02}:00",
                       *[number(row, k) for k in ("total_calls", "dialogues", "toss")],
                       format_duration(row["talk_seconds"]),
                       *[number(row, k) for k in ("new_prospects", "ng_with_dialogue")],
-                      row["counter_status"]]
+                      status]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(index, column, item)
-        latest = controller.store.latest(staff_id, day)
-        if latest:
+        if rows:
             def total(key):
                 known = [r[key] for r in rows if r.get(key) is not None]
                 return str(sum(known)) if known else "未取得"
             seconds = [r["talk_seconds"] for r in rows if r["talk_seconds"] is not None]
-            self.total_label.setText(f"当日合計　コール {total('total_calls')}／対話 {total('dialogues')}／トス {total('toss')}／応答時間 {format_duration(sum(seconds))}\n"
-                                     f"CTI上部の累計：総コール数 {latest['total_calls']}／有効コール {latest.get('valid_calls')}／新規見込 {latest['new_prospects']}"
-                                     f"　最終取得 {datetime.fromisoformat(latest['observed_at']):%Y/%m/%d %H:%M:%S}")
+            text = f"{'当日' if past is None else 'この日の'}合計　コール {total('total_calls')}／対話 {total('dialogues')}／トス {total('toss')}／応答時間 {format_duration(sum(seconds))}"
+            if latest:
+                text += (f"\nCTI上部の累計：総コール数 {latest['total_calls']}／有効コール {latest.get('valid_calls')}／新規見込 {latest['new_prospects']}"
+                         f"　最終取得 {observed:%Y/%m/%d %H:%M:%S}")
+            self.total_label.setText(text)
             key = (staff_id, day)
             if self._scroll_key != key:
                 self._scroll_key = key
-                hour = datetime.fromisoformat(latest["observed_at"]).hour
-                index = row_indexes.get(hour, 0)
+                index = row_indexes.get(observed.hour, 0) if observed else 0
                 self.table.scrollToItem(self.table.item(index, 0), QAbstractItemView.PositionAtCenter)
+        elif past:
+            self.total_label.setText("この日の保存済み集計はありません。「この日を集計」で、CTIの架電履歴からこの日の分を集計します。")
         else:
             self.total_label.setText("この日の保存済み集計はありません。「今すぐ集計」で現在のログインスタッフの当日分を取得します。")
