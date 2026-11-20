@@ -107,7 +107,7 @@ def clear_fixture(monkeypatch, changed=False, recreated=False):
                     next(n for n in data if n["hwnd"] == 13)["hwnd"] = 31
             return {"nodes": data, "errors": []}
 
-    def tables(handles):
+    def tables(handles, columns=None):
         current = [] if calls else ([{"call": "new query"}] if changed else rows)
         return [{"hwnd": 31 if calls and recreated else 13, "headers": ["対応日時", "管理番号"], "rows": current},
                 {"hwnd": 20, "headers": ["選択", "スタッフ"], "rows": staff_rows}]

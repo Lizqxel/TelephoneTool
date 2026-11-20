@@ -8,8 +8,14 @@ import subprocess
 import time
 
 
-def read_msaa(handles):
-    config = base64.b64encode(json.dumps({"handles": handles}).encode()).decode()
+def read_msaa(handles, columns=None):
+    """各ハンドルの表をMSAAで読む。
+
+    columns を渡すと、その列名をすべて持つ表だけは、その列のセルしか読まない（ほかの表はすべて読む）。
+    CTIの表はセルを1つずつプロセス越しに読むため、50行×19列で約4秒かかる。使う列だけにすると数分の1になり、
+    顧客の電話番号などの列も読まずに済む。
+    """
+    config = base64.b64encode(json.dumps({"handles": handles, "columns": list(columns) if columns else None}).encode()).decode()
     script = base64.b64encode(MSAA_SCRIPT.replace("__CONFIG__", config).encode("utf-16-le")).decode()
     try:
         process = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", script],
@@ -55,12 +61,16 @@ def msaa_tables(results):
         def belongs(cell, header):
             return cell["name"] == header or (cell["name"] or "").startswith(header + " 行 ")
 
+        # 列を絞って読んだ表は、行ごとに読んだ列（index は行の中での位置）だけを持つ。
+        kept = result.get("columns")
         rows = []
         for row in (n for n in nodes if n["parent_id"] == nodes[0]["id"] and n["role"] == 28):
             values = {}
             cells = [n for n in nodes if n["parent_id"] == row["id"] and n["role"] == 29]
-            positional = len(cells) == len(raw_headers) and all(belongs(c, raw_headers[i]) for i, c in enumerate(cells))
-            for index, cell in enumerate(cells):
+            positions = [c.get("index", i) for i, c in enumerate(cells)]
+            positional = ((len(cells) == len(raw_headers) or kept is not None) and len(set(positions)) == len(positions)
+                          and all(0 <= p < len(raw_headers) and belongs(c, raw_headers[p]) for c, p in zip(cells, positions)))
+            for index, cell in zip(positions, cells):
                 if positional:
                     label = headers[index]
                 else:
@@ -73,6 +83,8 @@ def msaa_tables(results):
                 if label in values:
                     raise RuntimeError("履歴のカラム名が重複しています。")
                 values[label] = cell["value"]
+            if kept is not None and cells and len(values) != len(kept):
+                raise RuntimeError("履歴のセルを読み取れませんでした。")
             if values:
                 rows.append(values)
         tables.append({"hwnd": result["hwnd"], "headers": headers, "rows": rows})
@@ -328,7 +340,7 @@ using System.Runtime.InteropServices;
 using Accessibility;
 
 public class AccNode {
-    public int id, parent_id, depth, child_id, role, state, child_count;
+    public int id, parent_id, depth, child_id, role, state, child_count, index;
     public string name, value, error;
 }
 public class AccResult {
@@ -337,6 +349,12 @@ public class AccResult {
     public bool truncated;
     public List<AccNode> nodes = new List<AccNode>();
     public List<string> errors = new List<string>();
+    public List<string> columns;  // 列を絞って読んだときの、読んだ列名（行の中の並び順）
+}
+// 見出し行のあとの行は、指定した列のセルだけを読む（見出し行に指定の列がすべてあるときだけ）。
+public class ColumnFilter {
+    public HashSet<string> wanted;
+    public bool[] keep;
 }
 public static class HiddenHistoryAcc {
     [DllImport("oleacc.dll")]
@@ -346,41 +364,75 @@ public static class HiddenHistoryAcc {
     static extern int AccessibleChildren(IAccessible container, int start, int count,
         [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex=2)] object[] children, out int obtained);
 
-    static void Walk(IAccessible acc, int childId, int parent, int depth, AccResult result, Stopwatch clock) {
+    static void Walk(IAccessible acc, int childId, int parent, int depth, int index, AccResult result, Stopwatch clock, ColumnFilter filter) {
         if (result.nodes.Count >= 50000 || depth > 16 || clock.Elapsed.TotalSeconds > 20) {
             result.truncated=true; return;
         }
-        var node=new AccNode { id=result.nodes.Count, parent_id=parent, depth=depth, child_id=childId };
+        // 列を絞っているときは、データ行の値（全セルをつないだ文字列）とセルの子の数は読まない。
+        bool filtered=filter != null && filter.keep != null;
+        var node=new AccNode { id=result.nodes.Count, parent_id=parent, depth=depth, child_id=childId, index=index };
         try { node.name=acc.get_accName(childId); } catch {}
         try { node.role=Convert.ToInt32(acc.get_accRole(childId)); } catch {}
         try { node.state=Convert.ToInt32(acc.get_accState(childId)); } catch {}
-        if ((node.state & 0x20000000) == 0) {
+        if ((node.state & 0x20000000) == 0 && !(filtered && depth == 1)) {
             try { node.value=acc.get_accValue(childId); } catch (Exception ex) { node.error=ex.Message; }
         }
-        if (childId == 0) { try { node.child_count=acc.accChildCount; } catch {} }
+        if (childId == 0 && !(filtered && depth == 2)) { try { node.child_count=acc.accChildCount; } catch {} }
         result.nodes.Add(node);
         if (node.child_count <= 0) return;
         int count=Math.Min(node.child_count, 50000-result.nodes.Count);
         if (count < node.child_count) result.truncated=true;
-        object[] children=new object[count]; int obtained;
-        int hr=AccessibleChildren(acc, 0, count, children, out obtained);
-        if (hr < 0) { result.errors.Add("AccessibleChildren HRESULT: " + hr); return; }
+        object[] children; int obtained; int hr;
+        if (filtered && depth == 1 && count == filter.keep.Length) {
+            // 読む列のセルだけを取り出す（全セルを取り出すと、それだけでプロセス越しの手間がかかる）。
+            children=new object[count]; obtained=count;
+            for (int k=0; k<count; k++) {
+                if (!filter.keep[k]) continue;
+                object[] one=new object[1]; int got;
+                hr=AccessibleChildren(acc, k, 1, one, out got);
+                if (hr < 0 || got != 1) { result.errors.Add("AccessibleChildren HRESULT: " + hr); return; }
+                children[k]=one[0];
+            }
+        } else {
+            children=new object[count];
+            hr=AccessibleChildren(acc, 0, count, children, out obtained);
+            if (hr < 0) { result.errors.Add("AccessibleChildren HRESULT: " + hr); return; }
+        }
+        bool skipCells=filtered && depth == 1 && obtained == filter.keep.Length;
+        int first=result.nodes.Count;
         for (int i=0; i<obtained; i++) {
             if (clock.Elapsed.TotalSeconds > 20) { result.truncated=true; break; }
+            if (skipCells && !filter.keep[i]) continue;
             var child=children[i] as IAccessible;
-            if (child != null) Walk(child, 0, node.id, depth+1, result, clock);
-            else if (children[i] is int) Walk(acc, (int)children[i], node.id, depth+1, result, clock);
+            if (child != null) Walk(child, 0, node.id, depth+1, i, result, clock, filter);
+            else if (children[i] is int) Walk(acc, (int)children[i], node.id, depth+1, i, result, clock, filter);
+        }
+        if (filter != null && filter.keep == null && depth == 1) {
+            // 見出し行（子がすべて列見出し）に指定の列がそろっていれば、以降の行はその列だけ読む。
+            var names=new List<string>();
+            for (int n=first; n<result.nodes.Count; n++)
+                if (result.nodes[n].parent_id == node.id) {
+                    if (result.nodes[n].role != 25) { names=null; break; }
+                    names.Add(result.nodes[n].name ?? "");
+                }
+            if (names != null && names.Count == obtained && filter.wanted.IsSubsetOf(names)) {
+                filter.keep=new bool[names.Count];
+                result.columns=new List<string>();
+                for (int n=0; n<names.Count; n++)
+                    if (filter.wanted.Contains(names[n])) { filter.keep[n]=true; result.columns.Add(names[n]); }
+            }
         }
     }
-    public static AccResult Read(long hwnd) {
+    public static AccResult Read(long hwnd, string[] columns) {
         var result=new AccResult { hwnd=hwnd };
         try {
             IAccessible acc; Guid iid=new Guid("618736e0-3c3d-11cf-810c-00aa00389b71");
             result.hresult=AccessibleObjectFromWindow(new IntPtr(hwnd), 0xfffffffc, ref iid, out acc);
             if (result.hresult >= 0 && acc != null) {
                 // Container trees may repeat descendants. Only enumerate native tables.
+                var filter=(columns == null || columns.Length == 0) ? null : new ColumnFilter { wanted=new HashSet<string>(columns) };
                 if (Convert.ToInt32(acc.get_accRole(0)) == 24)
-                    Walk(acc, 0, -1, 0, result, Stopwatch.StartNew());
+                    Walk(acc, 0, -1, 0, 0, result, Stopwatch.StartNew(), filter);
             }
         } catch (Exception ex) { result.errors.Add(ex.ToString()); }
         return result;
@@ -389,6 +441,8 @@ public static class HiddenHistoryAcc {
 '@
 Add-Type -TypeDefinition $source -ReferencedAssemblies ([Accessibility.IAccessible].Assembly.Location)
 $cfg=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CONFIG__')) | ConvertFrom-Json
-$results=@(foreach($h in $cfg.handles) { [HiddenHistoryAcc]::Read([long]$h) })
+$columns=$null
+if ($cfg.columns) { $columns=[string[]]@($cfg.columns) }
+$results=@(foreach($h in $cfg.handles) { [HiddenHistoryAcc]::Read([long]$h, $columns) })
 $results | ConvertTo-Json -Depth 12 -Compress
 '''

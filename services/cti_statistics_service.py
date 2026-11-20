@@ -24,6 +24,11 @@ CBN_SELCHANGE = 1
 # 架電履歴の検索条件の「未選択」。CTIは商材が未選択だと架電結果詳細（現アナNGなど）を空欄で返す。
 UNSELECTED_CHOICE = "-"
 MAX_HISTORY_PAGES = 60
+# 架電履歴の表は50件ごとのページに分かれる（1ページ目を1回で読み終えるための目安。違っていても2回読んで確かめる）。
+HISTORY_PAGE_SIZE = 50
+# 集計に使う列だけを読む（表は19列。セルを1つずつ読むので、使わない列を読まないと数倍速い）。
+HISTORY_COLUMNS = ("対応日時", "対応スタッフ", "架電結果", "架電結果詳細", "IP電話通話時間", "管理番号", "通話ユニークID")
+PROSPECT_COLUMNS = ("管理番号", "スタッフ", "ランク")
 COUNTER_LABELS = {"総コール数": "total_calls", "新規見込": "new_prospects", "対話有NG": "ng_with_dialogue",
                   "対話無NG": "ng_without_dialogue", "有効コール": "valid_calls"}
 
@@ -315,23 +320,46 @@ class CtiStatisticsCollector:
         return bool(self.windows.api.SendMessageTimeoutW(button["parent_hwnd"], WM_COMMAND, button["control_id"] & 0xffff,
                                                          button["hwnd"], SMTO_ABORTIFHUNG, timeout_ms, ctypes.byref(result)))
 
-    def read_grid(self, handles, choose, staff_hwnd, previous=None):
-        """2回続けて同じ内容になるまで読む。previous があれば、それと違う表（次のページ）を待つ。"""
+    def read_grid(self, handles, choose, staff_hwnd, previous=None, expected=None, columns=None):
+        """表を読む。expected（その表にあるはずの行数）と同じ行数なら1回で終え、そうでなければ2回続けて同じ内容になるまで読む。
+
+        expected は数か、読んだ表を受け取って行数（分からなければ None）を返す関数（画面の件数表示を読む）。
+        previous があれば、それと違う表（次のページ）を待つ。CTIのボタン処理は終わってから応答が返るので、
+        押した直後に読めば表はもう入れ替わっている。行数が合わないとき（読み途中など）だけ読み直す。
+        """
         stable = None
-        for _ in range(10):
-            if self.cancel.wait(0.3):
+        for attempt in range(10):
+            if attempt and self.cancel.wait(0.3):
                 self.check_cancelled()
-            tables = msaa_tables(read_msaa(handles))
+            tables = msaa_tables(read_msaa(handles, columns=columns))
             self.check_cancelled()
             grid = choose(tables, staff_hwnd)
             if grid is None:
                 raise RuntimeError("検索後の表を取得できませんでした。")
             if previous is not None and grid["rows"] == previous:
                 continue
+            want = expected(grid) if callable(expected) else expected
+            if want is not None and len(grid["rows"]) == want:
+                return grid, tables
             if stable is not None and stable == grid["rows"]:
                 return grid, tables
             stable = grid["rows"]
         raise RuntimeError("表の更新が完了しませんでした。")
+
+    def counted_rows(self, cti, count):
+        """read_grid の expected に渡す関数。画面を取り直し、count(画面, 表) で件数表示から行数を出す（読めなければ None）。
+
+        件数表示は表より少し遅れて変わることがあるので、表を読んだ後に読む。
+        """
+        def expected(grid):
+            snap = self.windows.snapshot(cti["hwnd"], 5000)
+            if snap["errors"]:
+                return None
+            try:
+                return count(snap["nodes"], grid)
+            except RuntimeError:
+                return None
+        return expected
 
     def collect(self, numeric_unit="seconds", day=None):
         """上部カウンターと、架電履歴・見込検索から当日分を取得する。
@@ -458,7 +486,7 @@ class CtiStatisticsCollector:
     def search_own_history(self, cti, before, page, controls, staff_name):
         """条件を確かめ、商材を選んで検索し、商材を元に戻す。検索日時は呼び出し元が戻す。"""
         validate_phone_filter(controls)
-        tables = msaa_tables(read_msaa(grid_handles(before["nodes"], page)))
+        tables = msaa_tables(read_msaa(grid_handles(before["nodes"], page), columns=HISTORY_COLUMNS))
         self.check_cancelled()
         staff = staff_table(tables)
         validate_staff_selection(staff, staff_name)
@@ -537,8 +565,11 @@ class CtiStatisticsCollector:
         refreshed_page = find_page(refreshed["nodes"], "架電履歴") or page
         handles = grid_handles(refreshed["nodes"], refreshed_page)
         try:
-            # Read twice after the command returns; never treat a truncated table as all rows.
-            grid, tables = self.read_grid(handles, choose_history, staff["hwnd"])
+            # 1ページ目が検索結果件数どおりの行数（最大50件）なら1回読むだけで済む。
+            # 件数を読めない・行数が合わないときは、2回続けて同じ内容になるまで読む（途中までの表を全件としない）。
+            first_page_rows = self.counted_rows(
+                cti, lambda nodes, grid: min(history_total(descendants(nodes, refreshed_page["hwnd"])), HISTORY_PAGE_SIZE))
+            grid, tables = self.read_grid(handles, choose_history, staff["hwnd"], expected=first_page_rows, columns=HISTORY_COLUMNS)
             after = self.windows.snapshot(cti["hwnd"], 5000)
             if after["errors"]:
                 raise RuntimeError("検索後の画面を取得できませんでした。")
@@ -553,12 +584,14 @@ class CtiStatisticsCollector:
         first_page = list(grid["rows"])
         if len(rows) < total:
             next_button = find_button(after_controls, "次へ")
+            page_size = len(first_page)  # 2ページ目以降も同じ行数ずつ（最後のページは残りの件数）
             for _ in range(MAX_HISTORY_PAGES):
                 if len(rows) >= total:
                     break
                 if not self.press(next_button):
                     raise RuntimeError("架電履歴の次のページへ進めませんでした。")
-                grid, tables = self.read_grid(handles, choose_history, staff["hwnd"], previous=grid["rows"])
+                grid, tables = self.read_grid(handles, choose_history, staff["hwnd"], previous=grid["rows"],
+                                              expected=min(page_size, total - len(rows)), columns=HISTORY_COLUMNS)
                 if not grid["rows"]:
                     break
                 rows.extend(grid["rows"])
@@ -583,7 +616,7 @@ class CtiStatisticsCollector:
                 return None
         except RuntimeError:
             return None
-        tables = msaa_tables(read_msaa(handles))
+        tables = msaa_tables(read_msaa(handles, columns=HISTORY_COLUMNS))
         # クリア直後は列の見出しが消えていることもある（choose_history と同じ扱い）。
         grids = [t for t in tables if {"対応日時", "管理番号"}.issubset(t["headers"]) or (not t["headers"] and not t["rows"])]
         if len(grids) != 1 or grids[0]["rows"]:
@@ -668,7 +701,8 @@ class CtiStatisticsCollector:
         buttons = [n for n in controls if n["text"] == "クリア" and "BUTTON" in n["class_name"]]
         if len(buttons) != 1:
             raise RuntimeError("架電履歴のクリアボタンを特定できませんでした。")
-        tables = msaa_tables(read_msaa([context["history_hwnd"], context["staff_hwnd"]]))
+        # 集計したときと同じ列だけを読んで、1ページ目と比べる。
+        tables = msaa_tables(read_msaa([context["history_hwnd"], context["staff_hwnd"]], columns=HISTORY_COLUMNS))
         history = next((t for t in tables if t["hwnd"] == context["history_hwnd"]), None)
         staff = next((t for t in tables if t["hwnd"] == context["staff_hwnd"]), None)
         if not history or not staff or history["rows"] != context["rows"] or staff["rows"] != context["staff_rows"] or search_conditions(controls) != context["conditions"]:
@@ -689,7 +723,8 @@ class CtiStatisticsCollector:
             if after["errors"]:
                 continue
             after_controls = descendants(after["nodes"], context["page_hwnd"])
-            current = msaa_tables(read_msaa([n["hwnd"] for n in after_controls if n["class_name"].startswith("WindowsForms10.Window.")]))
+            current = msaa_tables(read_msaa([n["hwnd"] for n in after_controls if n["class_name"].startswith("WindowsForms10.Window.")],
+                                            columns=HISTORY_COLUMNS))
             # Clear recreates the results grid and blanks the count label in CTI.
             # Rediscover the grid; the old handle and a numeric label are not reliable.
             candidates = [t for t in current if {"対応日時", "管理番号"}.issubset(t.get("headers", []))
@@ -713,7 +748,7 @@ class CtiStatisticsCollector:
             if page is None:
                 return None, "見込検索タブがまだ読み込まれていないため、トスは未取得です。CTI起動後に一度、見込検索タブを開いてください。"
             controls = descendants(before["nodes"], page["hwnd"])
-            tables = msaa_tables(read_msaa(grid_handles(before["nodes"], page)))
+            tables = msaa_tables(read_msaa(grid_handles(before["nodes"], page), columns=PROSPECT_COLUMNS))
             self.check_cancelled()
             staff = staff_table(tables)
             validate_staff_selection(staff, staff_name, "見込検索")
@@ -725,7 +760,9 @@ class CtiStatisticsCollector:
                     return None, "見込検索の検索応答がないため、トスは未取得です。"
                 refreshed = self.windows.snapshot(cti["hwnd"], 5000)
                 refreshed_page = find_page(refreshed["nodes"], "見込検索") or page
-                grid, _ = self.read_grid(grid_handles(refreshed["nodes"], refreshed_page), choose_prospects, staff["hwnd"])
+                grid, _ = self.read_grid(grid_handles(refreshed["nodes"], refreshed_page), choose_prospects, staff["hwnd"],
+                                         expected=self.counted_rows(cti, lambda nodes, grid: result_count(nodes, grid["hwnd"])),
+                                         columns=PROSPECT_COLUMNS)
                 nodes = self.windows.snapshot(cti["hwnd"], 5000)["nodes"]
             if grid is None:
                 return None, "見込検索の結果を特定できないため、トスは未取得です。"

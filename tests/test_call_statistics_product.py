@@ -23,16 +23,19 @@ class FastEvent(threading.Event):
 
 
 def fake_history_screen(monkeypatch, items, cursel, search_ok=True, main_product="", dates=None, target_day=None, fail_dates=False,
-                        no_calls=False, stuck=False):
+                        no_calls=False, stuck=False, calls=None, short_reads=()):
     """dates は検索日時の欄（開始・終了）の初期表示。省略時は当日の00:00:00〜23:59:59。
 
     no_calls: 検索結果が0件（CTIは表も件数も変えず、検索ボタンも押せるまま）。
     stuck: 検索後も表が空のまま、検索ボタンは押せなくなっている（0件とは判断しない）。
+    calls: 対象日の履歴の件数（表は50件ずつのページ。「次へ」「最初」でページが変わる）。省略時は2件。
+    short_reads: 表の読み取りのうち、途中までしか読めない回（検索後の何回目の読み取りか、0始まり）。
     """
     today = datetime.now(JST).date().isoformat()
     day = target_day or today
     state = {"cursel": cursel, "searched_with": None, "events": [], "searched_range": None,
-             "dates": list(dates or [f"{today} 00:00:00", f"{today} 23:59:59"]), "search_enabled": True}
+             "dates": list(dates or [f"{today} 00:00:00", f"{today} 23:59:59"]), "search_enabled": True,
+             "page": 0, "reads": []}
 
     def node(hwnd, parent, cls, text="", rect=(0, 0, 0, 0), control_id=None, visible=False):
         return {"hwnd": hwnd, "parent_hwnd": parent, "class_name": cls, "text": text, "rect": list(rect),
@@ -71,6 +74,13 @@ def fake_history_screen(monkeypatch, items, cursel, search_ok=True, main_product
         detail = "現アナNG" if items[state["searched_with"]] != "-" else ""
         start, end = (text[:10] for text in state["searched_range"])
         rows = []
+        if calls is not None:
+            if start <= day <= end:
+                stamp = day.replace("-", "/")
+                rows = [{"対応日時": f"{stamp} {10 + i // 60:02d}:{i % 60:02d}:00", "IP電話通話時間": "0", "管理番号": f"M{i}",
+                         "架電結果": "留守", "架電結果詳細": "-", "対応スタッフ": "姓　名", "通話ユニークID": f"u{i}"}
+                        for i in range(calls)]
+            return rows
         for index, when in enumerate(sorted({day, today})):
             if start <= when <= end:
                 stamp = when.replace("-", "/")
@@ -87,11 +97,16 @@ def fake_history_screen(monkeypatch, items, cursel, search_ok=True, main_product
         state["dates"][0 if picker["hwnd"] == 21 else 1] = f"{value:%Y-%m-%d %H:%M:%S}"
         state["events"].append(("date", "start" if picker["hwnd"] == 21 else "end", f"{value:%Y-%m-%d %H:%M:%S}"))
 
-    def tables(handles):
+    def tables(handles, columns=None):
         # 0件・クリア後の空の表は、検索結果の列（IP電話通話時間など）を持たない。
         headers = (["対応日時", "管理番号", "会社"] if no_calls or stuck else
                    ["対応日時", "IP電話通話時間", "管理番号", "架電結果", "架電結果詳細", "対応スタッフ", "通話ユニークID"])
-        return [{"hwnd": 40, "headers": headers, "rows": history_rows()},
+        rows = history_rows()[state["page"] * 50:(state["page"] + 1) * 50]
+        if state["searched_with"] is not None:
+            if len(state["reads"]) in short_reads:
+                rows = rows[:len(rows) // 2]  # 読み途中
+            state["reads"].append({"page": state["page"], "rows": len(rows), "columns": columns})
+        return [{"hwnd": 40, "headers": headers, "rows": rows},
                 {"hwnd": 41, "headers": ["選択", "スタッフ"], "rows": [{"選択": "True", "スタッフ": "姓　名"}]}]
 
     class Api:
@@ -127,6 +142,7 @@ def fake_history_screen(monkeypatch, items, cursel, search_ok=True, main_product
                     state["search_enabled"] = False  # 結果を表示するとクリアまで検索ボタンは押せない
             elif message == service.WM_COMMAND:
                 state["events"].append(("button", lparam))
+                state["page"] = state["page"] + 1 if lparam == 28 else 0 if lparam == 29 else state["page"]
             result._obj.value = value
             return 1
 
@@ -510,3 +526,31 @@ def test_period_and_product_are_restored_when_cancelled_during_the_search(monkey
         run()
     assert state["dates"] == wide and state["cursel"] == 0
     assert state["events"][-4:] == [("set", 0), ("notify", 0), ("date", "start", wide[0]), ("date", "end", wide[1])]
+
+
+def test_each_page_is_read_once_with_only_the_columns_used(monkeypatch):
+    # 287件のような日は50件ずつ6ページ。1ページを1回ずつ、集計に使う列だけ読む（セルを1つずつ読むので遅い）。
+    collector, state, run, day = fake_history_screen(monkeypatch, ["-", "自社コラボ"], 1, calls=120)
+    rows = run()
+    assert len(rows) == 120 and len({r["通話ユニークID"] for r in rows}) == 120
+    assert [(r["page"], r["rows"]) for r in state["reads"]] == [(0, 50), (1, 50), (2, 20)]
+    assert all(r["columns"] == service.HISTORY_COLUMNS for r in state["reads"])
+    assert [e for e in state["events"] if e[0] == "button"] == [("button", 28), ("button", 28), ("button", 29)]
+    assert state["page"] == 0  # 担当者が次に開いたときのため、1ページ目へ戻す
+    # 1ページ目へ戻した表は、集計したときの1ページ目と同じ（クリア前の比較に使う）。
+    assert collector._history_context["rows"] == rows[:50]
+
+
+def test_a_page_read_midway_is_read_again(monkeypatch):
+    # 行数が件数から分かる数と合わない回（読み途中）は、全件と見なさずに読み直す。
+    collector, state, run, day = fake_history_screen(monkeypatch, ["-", "自社コラボ"], 1, calls=120, short_reads=(0, 2))
+    rows = run()
+    assert len(rows) == 120 and len({r["通話ユニークID"] for r in rows}) == 120
+    assert [(r["page"], r["rows"]) for r in state["reads"]] == [(0, 25), (0, 50), (1, 25), (1, 50), (2, 20)]
+
+
+def test_single_page_day_is_read_once(monkeypatch):
+    collector, state, run, day = fake_history_screen(monkeypatch, ["-", "自社コラボ"], 1, calls=37)
+    assert len(run()) == 37
+    assert [(r["page"], r["rows"]) for r in state["reads"]] == [(0, 37)]
+    assert [e for e in state["events"] if e[0] == "button"] == []
