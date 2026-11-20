@@ -18,8 +18,11 @@ from services.call_statistics_sheet import SheetSender, sheet_hours, sheet_inter
 from services.cti_statistics_service import CtiStatisticsCollector
 
 
+CANCELLED = "集計を中止しました。"
+
+
 class StatisticsWorker(QThread):
-    completed = Signal(object, str, str)  # 集計結果、エラー、クリア・送信のお知らせ
+    completed = Signal(object, str, str)  # 集計結果、エラー（中止は CANCELLED）、クリア・送信のお知らせ
 
     def __init__(self, store, numeric_unit, sender_factory=None, parent=None, day=None):
         super().__init__(parent)
@@ -35,10 +38,12 @@ class StatisticsWorker(QThread):
             snapshot = (collector.collect(self.numeric_unit) if self.day is None
                         else collector.collect(self.numeric_unit, day=self.day))
             if self.cancelled.is_set():
+                self.completed.emit(None, CANCELLED, "")
                 return
             self.store.save(snapshot)
         except Exception as exc:
-            self.completed.emit(None, str(exc), "")
+            # 中止した回は、途中で出た例外の文言ではなく「中止しました」と知らせる（CTIの検索条件は集計側で元に戻す）。
+            self.completed.emit(None, CANCELLED if self.cancelled.is_set() else str(exc), "")
             return
         notices = []
         if snapshot.history_counters is not None:
@@ -49,6 +54,8 @@ class StatisticsWorker(QThread):
                 notices.append(f"架電履歴のクリア未完了：{exc}")
         if not self.cancelled.is_set():
             notices.append(self.send(snapshot))
+        else:
+            notices.append("中止したため、シートへは送っていません。")
         self.completed.emit(snapshot, "", "／".join(n for n in notices if n))
 
     def send(self, snapshot):
@@ -149,7 +156,23 @@ class CallStatisticsController(QObject):
         worker.start()
         self.set_status("CTIを集計しています…")
 
+    def cancel(self):
+        """実行中の集計を中止する。CTIの検索日時・商材は集計側で元に戻し、保存済みの値は残す。"""
+        if not self.busy or self.worker.cancelled.is_set():
+            return
+        self.pending = False  # 中止した直後に、待っていた集計を始めない（自動集計は次の00分・30分に動く）
+        self.pending_day = None
+        self.worker.cancelled.set()
+        self.set_status("集計を中止しています…（CTIの検索日時・商材を元に戻してから止まります）")
+
+    @property
+    def cancelling(self):
+        return self.busy and self.worker.cancelled.is_set()
+
     def _completed(self, snapshot, error, notice=""):
+        if error == CANCELLED:
+            self.set_status("集計を中止しました。保存済みの値は維持しています。")
+            return
         if error:
             self.set_status(f"集計できませんでした：{error} 保存済みの値は維持しています。")
             return
@@ -214,6 +237,9 @@ class CallStatisticsDialog(QDialog):
         self.staff = QComboBox()
         self.collect_button = QPushButton("今すぐ集計")
         self.collect_button.setToolTip("毎時00分・30分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")
+        self.cancel_button = QPushButton("中止")
+        self.cancel_button.setToolTip("集計を中止します。CTIの検索日時・商材は元に戻し、保存済みの値は残します。")
+        self.cancel_button.hide()
         self.automatic = QCheckBox("30分ごとに自動集計")
         self.automatic.setToolTip("起動時と毎時00分・30分に集計してシートへ送ります。")
         self.automatic.setChecked(controller.automatic)
@@ -222,6 +248,7 @@ class CallStatisticsDialog(QDialog):
         top.addWidget(self.staff, 1)
         top.addWidget(self.automatic)
         top.addWidget(self.collect_button)
+        top.addWidget(self.cancel_button)
         layout.addLayout(top)
         options = QHBoxLayout()
         options.addWidget(QLabel("通話時間が数値だけの場合の単位"))
@@ -258,6 +285,7 @@ class CallStatisticsDialog(QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
         self.collect_button.clicked.connect(self._collect_clicked)
+        self.cancel_button.clicked.connect(controller.cancel)
         self.automatic.toggled.connect(controller.set_automatic)
         self.duration_unit.currentIndexChanged.connect(self._unit_changed)
         self.day.dateChanged.connect(self.refresh)
@@ -298,6 +326,11 @@ class CallStatisticsDialog(QDialog):
         past = self.selected_past_day()
         self.collect_button.setEnabled(not controller.busy and not controller.closing and self.day.date() <= today)
         self.collect_button.setText("集計中…" if controller.busy else "この日を集計" if past else "今すぐ集計")
+        # 集計中は日付を固定し、終わったときに集計した日の表がそのまま見えるようにする。
+        self.day.setEnabled(not controller.busy)
+        self.cancel_button.setVisible(controller.busy and not controller.closing)
+        self.cancel_button.setEnabled(controller.busy and not controller.cancelling)
+        self.cancel_button.setText("中止中…" if controller.cancelling else "中止")
         self.collect_button.setToolTip(
             "CTIの架電履歴で、検索日時をこの日だけにして検索し、この日の分を集計してシートへ送ります。検索日時は元に戻します。"
             if past else "毎時00分・30分を待たずに、CTIから当日分を取得してシートへ送ります。日付欄は保存済みの表の表示日です。")

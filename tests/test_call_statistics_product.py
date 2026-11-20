@@ -490,3 +490,23 @@ def test_empty_table_with_a_locked_search_button_is_still_an_error(monkeypatch):
     collector, state, run, day = fake_history_screen(monkeypatch, ["-", "自社コラボ"], 1, stuck=True)
     with pytest.raises(RuntimeError, match="検索後の表"):
         run()
+
+
+def test_period_and_product_are_restored_when_cancelled_during_the_search(monkeypatch):
+    from datetime import timedelta
+    today = datetime.now(JST).date()
+    past = (today - timedelta(days=1)).isoformat()
+    wide = ["2026-09-30 00:00:00", f"{today.isoformat()} 23:59:59"]
+    collector, state, run, day = fake_history_screen(monkeypatch, ["-", "自社コラボ"], 0, dates=wide, target_day=past)
+    original = collector.press
+
+    def press_then_cancel(button, timeout_ms=15000):
+        pressed = original(button, timeout_ms)
+        collector.cancel.set()  # 検索ボタンを押した直後に「中止」
+        return pressed
+
+    collector.press = press_then_cancel
+    with pytest.raises(service.CollectionCancelled):
+        run()
+    assert state["dates"] == wide and state["cursel"] == 0
+    assert state["events"][-4:] == [("set", 0), ("notify", 0), ("date", "start", wide[0]), ("date", "end", wide[1])]

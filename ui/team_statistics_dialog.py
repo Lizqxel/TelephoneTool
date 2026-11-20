@@ -501,7 +501,7 @@ class TeamStatisticsDialog(QDialog):
         return pane.rowSpan(r, c), pane.columnSpan(r, c)
 
     def row_count(self):
-        return HEADER_ROWS + self.left.rowCount() if self.left.rowCount() else 0
+        return HEADER_ROWS + self.left.rowCount() if self.left.rowCount() or self.top.rowCount() else 0
 
     def _align_edges(self):
         v, h = self.body.verticalScrollBar(), self.body.horizontalScrollBar()
@@ -526,10 +526,13 @@ class TeamStatisticsDialog(QDialog):
         self.banner.show()
         unit = self.unit.currentText()
         members = [m for m in self.data.members if unit in (ALL_UNITS, "") or m.unit == unit]
+        # シートの「合計」行はシートのとおり最後に出す。全員分の合計なので、GPユニットで絞り込んだときは出さない。
+        total = self.data.sheet_total if unit in (ALL_UNITS, "") else None
         groups = [("日計", None), *[(f"{h}時台", h) for h in self.data.hours]]
         data_columns = 3 * len(groups)
+        body_rows = len(members) + (1 if total else 0)
         for pane, rows, columns in ((self.corner, HEADER_ROWS, NAME_COLUMNS), (self.top, HEADER_ROWS, data_columns),
-                                    (self.left, len(members) + 1, NAME_COLUMNS), (self.body, len(members) + 1, data_columns)):
+                                    (self.left, body_rows, NAME_COLUMNS), (self.body, body_rows, data_columns)):
             pane.setRowCount(rows)
             pane.setColumnCount(columns)
         for pane in (self.corner, self.left):
@@ -585,15 +588,15 @@ class TeamStatisticsDialog(QDialog):
                     put(row, 3 + 3 * index + k, "" if value is None else str(value),
                         group_color(index), bold=hour is None or own, align=right)
 
-        # 最終行は表示中の人の合計
-        row = HEADER_ROWS + len(members)
-        put(row, 0, f"全体（{len(members)}人）", BLACK, HEADER_TEXT, True, Qt.AlignLeft)
-        put(row, 1, "", TOTAL)
-        put(row, 2, "", TOTAL)
-        for index, (_, hour) in enumerate(groups):
-            for k in range(3):
-                known = [values(m, hour)[k] for m in members if values(m, hour)[k] is not None]
-                put(row, 3 + 3 * index + k, str(sum(known)) if known else "", TOTAL, bold=True, align=right)
+        if total:
+            # シートの「合計」行の値をそのまま出す（ツールで足し直さない）
+            row = HEADER_ROWS + len(members)
+            put(row, 0, total.name, BLACK, HEADER_TEXT, True, Qt.AlignLeft)
+            put(row, 1, total.department, TOTAL)
+            put(row, 2, total.unit, TOTAL)
+            for index, (_, hour) in enumerate(groups):
+                for k, value in enumerate(values(total, hour)):
+                    put(row, 3 + 3 * index + k, "" if value is None else str(value), TOTAL, bold=True, align=right)
 
         QTimer.singleShot(0, self._align_edges)
 
